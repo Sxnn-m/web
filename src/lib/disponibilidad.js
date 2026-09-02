@@ -47,6 +47,45 @@ export function agruparReceta(receta = []) {
   return [...mapa.values()];
 }
 
+// ─── Specs derivadas de la receta ────────────────────────────────────
+// specs.material y specs.peso ya no se cargan a mano: salen de la receta,
+// que es la única fuente de verdad de qué y cuánto consume el producto.
+
+/** Materiales únicos de la receta, en orden de aparición: "PLA, PETG". */
+export function materialesDeReceta(receta = []) {
+  const vistos = new Map();
+  for (const item of receta) {
+    const material = String(item?.material || "").trim();
+    if (!material) continue;
+    if ((Number(item?.gramos) || 0) <= 0) continue;
+    const clave = normalizar(material);
+    if (!vistos.has(clave)) vistos.set(clave, material);
+  }
+  return [...vistos.values()];
+}
+
+/** Suma de gramos de todas las líneas de la receta (peso real de impresión). */
+export function pesoTotalReceta(receta = []) {
+  return receta.reduce((total, item) => {
+    const gramos = Number(item?.gramos) || 0;
+    return gramos > 0 ? total + gramos : total;
+  }, 0);
+}
+
+/**
+ * Valores que se persisten en specs.material y specs.peso.
+ * Con receta vacía devuelve strings vacíos: no hay dato que mostrar y no
+ * queremos dejar un valor viejo desincronizado.
+ */
+export function specsDesdeReceta(receta = []) {
+  const materiales = materialesDeReceta(receta);
+  const peso = pesoTotalReceta(receta);
+  return {
+    material: materiales.join(", "),
+    peso: peso > 0 ? `${peso} g` : "",
+  };
+}
+
 /** Busca en el inventario el filamento que coincide en material Y color. */
 export function buscarFilamento(filamentos = [], material, color) {
   const clave = claveFilamento(material, color);

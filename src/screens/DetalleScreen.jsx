@@ -147,13 +147,6 @@ export function DetalleScreen({ go, addToCart, productId, detalleVariant = "A", 
               </TKButton>
             </div>
           )}
-
-          {/* Features bar */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginTop: 32, paddingTop: 24, borderTop: "1px solid var(--line)" }}>
-            <Feature icon={<Icon.truck/>} label="Envío 48h" sub="Todo Argentina"/>
-            <Feature icon={<Icon.shield/>} label="Garantía" sub="30 días"/>
-            <Feature icon={<Icon.spark/>} label="Personalizable" sub="Color + texto"/>
-          </div>
         </div>
       </div>
 
@@ -173,7 +166,7 @@ export function DetalleScreen({ go, addToCart, productId, detalleVariant = "A", 
           {tab === "desc" && <p>{product.desc} Cada pieza es impresa bajo pedido en nuestro taller en CABA. Los tiempos de producción varían según la demanda y el nivel de detalle.</p>}
           {tab === "specs" && (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 20 }}>
-              {Object.entries(product.specs).map(([k, v]) => (
+              {Object.entries(product.specs).filter(([, v]) => v).map(([k, v]) => (
                 <div key={k} style={{ borderTop: "1px solid var(--line-strong)", paddingTop: 10 }}>
                   <div style={{ fontSize: 10, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>{k}</div>
                   <div style={{ fontSize: 18, color: "var(--text)" }}>{v}</div>
@@ -237,7 +230,7 @@ function DetalleB({ go, addToCart, productId, products = [] }) {
           <h3 style={{ fontSize: 24, letterSpacing: -0.3, margin: "0 0 16px" }}>Sobre esta pieza</h3>
           <p style={{ fontSize: 16, color: "var(--muted)", lineHeight: 1.7 }}>{product.desc}</p>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginTop: 32 }}>
-            {Object.entries(product.specs).map(([k,v]) => (
+            {Object.entries(product.specs).filter(([, v]) => v).map(([k,v]) => (
               <div key={k} style={{ borderTop: "1px solid var(--line-strong)", paddingTop: 10 }}>
                 <div style={{ fontSize: 10, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 1 }}>{k}</div>
                 <div style={{ fontSize: 18 }}>{v}</div>
@@ -270,18 +263,6 @@ function DetalleB({ go, addToCart, productId, products = [] }) {
             </div>
           )}
         </div>
-      </div>
-    </div>
-  );
-}
-
-function Feature({ icon, label, sub }) {
-  return (
-    <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-      <span style={{ color: "var(--accent)" }}>{icon}</span>
-      <div>
-        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>{label}</div>
-        <div style={{ fontSize: 11, color: "var(--muted)" }}>{sub}</div>
       </div>
     </div>
   );
