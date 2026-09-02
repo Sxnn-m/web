@@ -56,9 +56,13 @@ export function buscarFilamento(filamentos = [], material, color) {
 /**
  * Calcula la disponibilidad de un producto contra el inventario de filamentos.
  *
- * Un producto está disponible SOLO SI, para cada material/color de su receta,
- * el inventario tiene al menos el doble de los gramos que consume una unidad.
- * Si falta un filamento de la receta, o no llega al doble, queda NO disponible.
+ * Un producto está disponible SOLO SI tiene receta cargada y, para cada
+ * material/color de esa receta, el inventario tiene al menos el doble de los
+ * gramos que consume una unidad. Si falta un filamento de la receta, o no
+ * llega al doble, queda NO disponible.
+ *
+ * Un producto sin receta también queda NO disponible: sin receta no hay forma
+ * de saber si se puede imprimir, así que no se vende hasta cargarla.
  *
  * @param {object} producto  documento de "products" (usa producto.receta)
  * @param {Array}  filamentos documentos de "filamentos"
@@ -72,9 +76,10 @@ export function buscarFilamento(filamentos = [], material, color) {
 export function calcularDisponibilidad(producto, filamentos = []) {
   const receta = agruparReceta(producto?.receta || []);
 
-  // Sin receta cargada no hay forma de evaluar consumo: no bloqueamos la venta.
+  // Sin receta cargada no hay forma de evaluar el consumo: el producto no
+  // se ofrece hasta que se cargue.
   if (receta.length === 0) {
-    return { disponible: true, sinReceta: true, detalle: [], faltantes: [] };
+    return { disponible: false, sinReceta: true, detalle: [], faltantes: [] };
   }
 
   const detalle = receta.map(item => {
