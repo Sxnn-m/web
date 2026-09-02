@@ -18,7 +18,9 @@ import {
   cargarPrivados, guardarPrivado, enriquecerProductos, migrarDatosPrivados,
   CAMPOS_PRIVADOS,
 } from '../lib/productosPrivados.js';
-import { DEFAULT_COSTS, MARGEN_MATERIAL, calcularRentabilidad } from '../lib/costos.js';
+import {
+  DEFAULT_COSTS, MARGEN_MATERIAL, calcularRentabilidad, calcularPrecioSugerido,
+} from '../lib/costos.js';
 
 // La fórmula de costo/precio/ganancia vive en src/lib/costos.js: una sola
 // implementación para la tabla de Rentabilidad y para la columna "Costo fab.".
@@ -216,8 +218,13 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
 
       // El doc público NO lleva receta/origenUrl/notas: van a la subcolección
       // privada, que solo pueden leer los admins.
-      const { _id, receta, origenUrl, notas, ...publico } = data;
-      const privado = { receta: receta || [], origenUrl: origenUrl || "", notas: notas || "" };
+      const { _id, receta, origenUrl, notas, insumos, ...publico } = data;
+      const privado = {
+        receta: receta || [],
+        origenUrl: origenUrl || "",
+        notas: notas || "",
+        insumos: insumos || [],
+      };
 
       let productId = _id;
       if (productId) {
@@ -229,6 +236,7 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
           receta: deleteField(),
           origenUrl: deleteField(),
           notas: deleteField(),
+          insumos: deleteField(),
         });
         setMsg("✓ Producto actualizado.");
       } else {
@@ -340,7 +348,7 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
           {tab === "dashboard" && <DashboardTab products={products} users={users} seedProducts={() => {}} categories={propCategories} onCategoriesChange={onCategoriesChange} onProductsChange={onProductsChange} setMsg={setMsg} />}
           {tab === "productos" && (
             showForm
-              ? <ProductForm product={editProduct} onSave={handleSave} onCancel={() => { setShowForm(false); setEditProduct(null); }} categories={propCategories} filamentos={filamentos}/>
+              ? <ProductForm product={editProduct} onSave={handleSave} onCancel={() => { setShowForm(false); setEditProduct(null); }} categories={propCategories} filamentos={filamentos} costs={costSettings}/>
               : <ProductsTab
                   products={productosFull}
                   costs={costSettings}
@@ -713,6 +721,143 @@ function RecetaEditor({ receta, setReceta, filamentos }) {
   );
 }
 
+// ─── Campo Precio: automático por fórmula, o manual con toggle ────────
+function PrecioField({ manual, onToggleManual, valorManual, onChangeManual, sugerido, precioFinal }) {
+  const noCalculable = !sugerido.calculable;
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
+        <div style={labelStyle}>Precio (ARS)</div>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 11, color: "var(--muted)", whiteSpace: "nowrap" }}>
+          <input
+            type="checkbox"
+            checked={manual}
+            onChange={e => onToggleManual(e.target.checked)}
+            style={{ width: 14, height: 14, accentColor: "var(--accent)", cursor: "pointer" }}
+          />
+          Editar precio manualmente
+        </label>
+      </div>
+
+      {manual ? (
+        <input
+          type="number"
+          value={valorManual}
+          onChange={e => onChangeManual(e.target.value)}
+          placeholder="0"
+          style={{
+            width: "100%", padding: "12px 14px", background: "var(--bg)",
+            border: "1px solid var(--accent)", borderRadius: 4,
+            fontFamily: "'DM Sans', system-ui, sans-serif", fontSize: 14,
+            color: "var(--text)", outline: "none", boxSizing: "border-box",
+          }}
+        />
+      ) : (
+        <div style={{
+          padding: "12px 14px", background: "var(--bg-alt)",
+          border: "1px dashed var(--line)", borderRadius: 4,
+          fontSize: 14, fontWeight: noCalculable ? 400 : 600,
+          color: noCalculable ? "var(--muted)" : "var(--text)",
+          boxSizing: "border-box",
+        }}>
+          {noCalculable
+            ? `${fmtARS(0)} (sin receta, no se puede calcular)`
+            : fmtARS(precioFinal)}
+        </div>
+      )}
+
+      <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 6, lineHeight: 1.5 }}>
+        {manual ? (
+          <>
+            Precio fijado a mano.{" "}
+            {sugerido.calculable
+              ? <>La fórmula sugiere <strong style={{ color: "var(--text)" }}>{fmtARS(sugerido.precio)}</strong>
+                  {sugerido.insumos > 0 && <> (incluye {fmtARS(sugerido.insumos)} de insumos)</>}.</>
+              : <>No hay precio sugerido: {sugerido.motivo?.toLowerCase()}.</>}
+            {sugerido.insumos > 0 && (
+              <div style={{ color: "#B56B3E", marginTop: 4 }}>
+                Los {fmtARS(sugerido.insumos)} de insumos NO se suman solos en modo manual.
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            (calculado automáticamente)
+            {sugerido.calculable && sugerido.insumos > 0 && (
+              <> — {fmtARS(sugerido.base)} de material y máquina + {fmtARS(sugerido.insumos)} de insumos</>
+            )}
+            {noCalculable && <> — {sugerido.motivo}</>}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Editor de insumos (opcional) ─────────────────────────────────────
+function InsumosEditor({ insumos, setInsumos }) {
+  const up = (i, patch) => setInsumos(list => list.map((l, j) => j === i ? { ...l, ...patch } : l));
+  const quitar = (i) => setInsumos(list => list.filter((_, j) => j !== i));
+  const agregar = () => setInsumos(list => [...list, { nombre: "", precio: 0 }]);
+
+  const total = insumos.reduce((s, i) => s + (Number(i.precio) || 0), 0);
+
+  return (
+    <div style={{ marginBottom: 16, paddingTop: 16, borderTop: "1px solid var(--line)" }}>
+      <div style={{ ...labelStyle, marginBottom: 4 }}>Insumos (opcional)</div>
+      <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 12, lineHeight: 1.5 }}>
+        Componentes que no son filamento (imanes, tornillos, cable, LEDs). Su precio se suma al
+        precio final <strong>sin margen</strong>, tal cual.
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {insumos.map((l, i) => (
+          <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 130px 36px", gap: 10, alignItems: "center" }}>
+            <input
+              value={l.nombre}
+              onChange={e => up(i, { nombre: e.target.value })}
+              placeholder="Imán neodimio 10mm"
+              style={recetaInput}
+            />
+            <input
+              type="number"
+              value={l.precio}
+              onChange={e => up(i, { precio: e.target.value })}
+              placeholder="Precio ARS"
+              style={recetaInput}
+            />
+            <button onClick={() => quitar(i)} style={{ ...actionBtn, color: "#c64138", justifyContent: "center" }} title="Quitar insumo">
+              <Icon.trash size={14}/>
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {insumos.length === 0 && (
+        <div style={{ fontSize: 12, color: "var(--muted)", padding: "6px 0" }}>
+          Sin insumos: el precio sale solo de la receta y la hora de máquina.
+        </div>
+      )}
+
+      <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 12 }}>
+        <button onClick={agregar} style={{
+          background: "none", border: "1px dashed var(--line-strong)",
+          padding: "8px 14px", cursor: "pointer", color: "var(--muted)",
+          fontSize: 12, display: "flex", alignItems: "center", gap: 6,
+        }}>
+          <Icon.plus size={12}/> Agregar insumo
+        </button>
+        {insumos.length > 0 && (
+          <span style={{ fontSize: 12, color: "var(--muted)" }}>
+            Total insumos: <strong style={{ color: "var(--text)" }}>{fmtARS(total)}</strong>
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Spec de solo lectura, calculada desde la receta ──────────────────
 function SpecCalculada({ label, valor, vacio }) {
   const hayValor = Boolean(valor);
@@ -778,7 +923,7 @@ const recetaInput = {
 };
 
 // ─── Product Form (Create / Edit) ─────────────────────────────
-function ProductForm({ product, onSave, onCancel, categories = [], filamentos = [] }) {
+function ProductForm({ product, onSave, onCancel, categories = [], filamentos = [], costs = DEFAULT_COSTS }) {
   // Normalize: existing products may have img (string) or images (array)
   const initImages = () => {
     if (product?.images?.length) return [...product.images, "", "", "", "", ""].slice(0, 5);
@@ -791,7 +936,7 @@ function ProductForm({ product, onSave, onCancel, categories = [], filamentos = 
     name: product?.name || "",
     cat: product?.cat || (categories[0]?.id || "casa"),
     sub: product?.sub || "",
-    price: product?.price || 0,
+    // price no vive en el form: sale de la fórmula o del modo manual.
     desc: product?.desc || "",
     tag: product?.tag || "",
     stock: product?.stock || 0,
@@ -808,6 +953,13 @@ function ProductForm({ product, onSave, onCancel, categories = [], filamentos = 
       gramos: l.gramos ?? 0,
     }))
   );
+  const [insumos, setInsumos] = useState(() =>
+    (product?.insumos || []).map(i => ({ nombre: i.nombre || "", precio: i.precio ?? 0 }))
+  );
+  // El modo manual se persiste en el producto: si no, al reabrir el formulario
+  // volvería a modo automático y el próximo guardado pisaría el precio a mano.
+  const [precioManual, setPrecioManual] = useState(product?.precioManual === true);
+  const [precioEditado, setPrecioEditado] = useState(product?.price || 0);
 
   const up = (key, val) => setForm(f => ({ ...f, [key]: val }));
   const upSpec = (key, val) => setForm(f => ({ ...f, specs: { ...f.specs, [key]: val } }));
@@ -828,13 +980,41 @@ function ProductForm({ product, onSave, onCancel, categories = [], filamentos = 
   // Material y peso salen de la receta y se recalculan en vivo mientras se edita.
   const specsCalculadas = useMemo(() => specsDesdeReceta(recetaLimpia), [recetaLimpia]);
 
+  const insumosLimpios = useMemo(() => insumos
+    .filter(i => i.nombre.trim())
+    .map(i => ({ nombre: i.nombre.trim(), precio: Number(i.precio) || 0 })), [insumos]);
+
+  // Precio sugerido: misma fórmula que el tab de Costos (hora de máquina +
+  // material con margen) más los insumos sumados sin margen. Se recalcula solo
+  // al tocar receta, tiempo de impresión o insumos.
+  const sugerido = useMemo(
+    () => calcularPrecioSugerido(
+      { receta: recetaLimpia, insumos: insumosLimpios, specs: { tiempo: form.specs.tiempo } },
+      costs
+    ),
+    [recetaLimpia, insumosLimpios, form.specs.tiempo, costs]
+  );
+
+  // En automático manda la fórmula; en manual, lo que escribió el usuario.
+  const precioFinal = precioManual
+    ? (Number(precioEditado) || 0)
+    : (sugerido.precio || 0);
+
+  const activarManual = (activo) => {
+    setPrecioManual(activo);
+    // Al activar arranca desde el precio calculado; al desactivar se descarta
+    // lo escrito a mano y vuelve a mandar la fórmula.
+    if (activo) setPrecioEditado(sugerido.precio || 0);
+  };
+
   const handleSubmit = () => {
     if (!form.name.trim()) return alert("El nombre es obligatorio.");
-    if (!form.price || form.price <= 0) return alert("El precio debe ser mayor a 0.");
     const cleanImages = images.filter(u => u.trim());
     const data = {
       ...form,
-      price: Number(form.price),
+      price: Number(precioFinal) || 0,
+      precioManual,
+      insumos: insumosLimpios,
       stock: Number(form.stock),
       visible: form.visible,
       images: cleanImages,
@@ -884,7 +1064,14 @@ function ProductForm({ product, onSave, onCancel, categories = [], filamentos = 
               </select>
             </div>
 
-            <TKInput label="Precio (ARS)" type="number" value={form.price} onChange={e => up("price", e.target.value)} />
+            <PrecioField
+              manual={precioManual}
+              onToggleManual={activarManual}
+              valorManual={precioEditado}
+              onChangeManual={setPrecioEditado}
+              sugerido={sugerido}
+              precioFinal={precioFinal}
+            />
             <TKInput label="Stock manual (heredado)" type="number" value={form.stock} onChange={e => up("stock", e.target.value)} hint="La disponibilidad real sale de la receta + inventario" />
 
             <div style={{ gridColumn: "1 / -1" }}>
@@ -937,6 +1124,9 @@ function ProductForm({ product, onSave, onCancel, categories = [], filamentos = 
 
           {/* Receta de consumo de filamento */}
           <RecetaEditor receta={receta} setReceta={setReceta} filamentos={filamentos}/>
+
+          {/* Insumos opcionales (imanes, tornillos, cable...) */}
+          <InsumosEditor insumos={insumos} setInsumos={setInsumos}/>
 
           {/* Vista previa de disponibilidad con el inventario actual */}
           <DisponibilidadPreview receta={receta} filamentos={filamentos}/>
@@ -1051,7 +1241,7 @@ function ProductForm({ product, onSave, onCancel, categories = [], filamentos = 
             <div style={{...labelStyle, marginBottom: 10}}>Vista previa en catálogo</div>
             <PreviewCard
               name={form.name || "Nombre del producto"}
-              price={Number(form.price) || 0}
+              price={precioFinal}
               tag={form.tag || null}
               sub={form.sub || ""}
               img={mainImg}
