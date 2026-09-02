@@ -18,30 +18,10 @@ import {
   cargarPrivados, guardarPrivado, enriquecerProductos, migrarDatosPrivados,
   CAMPOS_PRIVADOS,
 } from '../lib/productosPrivados.js';
+import { DEFAULT_COSTS, MARGEN_MATERIAL, calcularRentabilidad } from '../lib/costos.js';
 
-// ─── Shared cost helpers (used by ProductsTab & CostosTab) ───────────
-
-const DEFAULT_COSTS = {
-  horaMaquina: 150,
-  materiales: {
-    "PLA": 80, "PLA+": 95, "PLA tranúlcido": 110,
-    "PETG": 100, "TPU": 130, "Resina": 200,
-  },
-};
-
-const parseGrams = (str = "") => parseFloat(String(str).replace(/[^0-9.]/g, "")) || 0;
-const parseHours = (str = "") => parseFloat(String(str).replace(/[^0-9.]/g, "")) || 0;
-
-const calcCosto = (p, costs) => {
-  const grams = parseGrams(p.specs?.peso);
-  const hours = parseHours(p.specs?.tiempo);
-  const mat = p.specs?.material || "";
-  const matKey = Object.keys(costs.materiales || {}).find(
-    k => mat.toLowerCase().includes(k.toLowerCase()) || k.toLowerCase().includes(mat.toLowerCase())
-  );
-  const costoPorGramo = matKey ? (costs.materiales[matKey] || 0) : 0;
-  return grams * costoPorGramo + hours * (costs.horaMaquina || 0);
-};
+// La fórmula de costo/precio/ganancia vive en src/lib/costos.js: una sola
+// implementación para la tabla de Rentabilidad y para la columna "Costo fab.".
 
 // ─── Admin Screen ───────────────────────────────────────────────
 export function AdminScreen({ go, onProductsChange, onCategoriesChange, categories: propCategories = [], products: propProductsAll = [] }) {
@@ -392,7 +372,7 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
             />
           )}
           {tab === "usuarios" && <UsersTab users={users} onToggleRole={toggleRole} />}
-          {tab === "costos" && <CostosTab products={products} setMsg={setMsg} />}
+          {tab === "costos" && <CostosTab products={productosFull} setMsg={setMsg} />}
         </main>
       </div>
     </div>
@@ -496,8 +476,7 @@ function ProductsTab({
           </div>
 
           {filtered.map(p => {
-            const costo = calcCosto(p, costs);
-            const sinDatos = !p.specs?.peso && !p.specs?.tiempo;
+            const rent = calcularRentabilidad(p, costs);
             const disp = calcularDisponibilidad(p, filamentos);
             const abierto = expandido === p._id;
             return (
@@ -519,9 +498,9 @@ function ProductsTab({
                   </div>
                   <div>{fmtARS(p.price || 0)}</div>
                   <div style={{ fontSize: 12 }}>
-                    {sinDatos
-                      ? <span style={{ color: "var(--muted)" }}>—</span>
-                      : <span style={{ color: "var(--text)", fontWeight: 600 }}>{fmtARS(costo)}</span>
+                    {rent.calculable
+                      ? <span style={{ color: "var(--text)", fontWeight: 600 }}>{fmtARS(rent.costoFabricacion)}</span>
+                      : <span style={{ color: "var(--muted)" }} title={rent.motivo}>—</span>
                     }
                   </div>
                   <div style={{
@@ -1456,18 +1435,19 @@ function CostosTab({ products, setMsg }) {
     setCosts(c => ({ ...c, materiales: updated }));
   };
 
-  // uses module-level calcCosto(p, costs)
-
+  // Fórmula única en src/lib/costos.js
   const rows = products
     .filter(p => p.visible !== false)
-    .map(p => {
-      const costo = calcCosto(p, costs);
-      const precio = p.price || 0;
-      const ganancia = precio - costo;
-      const margen = precio > 0 ? (ganancia / precio) * 100 : 0;
-      return { ...p, costo, ganancia, margen };
-    })
-    .sort((a, b) => a.margen - b.margen); // worst margin first
+    .map(p => ({ ...p, rent: calcularRentabilidad(p, costs) }))
+    // Peor margen primero; los no calculables van al final para que no
+    // ensucien el ranking pero queden visibles.
+    .sort((a, b) => {
+      if (a.rent.calculable !== b.rent.calculable) return a.rent.calculable ? -1 : 1;
+      if (!a.rent.calculable) return (a.name || "").localeCompare(b.name || "");
+      return a.rent.margen - b.rent.margen;
+    });
+
+  const noCalculables = rows.filter(r => !r.rent.calculable).length;
 
   if (loading) return <div style={{ padding: 40, color: "var(--muted)" }}>Cargando configuración...</div>;
 
@@ -1501,8 +1481,12 @@ function CostosTab({ products, setMsg }) {
 
         {/* Materiales */}
         <div style={{ padding: 24, background: "var(--bg-alt)", border: "1px solid var(--line)" }}>
-          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: "var(--muted)", marginBottom: 16 }}>
-            Costo por gramo de material (ARS/g)
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: "var(--muted)", marginBottom: 6 }}>
+            Costo de fabricación por gramo (ARS/g)
+          </div>
+          <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.5, marginBottom: 16 }}>
+            Lo que <strong style={{ color: "var(--text)" }}>te cuesta a vos producir un gramo</strong> de
+            cada material, no el precio de venta.
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {Object.entries(costs.materiales).map(([mat, val]) => (
@@ -1538,6 +1522,13 @@ function CostosTab({ products, setMsg }) {
               <TKButton variant="outline" onClick={addMaterial} icon={<Icon.plus size={14}/>}>Agregar</TKButton>
             </div>
           </div>
+
+          <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--line)", fontSize: 11, color: "var(--muted)", lineHeight: 1.6 }}>
+            El precio de venta se deriva de este costo con un margen fijo de{" "}
+            <strong style={{ color: "var(--text)" }}>×{MARGEN_MATERIAL}</strong> sobre el material,
+            más la hora de máquina sumada aparte (sin margen). El nombre del material tiene que
+            coincidir con el que usás en las recetas.
+          </div>
         </div>
       </div>
 
@@ -1546,23 +1537,29 @@ function CostosTab({ products, setMsg }) {
         <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: "var(--muted)", marginBottom: 4 }}>
           Rentabilidad por producto
         </div>
-        <div style={{ fontSize: 11, color: "var(--muted)" }}>
-          Ordenado de menor a mayor margen. Costos calculados con la configuración actual.
+        <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.6 }}>
+          Ordenado de menor a mayor margen. Costo y precio salen de la receta de cada producto:
+          costo = gramos × costo/g por material; precio = hora de máquina + gramos × costo/g × {MARGEN_MATERIAL}.
+          {noCalculables > 0 && (
+            <> · <span style={{ color: "#B56B3E", fontWeight: 700 }}>
+              {noCalculables} sin calcular (falta receta o costo de material)
+            </span></>
+          )}
         </div>
       </div>
 
       <div style={{ overflowX: "auto", margin: "0 -16px", padding: "0 16px" }}>
-        <div style={{ minWidth: 820 }}>
+        <div style={{ minWidth: 900 }}>
           {/* Table header */}
           <div style={{
             display: "grid",
-            gridTemplateColumns: "2fr 80px 80px 90px 100px 100px 90px",
+            gridTemplateColumns: "2fr 110px 130px 80px 100px 100px 90px",
             gap: 12, padding: "10px 12px", background: "var(--bg-alt)",
             fontSize: 10, textTransform: "uppercase", letterSpacing: 1.5,
             color: "var(--muted)", fontWeight: 700,
           }}>
             <div>Producto</div>
-            <div>Material</div>
+            <div>Material/es</div>
             <div>Peso</div>
             <div>Tiempo</div>
             <div>Costo fab.</div>
@@ -1571,36 +1568,62 @@ function CostosTab({ products, setMsg }) {
           </div>
 
           {rows.map(p => {
-            const sinDatos = !p.specs?.peso && !p.specs?.tiempo;
-            const margenColor = p.margen < 0 ? "#c64138" : p.margen < 30 ? "#B56B3E" : "#4a7a52";
+            const { rent } = p;
+            const margenColor = !rent.calculable ? "var(--muted)"
+              : rent.margen < 0 ? "#c64138" : rent.margen < 30 ? "#B56B3E" : "#4a7a52";
+            const noCalc = <span style={{ color: "var(--muted)", fontSize: 12 }} title={rent.motivo}>—</span>;
             return (
               <div key={p._id || p.id} style={{
                 display: "grid",
-                gridTemplateColumns: "2fr 80px 80px 90px 100px 100px 90px",
+                gridTemplateColumns: "2fr 110px 130px 80px 100px 100px 90px",
                 gap: 12, padding: "14px 12px", borderBottom: "1px solid var(--line)",
                 fontSize: 13, alignItems: "center",
               }}>
                 <div>
-                  <div style={{ fontWeight: 600, color: "var(--text)" }}>{p.name}</div>
-                  <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>{p.cat} · {p.sub}</div>
+                  <div style={{ fontWeight: 600, color: "var(--text)", display: "flex", alignItems: "center", gap: 6 }}>
+                    {p.name}
+                    {!rent.calculable && (
+                      <span title={rent.motivo} style={{ color: "#B56B3E", display: "inline-flex" }}>
+                        <Icon.shield size={13}/>
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>
+                    {!rent.calculable ? rent.motivo : `${p.cat} · ${p.sub}`}
+                  </div>
                 </div>
-                <div style={{ fontSize: 12, color: "var(--muted)" }}>{p.specs?.material || "—"}</div>
-                <div style={{ fontSize: 12, color: "var(--muted)" }}>{p.specs?.peso || "—"}</div>
+
+                {/* Material/es: todos los materiales distintos de la receta */}
+                <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                  {rent.materiales.length > 0
+                    ? rent.materiales.map(m => m.material).join(", ")
+                    : "—"}
+                </div>
+
+                {/* Peso: total unificado con un material, desglosado con varios */}
+                <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                  {rent.materiales.length === 0 ? "—"
+                    : rent.materiales.length === 1
+                      ? `${rent.gramosTotales} g`
+                      : rent.materiales.map(m => (
+                          <div key={m.material} style={{ whiteSpace: "nowrap" }}>
+                            <strong style={{ color: "var(--text)", fontWeight: 600 }}>{m.material}:</strong> {m.gramos} g
+                          </div>
+                        ))}
+                </div>
+
                 <div style={{ fontSize: 12, color: "var(--muted)" }}>{p.specs?.tiempo || "—"}</div>
                 <div style={{ fontWeight: 600 }}>
-                  {sinDatos
-                    ? <span style={{ color: "var(--muted)", fontSize: 11 }}>Sin datos</span>
-                    : fmtARS(p.costo)
-                  }
+                  {rent.calculable ? fmtARS(rent.costoFabricacion) : noCalc}
                 </div>
-                <div style={{ fontWeight: 600 }}>{fmtARS(p.price || 0)}</div>
+                <div style={{ fontWeight: 600 }}>
+                  {rent.calculable ? fmtARS(rent.precioVenta) : noCalc}
+                </div>
                 <div>
-                  {sinDatos ? (
-                    <span style={{ color: "var(--muted)", fontSize: 11 }}>—</span>
-                  ) : (
+                  {!rent.calculable ? noCalc : (
                     <div>
                       <div style={{ fontWeight: 700, color: margenColor }}>
-                        {fmtARS(p.ganancia)}
+                        {fmtARS(rent.ganancia)}
                       </div>
                       <div style={{
                         display: "inline-block", marginTop: 3,
@@ -1608,7 +1631,7 @@ function CostosTab({ products, setMsg }) {
                         background: margenColor + "18",
                         color: margenColor, fontSize: 11, fontWeight: 700,
                       }}>
-                        {p.margen.toFixed(1)}%
+                        {rent.margen.toFixed(1)}%
                       </div>
                     </div>
                   )}
