@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { COLORS_FILAMENT } from '../data.js';
-import { TKButton, TKInput, TKPill, Icon, ProductCard, fmtARS } from '../components/UI.jsx';
+import { TKButton, TKInput, TKPill, Icon, ProductCard, fmtARS, SinStockBadge, sinStock } from '../components/UI.jsx';
 
 export function DetalleScreen({ go, addToCart, productId, detalleVariant = "A", products = [] }) {
   const product = products.find(p => p.id === productId) || products[0] || {};
+  const agotado = sinStock(product);
 
   // Build gallery from images array or fallback to single img
   const gallery = product.images?.filter(u => u?.trim()) ||
@@ -88,9 +89,19 @@ export function DetalleScreen({ go, addToCart, productId, detalleVariant = "A", 
           <h1 style={{ fontSize: "clamp(32px, 4.5vw, 52px)", letterSpacing: -1, lineHeight: 1, margin: "0 0 18px", color: "var(--text)" }}>
             {product.name}
           </h1>
-          <div style={{ fontSize: 36, color: "var(--accent)", marginBottom: 28 }}>
-            {fmtARS(product.price)}
-          </div>
+          {agotado ? (
+            <div style={{ marginBottom: 28 }}>
+              <SinStockBadge/>
+              <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 10 }}>
+                Estamos reponiendo material para esta pieza. Escribinos por Instagram y te avisamos
+                cuando vuelva.
+              </div>
+            </div>
+          ) : (
+            <div style={{ fontSize: 36, color: "var(--accent)", marginBottom: 28 }}>
+              {fmtARS(product.price)}
+            </div>
+          )}
 
           <p style={{ fontSize: 15, color: "var(--muted)", lineHeight: 1.6, marginBottom: 28 }}>
             {product.desc}
@@ -120,16 +131,22 @@ export function DetalleScreen({ go, addToCart, productId, detalleVariant = "A", 
           </div>
 
           {/* Qty + Add */}
-          <div style={{ display: "flex", gap: 12, alignItems: "stretch", marginBottom: 24 }}>
-            <div style={{ display: "flex", alignItems: "center", border: "1px solid var(--line-strong)" }}>
-              <button onClick={() => setQty(Math.max(1, qty - 1))} style={qtyBtn}><Icon.minus/></button>
-              <span style={{ padding: "0 18px", fontSize: 16 }}>{qty}</span>
-              <button onClick={() => setQty(qty + 1)} style={qtyBtn}><Icon.plus/></button>
+          {agotado ? (
+            <div style={{ marginBottom: 24 }}>
+              <TKButton size="lg" full disabled>Sin stock</TKButton>
             </div>
-            <TKButton size="lg" full icon={<Icon.ig size={16}/>} onClick={() => addToCart(product, { color, custom, qty })}>
-              Consultar por Instagram — {fmtARS(product.price * qty)}
-            </TKButton>
-          </div>
+          ) : (
+            <div style={{ display: "flex", gap: 12, alignItems: "stretch", marginBottom: 24 }}>
+              <div style={{ display: "flex", alignItems: "center", border: "1px solid var(--line-strong)" }}>
+                <button onClick={() => setQty(Math.max(1, qty - 1))} style={qtyBtn}><Icon.minus/></button>
+                <span style={{ padding: "0 18px", fontSize: 16 }}>{qty}</span>
+                <button onClick={() => setQty(qty + 1)} style={qtyBtn}><Icon.plus/></button>
+              </div>
+              <TKButton size="lg" full icon={<Icon.ig size={16}/>} onClick={() => addToCart(product, { color, custom, qty })}>
+                Consultar por Instagram — {fmtARS(product.price * qty)}
+              </TKButton>
+            </div>
+          )}
 
           {/* Features bar */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginTop: 32, paddingTop: 24, borderTop: "1px solid var(--line)" }}>
@@ -181,6 +198,7 @@ export function DetalleScreen({ go, addToCart, productId, detalleVariant = "A", 
 
 function DetalleB({ go, addToCart, productId, products = [] }) {
   const product = products.find(p => p.id === productId) || products[0] || {};
+  const agotado = sinStock(product);
   const [color, setColor] = useState(COLORS_FILAMENT[2]);
   const [qty, setQty] = useState(1);
 
@@ -200,10 +218,16 @@ function DetalleB({ go, addToCart, productId, products = [] }) {
             </h1>
           </div>
           <div style={{ background: "var(--bg)", padding: "24px 32px", minWidth: 300 }}>
-            <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 8 }}>DESDE</div>
-            <div style={{ fontSize: 48, color: "var(--accent)", letterSpacing: -1 }}>
-              {fmtARS(product.price)}
-            </div>
+            {agotado ? (
+              <SinStockBadge/>
+            ) : (
+              <>
+                <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 8 }}>DESDE</div>
+                <div style={{ fontSize: 48, color: "var(--accent)", letterSpacing: -1 }}>
+                  {fmtARS(product.price)}
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -231,16 +255,20 @@ function DetalleB({ go, addToCart, productId, products = [] }) {
                 style={{ width: 40, height: 40, borderRadius: "50%", cursor: "pointer", background: c.hex, border: `2px solid ${color.id === c.id ? "var(--accent)" : "var(--line)"}`, outline: color.id === c.id ? "2px solid var(--bg)" : "none", outlineOffset: -4 }}/>
             ))}
           </div>
-          <div style={{ display: "flex", gap: 12 }}>
-            <div style={{ display: "flex", alignItems: "center", border: "1px solid var(--line-strong)" }}>
-              <button onClick={() => setQty(Math.max(1, qty - 1))} style={qtyBtn}><Icon.minus/></button>
-              <span style={{ padding: "0 18px", fontSize: 16 }}>{qty}</span>
-              <button onClick={() => setQty(qty + 1)} style={qtyBtn}><Icon.plus/></button>
+          {agotado ? (
+            <TKButton size="lg" full disabled>Sin stock</TKButton>
+          ) : (
+            <div style={{ display: "flex", gap: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", border: "1px solid var(--line-strong)" }}>
+                <button onClick={() => setQty(Math.max(1, qty - 1))} style={qtyBtn}><Icon.minus/></button>
+                <span style={{ padding: "0 18px", fontSize: 16 }}>{qty}</span>
+                <button onClick={() => setQty(qty + 1)} style={qtyBtn}><Icon.plus/></button>
+              </div>
+              <TKButton size="lg" full icon={<Icon.ig size={16}/>} onClick={() => addToCart(product, { color, qty })}>
+                Consultar por Instagram
+              </TKButton>
             </div>
-            <TKButton size="lg" full icon={<Icon.ig size={16}/>} onClick={() => addToCart(product, { color, qty })}>
-              Consultar por Instagram
-            </TKButton>
-          </div>
+          )}
         </div>
       </div>
     </div>

@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { CATEGORIES as FALLBACK_CATEGORIES } from '../data.js';
-import { TKButton, TKPill, Icon, ProductImage, ProductCard } from '../components/UI.jsx';
+import { TKButton, TKPill, Icon, ProductImage, ProductCard, SinStockBadge, sinStock } from '../components/UI.jsx';
 
 export function HomeScreen({ go, addToCart, homeVariant = "A", products = [], categories = FALLBACK_CATEGORIES }) {
   const featured = useMemo(() => {
@@ -223,17 +223,23 @@ function BestSellersCarousel({ featured, go, addToCart }) {
                   </div>
                 </div>
 
-                <div style={{ fontSize: 32, color: "var(--accent)", letterSpacing: -0.5 }}>
-                  {`$ ${Math.round(p.price).toLocaleString("es-AR")}`}
-                </div>
+                {sinStock(p) ? (
+                  <SinStockBadge/>
+                ) : (
+                  <div style={{ fontSize: 32, color: "var(--accent)", letterSpacing: -0.5 }}>
+                    {`$ ${Math.round(p.price).toLocaleString("es-AR")}`}
+                  </div>
+                )}
 
                 <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
                   <TKButton onClick={() => go("detalle", { id: p.id })}>
                     Ver producto <Icon.arrow/>
                   </TKButton>
-                  <TKButton variant="outline" onClick={() => addToCart(p)}>
-                    <Icon.ig size={14}/> Consultar por Instagram
-                  </TKButton>
+                  {!sinStock(p) && (
+                    <TKButton variant="outline" onClick={() => addToCart(p)}>
+                      <Icon.ig size={14}/> Consultar por Instagram
+                    </TKButton>
+                  )}
                 </div>
               </div>
             </div>

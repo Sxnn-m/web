@@ -1,0 +1,77 @@
+rules_version = '2';
+
+// TKPrints — reglas de Firestore
+//
+// Modelo de roles: /users/{uid}.role == "admin".
+// El catálogo público solo necesita leer "products" y "categories".
+// El inventario de filamento y los pedidos son 100% privados del backoffice.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function estaLogueado() {
+      return request.auth != null;
+    }
+
+    function esAdmin() {
+      return estaLogueado()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    // ── Usuarios ───────────────────────────────────────────────────────
+    // Cada usuario lee su propio documento (App.jsx consulta su rol).
+    // Nadie puede auto-asignarse el rol admin: solo un admin cambia roles.
+    match /users/{userId} {
+      allow read: if estaLogueado() && (request.auth.uid == userId || esAdmin());
+      allow create: if estaLogueado()
+        && request.auth.uid == userId
+        && (!('role' in request.resource.data) || request.resource.data.role == 'customer');
+      allow update: if esAdmin()
+        || (estaLogueado() && request.auth.uid == userId
+            && request.resource.data.role == resource.data.role);
+      allow delete: if esAdmin();
+    }
+
+    // ── Catálogo público ───────────────────────────────────────────────
+    // Lectura abierta (incluye el booleano "disponible", que es el único
+    // dato de stock que ve el público). Escritura solo admin: así nadie
+    // puede tocar receta, origenUrl, notas ni disponible.
+    match /products/{productId} {
+      allow read: if true;
+      allow write: if esAdmin();
+    }
+
+    match /categories/{categoryId} {
+      allow read: if true;
+      allow write: if esAdmin();
+    }
+
+    // ── Configuración de costos (backoffice) ───────────────────────────
+    match /settings/{settingId} {
+      allow read, write: if esAdmin();
+    }
+
+    // ── Inventario de filamento ────────────────────────────────────────
+    // Sin lectura ni escritura pública: las cantidades en gramos y los
+    // historiales de gastos/restocks nunca salen del backoffice.
+    match /filamentos/{filamentoId} {
+      allow read, write: if esAdmin();
+
+      match /gastos/{gastoId} {
+        allow read, write: if esAdmin();
+      }
+
+      match /restocks/{restockId} {
+        allow read, write: if esAdmin();
+      }
+    }
+
+    // ── Pedidos ────────────────────────────────────────────────────────
+    match /pedidos/{pedidoId} {
+      allow read, write: if esAdmin();
+    }
+
+    // Todo lo no declarado arriba queda denegado por defecto.
+  }
+}
