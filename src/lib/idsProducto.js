@@ -49,3 +49,45 @@ export function detectarDuplicados(productos = []) {
 export function idsDuplicados(productos = []) {
   return new Set(detectarDuplicados(productos).map(d => d.id));
 }
+
+/** createdAt (Timestamp de Firestore | Date | number) → milisegundos, o null. */
+function msDeCreacion(producto) {
+  const c = producto?.createdAt;
+  if (!c) return null;
+  if (typeof c.toMillis === "function") return c.toMillis();
+  if (typeof c.seconds === "number") return c.seconds * 1000;
+  const d = new Date(c);
+  return Number.isNaN(d.getTime()) ? null : d.getTime();
+}
+
+/**
+ * Plan de renumeración de TODO el catálogo: TKP1..TKPn por orden de creación.
+ * Los productos sin createdAt van al final, ordenados por nombre.
+ *
+ * Función pura: no escribe nada. La escritura vive en src/lib/migracionIds.js
+ * y se aplica sobre el plan exacto que el usuario revisó.
+ *
+ * @returns {Array<{_id, nombre, idViejo, idNuevo, cambia, sinFecha}>}
+ */
+export function planDeRenumeracion(productos = []) {
+  const conFecha = [];
+  const sinFecha = [];
+  for (const p of productos) {
+    if (msDeCreacion(p) === null) sinFecha.push(p);
+    else conFecha.push(p);
+  }
+  conFecha.sort((a, b) => msDeCreacion(a) - msDeCreacion(b));
+  sinFecha.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+
+  return [...conFecha, ...sinFecha].map((p, i) => {
+    const idNuevo = `${PREFIJO_ID}${i + 1}`;
+    return {
+      _id: p._id,
+      nombre: p.name || "(sin nombre)",
+      idViejo: p.id || "—",
+      idNuevo,
+      cambia: (p.id || "") !== idNuevo,
+      sinFecha: msDeCreacion(p) === null,
+    };
+  });
+}

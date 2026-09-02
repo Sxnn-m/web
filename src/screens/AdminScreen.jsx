@@ -24,7 +24,8 @@ import {
 import {
   tiempoDeProducto, specsDeTiempo, formatTiempo, formatTiempoProducto,
 } from '../lib/tiempoImpresion.js';
-import { siguienteIdProducto, idsDuplicados } from '../lib/idsProducto.js';
+import { siguienteIdProducto, idsDuplicados, planDeRenumeracion } from '../lib/idsProducto.js';
+import { aplicarRenumeracionIds } from '../lib/migracionIds.js';
 
 // La fórmula de costo/precio/ganancia vive en src/lib/costos.js: una sola
 // implementación para la tabla de Rentabilidad y para la columna "Costo fab.".
@@ -143,6 +144,26 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
       (sinReceta > 0 ? ` ${sinReceta} sin receta quedaron NO disponibles.` : "")
     );
     setTiemposIlegibles(tiemposIlegibles || []);
+  };
+
+  // Renumeración de IDs: escribe el plan exacto que se revisó en el modal.
+  const handleRenumerarIds = async (plan) => {
+    setMsg("Renumerando IDs...");
+    try {
+      const { actualizados, errores } = await aplicarRenumeracionIds(plan);
+      await loadProducts();
+      onProductsChange?.();
+      if (errores.length > 0) {
+        setMsg(
+          `Renumerados ${actualizados} productos, pero ${errores.length} fallaron: ` +
+          errores.map(e => e.nombre).join(", ") + ". Volvé a correr el botón para completarlos."
+        );
+      } else {
+        setMsg(`✓ ${actualizados} producto(s) renumerados. Los IDs quedaron correlativos y únicos.`);
+      }
+    } catch (err) {
+      setMsg("Error al renumerar: " + err.message);
+    }
   };
 
   // Botón manual: mueve receta/origenUrl/notas del doc público a la subcolección
@@ -379,6 +400,7 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
                   onNew={() => { setEditProduct(null); setShowForm(true); }}
                   onRecalcular={handleRecalcular}
                   onMigrarPrivados={handleMigrarPrivados}
+                  onRenumerarIds={handleRenumerarIds}
                   tiemposIlegibles={tiemposIlegibles}
                   onCerrarTiempos={() => setTiemposIlegibles([])}
                   onToggleVisible={async (p) => {
@@ -442,9 +464,10 @@ function DashboardTab({ products, users, categories, onCategoriesChange, onProdu
 function ProductsTab({
   products, costs = DEFAULT_COSTS, filamentos = [], categories = [], pendientesDeMigrar = 0,
   onEdit, onDelete, onNew, onToggleVisible, onRecalcular, onMigrarPrivados,
-  tiemposIlegibles = [], onCerrarTiempos,
+  onRenumerarIds, tiemposIlegibles = [], onCerrarTiempos,
 }) {
   const [search, setSearch] = useState("");
+  const [planRenumeracion, setPlanRenumeracion] = useState(null);
   const [filtroCat, setFiltroCat] = useState("all");
   const [filtroSub, setFiltroSub] = useState("all");
   const [expandido, setExpandido] = useState(null);
@@ -493,6 +516,13 @@ function ProductsTab({
               Migrar datos privados ({pendientesDeMigrar})
             </TKButton>
           )}
+          <TKButton
+            variant="outline"
+            onClick={() => setPlanRenumeracion(planDeRenumeracion(products))}
+            icon={<Icon.list size={14}/>}
+          >
+            Renumerar IDs
+          </TKButton>
           <TKButton variant="outline" onClick={onRecalcular} icon={<Icon.spark size={14}/>}>
             Recalcular desde recetas
           </TKButton>
@@ -696,6 +726,18 @@ function ProductsTab({
         </div>
       </div>
 
+      {planRenumeracion && (
+        <ModalRenumeracion
+          plan={planRenumeracion}
+          onClose={() => setPlanRenumeracion(null)}
+          onConfirm={async () => {
+            const plan = planRenumeracion;
+            setPlanRenumeracion(null);
+            await onRenumerarIds(plan);
+          }}
+        />
+      )}
+
       {filtered.length === 0 && (
         <div style={{ padding: 40, textAlign: "center", color: "var(--muted)" }}>
           No se encontraron productos.
@@ -710,6 +752,88 @@ const actionBtn = {
   cursor: "pointer", color: "var(--text)", display: "flex", alignItems: "center",
   borderRadius: 4,
 };
+
+// ─── Modal: revisar la renumeración antes de escribir ─────────────────
+function ModalRenumeracion({ plan, onClose, onConfirm }) {
+  const cambian = plan.filter(p => p.cambia);
+  const sinFecha = plan.filter(p => p.sinFecha).length;
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", zIndex: 200,
+        display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: "var(--bg)", border: "1px solid var(--line)",
+          maxWidth: 640, width: "100%", maxHeight: "85vh",
+          display: "flex", flexDirection: "column",
+          padding: 28, boxShadow: "0 20px 60px rgba(0,0,0,.3)",
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
+          <h3 style={{ fontSize: 24, margin: 0 }}>Renumerar IDs de producto</h3>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)" }}>
+            <Icon.close size={18}/>
+          </button>
+        </div>
+        <p style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.6, marginTop: 0, marginBottom: 8 }}>
+          Todo el catálogo pasa a TKP1…TKP{plan.length} por orden de creación. Se escribe
+          únicamente el campo <code>id</code> de cada producto: no se tocan las recetas, el
+          inventario, los pedidos ni los datos privados.
+        </p>
+        <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 14 }}>
+          <strong style={{ color: "var(--text)" }}>{cambian.length}</strong> de {plan.length} productos
+          cambian de ID.
+          {sinFecha > 0 && ` ${sinFecha} sin fecha de creación van al final, ordenados por nombre.`}
+        </div>
+
+        <div style={{ flex: 1, overflowY: "auto", border: "1px solid var(--line)", marginBottom: 20 }}>
+          <div style={{
+            display: "grid", gridTemplateColumns: "1fr 90px 20px 90px",
+            gap: 10, padding: "10px 12px", background: "var(--bg-alt)",
+            fontSize: 10, textTransform: "uppercase", letterSpacing: 1.2,
+            color: "var(--muted)", fontWeight: 700,
+            position: "sticky", top: 0,
+          }}>
+            <div>Producto</div><div>Antes</div><div/><div>Después</div>
+          </div>
+          {plan.map(item => (
+            <div key={item._id} style={{
+              display: "grid", gridTemplateColumns: "1fr 90px 20px 90px",
+              gap: 10, padding: "10px 12px", borderTop: "1px solid var(--line)",
+              fontSize: 12, alignItems: "center",
+              opacity: item.cambia ? 1 : 0.5,
+            }}>
+              <div style={{ fontWeight: 600 }}>
+                {item.nombre}
+                {item.sinFecha && <span style={{ color: "var(--muted)", fontWeight: 400 }}> · sin fecha</span>}
+              </div>
+              <div style={{ color: "var(--muted)", textDecoration: item.cambia ? "line-through" : "none" }}>
+                {item.idViejo}
+              </div>
+              <div style={{ color: "var(--muted)" }}>{item.cambia ? "→" : "="}</div>
+              <div style={{ fontWeight: 700, color: item.cambia ? "#4a7a52" : "var(--muted)" }}>
+                {item.idNuevo}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
+          <TKButton variant="outline" onClick={onClose}>Cancelar</TKButton>
+          <TKButton onClick={onConfirm} disabled={cambian.length === 0}>
+            {cambian.length === 0 ? "No hay nada que cambiar" : `Aplicar a ${cambian.length} producto(s)`}
+          </TKButton>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ─── Detalle expandible de disponibilidad (solo backoffice) ───────────
 function DisponibilidadDetalle({ disp, producto }) {
