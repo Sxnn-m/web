@@ -7,7 +7,7 @@ import {
   collection, getDocs, addDoc, updateDoc, deleteDoc, doc,
   query, orderBy, increment, serverTimestamp,
 } from 'firebase/firestore';
-import { calcularDisponibilidad, buscarFilamento } from './disponibilidad.js';
+import { calcularDisponibilidad, buscarFilamento, specsDesdeReceta } from './disponibilidad.js';
 
 export const COL_FILAMENTOS = "filamentos";
 export const COL_PEDIDOS = "pedidos";
@@ -81,22 +81,41 @@ export async function registrarRestock(filamentoId, cantidadAgregada, nota = "")
 // ─── Recálculo del booleano público "disponible" ─────────────────────
 
 /**
- * Recalcula "disponible" para todos los productos y escribe solo los que
- * cambiaron. Es el único punto donde el catálogo público se entera de un
- * cambio de inventario o de receta, sin exponer gramos.
+ * Recalcula, para cada producto, todo lo que se deriva de su receta:
+ *   - "disponible": el único dato de stock que ve el catálogo público.
+ *   - specs.material y specs.peso: derivados de la receta, no editables a mano.
  *
- * @returns {{actualizados: number, total: number}}
+ * Escribe una sola vez por producto y solo si algo cambió. Recibe productos
+ * ya enriquecidos con su receta privada.
+ *
+ * @returns {{actualizados, disponibilidadActualizada, specsActualizadas, total}}
  */
 export async function recalcularDisponibilidad(productos = [], filamentos = []) {
   let actualizados = 0;
+  let disponibilidadActualizada = 0;
+  let specsActualizadas = 0;
+
   for (const p of productos) {
     if (!p?._id) continue;
+
     const { disponible } = calcularDisponibilidad(p, filamentos);
-    if (p.disponible === disponible) continue;
-    await updateDoc(doc(db, COL_PRODUCTS, p._id), { disponible });
+    const specs = specsDesdeReceta(p.receta || []);
+    const patch = {};
+
+    if (p.disponible !== disponible) patch.disponible = disponible;
+    // Notación de punto: actualiza solo estas claves y deja specs.tiempo intacto.
+    if ((p.specs?.material || "") !== specs.material) patch["specs.material"] = specs.material;
+    if ((p.specs?.peso || "") !== specs.peso) patch["specs.peso"] = specs.peso;
+
+    if (Object.keys(patch).length === 0) continue;
+
+    await updateDoc(doc(db, COL_PRODUCTS, p._id), patch);
     actualizados++;
+    if ("disponible" in patch) disponibilidadActualizada++;
+    if ("specs.material" in patch || "specs.peso" in patch) specsActualizadas++;
   }
-  return { actualizados, total: productos.length };
+
+  return { actualizados, disponibilidadActualizada, specsActualizadas, total: productos.length };
 }
 
 // ─── Pedidos ─────────────────────────────────────────────────────────

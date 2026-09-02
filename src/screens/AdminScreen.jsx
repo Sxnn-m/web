@@ -9,7 +9,7 @@ import { PRODUCTS as SEED_PRODUCTS, CATEGORIES } from '../data.js';
 import { InventarioTab } from './admin/InventarioTab.jsx';
 import { PedidosTab } from './admin/PedidosTab.jsx';
 import {
-  calcularDisponibilidad, motivoFaltante, FACTOR_DISPONIBILIDAD,
+  calcularDisponibilidad, motivoFaltante, FACTOR_DISPONIBILIDAD, specsDesdeReceta,
 } from '../lib/disponibilidad.js';
 import {
   cargarFilamentos, cargarPedidos, recalcularDisponibilidad,
@@ -109,16 +109,16 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
    */
   const sincronizarDisponibilidad = async (prodsFull, films) => {
     try {
-      const { actualizados } = await recalcularDisponibilidad(prodsFull, films);
-      if (actualizados > 0) {
+      const resultado = await recalcularDisponibilidad(prodsFull, films);
+      if (resultado.actualizados > 0) {
         await loadProducts();
         onProductsChange?.();
       }
-      return actualizados;
+      return resultado;
     } catch (err) {
       console.error(err);
-      setMsg("Error al recalcular disponibilidad: " + err.message);
-      return 0;
+      setMsg("Error al recalcular: " + err.message);
+      return { actualizados: 0, disponibilidadActualizada: 0, specsActualizadas: 0 };
     }
   };
 
@@ -135,15 +135,18 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
     await sincronizarDisponibilidad(prodsFull, films);
   };
 
-  // Botón manual: recalcula la disponibilidad de todo el catálogo
+  // Botón manual: recalcula desde la receta todo lo derivado — disponibilidad
+  // y specs.material / specs.peso — sobre el catálogo completo.
   const handleRecalcular = async () => {
-    setMsg("Recalculando disponibilidad...");
+    setMsg("Recalculando desde las recetas...");
     const { prodsFull, films } = await recargarTodo();
-    const actualizados = await sincronizarDisponibilidad(prodsFull, films);
+    const { disponibilidadActualizada, specsActualizadas } =
+      await sincronizarDisponibilidad(prodsFull, films);
     const sinReceta = prodsFull.filter(p => (p.receta || []).length === 0).length;
     setMsg(
-      `✓ Disponibilidad recalculada sobre ${prodsFull.length} productos ` +
-      `(${actualizados} actualizado${actualizados !== 1 ? "s" : ""}).` +
+      `✓ Recalculado sobre ${prodsFull.length} productos: ` +
+      `${disponibilidadActualizada} con disponibilidad actualizada, ` +
+      `${specsActualizadas} con material/peso actualizados.` +
       (sinReceta > 0 ? ` ${sinReceta} sin receta quedaron NO disponibles.` : "")
     );
   };
@@ -452,7 +455,7 @@ function ProductsTab({
             </TKButton>
           )}
           <TKButton variant="outline" onClick={onRecalcular} icon={<Icon.spark size={14}/>}>
-            Recalcular disponibilidad
+            Recalcular desde recetas
           </TKButton>
           <TKButton onClick={onNew} icon={<Icon.plus size={14}/>}>Nuevo producto</TKButton>
         </div>
@@ -731,6 +734,28 @@ function RecetaEditor({ receta, setReceta, filamentos }) {
   );
 }
 
+// ─── Spec de solo lectura, calculada desde la receta ──────────────────
+function SpecCalculada({ label, valor, vacio }) {
+  const hayValor = Boolean(valor);
+  return (
+    <div>
+      <div style={{ ...labelStyle, marginBottom: 6 }}>{label}</div>
+      <div style={{
+        padding: "12px 14px", background: "var(--bg-alt)",
+        border: "1px dashed var(--line)", borderRadius: 4,
+        fontSize: 14, color: hayValor ? "var(--text)" : "var(--muted)",
+        fontWeight: hayValor ? 600 : 400,
+        minHeight: 20, boxSizing: "border-box",
+      }}>
+        {hayValor ? valor : vacio}
+      </div>
+      <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 6 }}>
+        (calculado desde la receta)
+      </div>
+    </div>
+  );
+}
+
 // ─── Preview en vivo de la disponibilidad mientras se edita la receta ──
 function DisponibilidadPreview({ receta, filamentos }) {
   const limpia = receta
@@ -812,17 +837,22 @@ function ProductForm({ product, onSave, onCancel, categories = [], filamentos = 
   const currentCat = (categories.length ? categories : []).find(c => c.id === form.cat);
   const mainImg = images.find(u => u.trim()) || "";
 
+  // Líneas de receta válidas — base de las specs derivadas y de lo que se guarda.
+  const recetaLimpia = useMemo(() => receta
+    .filter(l => l.material.trim() && l.color.trim() && (Number(l.gramos) || 0) > 0)
+    .map(l => ({
+      material: l.material.trim(),
+      color: l.color.trim(),
+      gramos: Number(l.gramos),
+    })), [receta]);
+
+  // Material y peso salen de la receta y se recalculan en vivo mientras se edita.
+  const specsCalculadas = useMemo(() => specsDesdeReceta(recetaLimpia), [recetaLimpia]);
+
   const handleSubmit = () => {
     if (!form.name.trim()) return alert("El nombre es obligatorio.");
     if (!form.price || form.price <= 0) return alert("El precio debe ser mayor a 0.");
     const cleanImages = images.filter(u => u.trim());
-    const cleanReceta = receta
-      .filter(l => l.material.trim() && l.color.trim() && (Number(l.gramos) || 0) > 0)
-      .map(l => ({
-        material: l.material.trim(),
-        color: l.color.trim(),
-        gramos: Number(l.gramos),
-      }));
     const data = {
       ...form,
       price: Number(form.price),
@@ -830,7 +860,14 @@ function ProductForm({ product, onSave, onCancel, categories = [], filamentos = 
       visible: form.visible,
       images: cleanImages,
       img: cleanImages[0] || "",
-      receta: cleanReceta,
+      receta: recetaLimpia,
+      // specs.material y specs.peso los setea el código desde la receta;
+      // solo specs.tiempo viene del formulario.
+      specs: {
+        ...form.specs,
+        material: specsCalculadas.material,
+        peso: specsCalculadas.peso,
+      },
       origenUrl: form.origenUrl.trim(),
       notas: form.notas,
     };
@@ -901,13 +938,21 @@ function ProductForm({ product, onSave, onCancel, categories = [], filamentos = 
             </div>
           </div>
 
-          {/* Specs */}
+          {/* Specs — material y peso derivan de la receta, no se editan a mano */}
           <div style={{ marginBottom: 16 }}>
             <div style={{...labelStyle, marginBottom: 12}}>Especificaciones</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
-              <TKInput label="Material" value={form.specs.material} onChange={e => upSpec("material", e.target.value)} placeholder="PLA" />
+              <SpecCalculada
+                label="Material"
+                valor={specsCalculadas.material}
+                vacio="Sin receta cargada"
+              />
               <TKInput label="Tiempo impresión" value={form.specs.tiempo} onChange={e => upSpec("tiempo", e.target.value)} placeholder="8h" />
-              <TKInput label="Peso" value={form.specs.peso} onChange={e => upSpec("peso", e.target.value)} placeholder="180g" />
+              <SpecCalculada
+                label="Peso"
+                valor={specsCalculadas.peso}
+                vacio="Sin receta cargada"
+              />
             </div>
           </div>
 
