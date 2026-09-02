@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { PRODUCTS as FALLBACK_PRODUCTS, CATEGORIES as FALLBACK_CATEGORIES, CONTACT } from '../../data.js';
-import { TKButton, TKLogo, TKPill, Icon, fmtARS } from '../../components/UI.jsx';
+import { TKButton, TKLogo, TKPill, Icon, fmtARS, SinStockBadge, sinStock } from '../../components/UI.jsx';
 
 // ========== Mobile Home ==========
 export function MobileHome({ go, addToCart, products = FALLBACK_PRODUCTS, categories = FALLBACK_CATEGORIES }) {
@@ -83,17 +83,23 @@ export function MobileHome({ go, addToCart, products = FALLBACK_PRODUCTS, catego
                     <div style={{ fontWeight: 700, fontSize: 20, color: "#fff", textShadow: "0 2px 10px rgba(0,0,0,.5)", letterSpacing: -0.3, lineHeight: 1.1 }}>
                       {p.name}
                     </div>
-                    <div style={{ fontWeight: 700, fontSize: 18, color: "#fff", textShadow: "0 2px 10px rgba(0,0,0,.5)", marginTop: 4 }}>
-                      {fmtARS(p.price)}
-                    </div>
+                    {sinStock(p) ? (
+                      <div style={{ marginTop: 6 }}><SinStockBadge size="sm"/></div>
+                    ) : (
+                      <div style={{ fontWeight: 700, fontSize: 18, color: "#fff", textShadow: "0 2px 10px rgba(0,0,0,.5)", marginTop: 4 }}>
+                        {fmtARS(p.price)}
+                      </div>
+                    )}
                   </div>
-                  <button onClick={(e) => { e.stopPropagation(); addToCart(p); }} style={{
-                    width: 40, height: 40, borderRadius: "50%", background: "var(--accent)", color: "#fff",
-                    border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
-                    boxShadow: "0 4px 12px rgba(0,0,0,.25)",
-                  }}>
-                    <Icon.ig size={18}/>
-                  </button>
+                  {!sinStock(p) && (
+                    <button onClick={(e) => { e.stopPropagation(); addToCart(p); }} style={{
+                      width: 40, height: 40, borderRadius: "50%", background: "var(--accent)", color: "#fff",
+                      border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+                      boxShadow: "0 4px 12px rgba(0,0,0,.25)",
+                    }}>
+                      <Icon.ig size={18}/>
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -295,13 +301,15 @@ export function MobileCategoria({ go, addToCart, cat, products = FALLBACK_PRODUC
             <div style={{ position: "relative", aspectRatio: "1/1", background: "var(--beige)", overflow: "hidden", marginBottom: 8 }}>
               <img src={p.img} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", mixBlendMode: "multiply" }}/>
               {p.tag && <div style={{ position: "absolute", top: 8, left: 8 }}><TKPill variant={p.tag === "Premium" ? "dark" : "default"}>{p.tag}</TKPill></div>}
-              <button onClick={(e) => { e.stopPropagation(); addToCart(p); }} style={{
-                position: "absolute", bottom: 6, right: 6, width: 32, height: 32, borderRadius: "50%",
-                background: "var(--anchor)", color: "#fff", border: "none", cursor: "pointer",
-                display: "flex", alignItems: "center", justifyContent: "center",
-              }}>
-                <Icon.ig size={14}/>
-              </button>
+              {!sinStock(p) && (
+                <button onClick={(e) => { e.stopPropagation(); addToCart(p); }} style={{
+                  position: "absolute", bottom: 6, right: 6, width: 32, height: 32, borderRadius: "50%",
+                  background: "var(--anchor)", color: "#fff", border: "none", cursor: "pointer",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}>
+                  <Icon.ig size={14}/>
+                </button>
+              )}
             </div>
             <div style={{ fontSize: 9, color: "var(--muted)", letterSpacing: 1, textTransform: "uppercase", marginBottom: 2 }}>
               {p.sub}
@@ -309,9 +317,13 @@ export function MobileCategoria({ go, addToCart, cat, products = FALLBACK_PRODUC
             <div style={{ fontWeight: 700, fontSize: 14, lineHeight: 1.15, letterSpacing: -0.2 }}>
               {p.name}
             </div>
-            <div style={{ fontWeight: 700, fontSize: 14, color: "var(--accent)", marginTop: 4 }}>
-              {fmtARS(p.price)}
-            </div>
+            {sinStock(p) ? (
+              <div style={{ marginTop: 6 }}><SinStockBadge size="sm"/></div>
+            ) : (
+              <div style={{ fontWeight: 700, fontSize: 14, color: "var(--accent)", marginTop: 4 }}>
+                {fmtARS(p.price)}
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -384,14 +396,20 @@ export function MobileBuscador({ go, addToCart, products = FALLBACK_PRODUCTS }) 
                 <div>
                   <div style={{ fontSize: 10, color: "var(--muted)" }}>{p.sub}</div>
                   <div style={{ fontWeight: 700, fontSize: 15, letterSpacing: -0.2 }}>{p.name}</div>
-                  <div style={{ fontWeight: 700, fontSize: 14, color: "var(--accent)", marginTop: 2 }}>{fmtARS(p.price)}</div>
+                  {sinStock(p) ? (
+                    <div style={{ marginTop: 4 }}><SinStockBadge size="sm"/></div>
+                  ) : (
+                    <div style={{ fontWeight: 700, fontSize: 14, color: "var(--accent)", marginTop: 2 }}>{fmtARS(p.price)}</div>
+                  )}
                 </div>
-                <button onClick={(e) => { e.stopPropagation(); addToCart(p); }} style={{
-                  width: 36, height: 36, borderRadius: "50%", background: "var(--anchor)", color: "#fff",
-                  border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
-                }}>
-                  <Icon.ig size={16}/>
-                </button>
+                {!sinStock(p) && (
+                  <button onClick={(e) => { e.stopPropagation(); addToCart(p); }} style={{
+                    width: 36, height: 36, borderRadius: "50%", background: "var(--anchor)", color: "#fff",
+                    border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+                  }}>
+                    <Icon.ig size={16}/>
+                  </button>
+                )}
               </div>
             ))}
           </div>

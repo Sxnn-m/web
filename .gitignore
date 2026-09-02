@@ -1,0 +1,21 @@
+# Dependencias
+node_modules/
+
+# Build de Vite
+dist/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Entorno local
+.env
+.env.local
+.env.*.local
+
+# Sistema operativo / editores
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

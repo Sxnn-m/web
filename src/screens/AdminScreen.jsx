@@ -6,6 +6,14 @@ import {
   getDoc, setDoc, serverTimestamp,
 } from 'firebase/firestore';
 import { PRODUCTS as SEED_PRODUCTS, CATEGORIES } from '../data.js';
+import { InventarioTab } from './admin/InventarioTab.jsx';
+import { PedidosTab } from './admin/PedidosTab.jsx';
+import {
+  calcularDisponibilidad, motivoFaltante, FACTOR_DISPONIBILIDAD,
+} from '../lib/disponibilidad.js';
+import {
+  cargarFilamentos, cargarPedidos, recalcularDisponibilidad,
+} from '../lib/inventario.js';
 
 // ─── Shared cost helpers (used by ProductsTab & CostosTab) ───────────
 
@@ -41,6 +49,8 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
   const [showForm, setShowForm] = useState(false);
   const [msg, setMsg] = useState("");
   const [costSettings, setCostSettings] = useState(DEFAULT_COSTS);
+  const [filamentos, setFilamentos] = useState([]);
+  const [pedidos, setPedidos] = useState([]);
 
   // ─── Load data ──────────────────────────────────────────────
   const loadProducts = async () => {
@@ -48,7 +58,50 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
       const snap = await getDocs(collection(db, "products"));
       const list = snap.docs.map(d => ({ _id: d.id, ...d.data() }));
       setProducts(list);
-    } catch (err) { console.error(err); }
+      return list;
+    } catch (err) { console.error(err); return []; }
+  };
+
+  const loadFilamentos = async () => {
+    try {
+      const list = await cargarFilamentos();
+      setFilamentos(list);
+      return list;
+    } catch (err) { console.error(err); return []; }
+  };
+
+  const loadPedidos = async () => {
+    try {
+      const list = await cargarPedidos();
+      setPedidos(list);
+      return list;
+    } catch (err) { console.error(err); return []; }
+  };
+
+  /**
+   * Punto único donde el catálogo público se entera de un cambio de stock:
+   * recalcula el booleano "disponible" de cada producto y lo persiste.
+   */
+  const sincronizarDisponibilidad = async (prods, films) => {
+    try {
+      const { actualizados } = await recalcularDisponibilidad(prods, films);
+      if (actualizados > 0) {
+        await loadProducts();
+        onProductsChange?.();
+      }
+      return actualizados;
+    } catch (err) {
+      console.error(err);
+      setMsg("Error al recalcular disponibilidad: " + err.message);
+      return 0;
+    }
+  };
+
+  // Inventario cambió (alta/edición de filamento o restock) → recalcular productos
+  const handleInventarioChange = async () => {
+    const films = await loadFilamentos();
+    const prods = await loadProducts();
+    await sincronizarDisponibilidad(prods, films);
   };
 
   const loadUsers = async () => {
@@ -66,7 +119,8 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
         if (snap.exists()) setCostSettings(snap.data());
       } catch (e) { /* silently ignore, use defaults */ }
     };
-    Promise.all([loadProducts(), loadUsers(), loadCosts()]).then(() => setLoading(false));
+    Promise.all([loadProducts(), loadUsers(), loadCosts(), loadFilamentos(), loadPedidos()])
+      .then(() => setLoading(false));
   }, []);
 
   // ─── Seed hardcoded products to Firestore ───────────────────
@@ -105,13 +159,17 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
   // ─── Save product (create or update) ────────────────────────
   const handleSave = async (data) => {
     try {
+      // El catálogo público solo lee este booleano: se recalcula al guardar,
+      // porque la receta pudo haber cambiado.
+      const disponible = calcularDisponibilidad(data, filamentos).disponible;
       if (data._id) {
         const { _id, ...rest } = data;
-        await updateDoc(doc(db, "products", _id), rest);
+        await updateDoc(doc(db, "products", _id), { ...rest, disponible });
         setMsg("✓ Producto actualizado.");
       } else {
         await addDoc(collection(db, "products"), {
           ...data,
+          disponible,
           createdAt: serverTimestamp(),
         });
         setMsg("✓ Producto creado.");
@@ -143,6 +201,8 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
     { id: "dashboard", label: "Dashboard", icon: <Icon.home size={16}/> },
     { id: "productos", label: "Productos", icon: <Icon.grid size={16}/> },
     { id: "categorias", label: "Categorías", icon: <Icon.layers size={16}/> },
+    { id: "inventario", label: "Inventario", icon: <Icon.layers size={16}/> },
+    { id: "pedidos", label: "Pedidos", icon: <Icon.truck size={16}/> },
     { id: "usuarios", label: "Usuarios", icon: <Icon.user size={16}/> },
     { id: "costos", label: "Costos", icon: <Icon.spark size={16}/> },
   ];
@@ -211,14 +271,27 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
           {tab === "dashboard" && <DashboardTab products={products} users={users} seedProducts={() => {}} categories={propCategories} onCategoriesChange={onCategoriesChange} onProductsChange={onProductsChange} setMsg={setMsg} />}
           {tab === "productos" && (
             showForm
-              ? <ProductForm product={editProduct} onSave={handleSave} onCancel={() => { setShowForm(false); setEditProduct(null); }} categories={propCategories}/>
-              : <ProductsTab products={products} costs={costSettings} onEdit={(p) => { setEditProduct(p); setShowForm(true); }} onDelete={handleDelete} onNew={() => { setEditProduct(null); setShowForm(true); }} onToggleVisible={async (p) => {
+              ? <ProductForm product={editProduct} onSave={handleSave} onCancel={() => { setShowForm(false); setEditProduct(null); }} categories={propCategories} filamentos={filamentos}/>
+              : <ProductsTab products={products} costs={costSettings} filamentos={filamentos} onEdit={(p) => { setEditProduct(p); setShowForm(true); }} onDelete={handleDelete} onNew={() => { setEditProduct(null); setShowForm(true); }} onToggleVisible={async (p) => {
                   await updateDoc(doc(db, "products", p._id), { visible: p.visible === false ? true : false });
                   await loadProducts();
                   onProductsChange?.();
                 }}/>
           )}
           {tab === "categorias" && <CategoriesTab categories={propCategories} products={products} onCategoriesChange={onCategoriesChange} setMsg={setMsg}/>}
+          {tab === "inventario" && (
+            <InventarioTab filamentos={filamentos} onChanged={handleInventarioChange} setMsg={setMsg}/>
+          )}
+          {tab === "pedidos" && (
+            <PedidosTab
+              pedidos={pedidos}
+              productos={products}
+              filamentos={filamentos}
+              onPedidosChange={loadPedidos}
+              onInventarioChange={handleInventarioChange}
+              setMsg={setMsg}
+            />
+          )}
           {tab === "usuarios" && <UsersTab users={users} onToggleRole={toggleRole} />}
           {tab === "costos" && <CostosTab products={products} setMsg={setMsg} />}
         </main>
@@ -257,14 +330,15 @@ function DashboardTab({ products, users, categories, onCategoriesChange, onProdu
 }
 
 // ─── Products Table ─────────────────────────────────────
-function ProductsTab({ products, costs = DEFAULT_COSTS, onEdit, onDelete, onNew, onToggleVisible }) {
+function ProductsTab({ products, costs = DEFAULT_COSTS, filamentos = [], onEdit, onDelete, onNew, onToggleVisible }) {
   const [search, setSearch] = useState("");
+  const [expandido, setExpandido] = useState(null);
   const filtered = products.filter(p =>
     p.name?.toLowerCase().includes(search.toLowerCase()) ||
     p.cat?.toLowerCase().includes(search.toLowerCase())
   );
 
-  const COL = "50px 2fr 1fr 90px 90px 70px 80px 100px";
+  const COL = "50px 2fr 1fr 90px 90px 70px 110px 70px 70px 90px";
 
   return (
     <>
@@ -283,7 +357,7 @@ function ProductsTab({ products, costs = DEFAULT_COSTS, onEdit, onDelete, onNew,
 
       {/* Table container with horizontal scroll for mobile */}
       <div style={{ overflowX: "auto", margin: "0 -16px", padding: "0 16px" }}>
-        <div style={{ minWidth: 820 }}>
+        <div style={{ minWidth: 1020 }}>
           {/* Table header */}
           <div style={{
             display: "grid", gridTemplateColumns: COL,
@@ -291,62 +365,89 @@ function ProductsTab({ products, costs = DEFAULT_COSTS, onEdit, onDelete, onNew,
             fontSize: 10, textTransform: "uppercase",
             letterSpacing: 1.5, color: "var(--muted)", fontWeight: 700,
           }}>
-            <div>ID</div><div>Nombre</div><div>Categoría</div><div>Precio</div><div>Costo fab.</div><div>Stock</div><div>Visible</div><div>Acciones</div>
+            <div>ID</div><div>Nombre</div><div>Categoría</div><div>Precio</div><div>Costo fab.</div><div>Stock</div><div>Disponible</div><div>Origen</div><div>Visible</div><div>Acciones</div>
           </div>
 
           {filtered.map(p => {
             const costo = calcCosto(p, costs);
             const sinDatos = !p.specs?.peso && !p.specs?.tiempo;
+            const disp = calcularDisponibilidad(p, filamentos);
+            const abierto = expandido === p._id;
             return (
-              <div key={p._id} style={{
-                display: "grid", gridTemplateColumns: COL,
-                gap: 12, padding: "14px 12px", borderBottom: "1px solid var(--line)",
-                fontSize: 13, alignItems: "center",
-                opacity: p.visible === false ? 0.5 : 1,
-              }}>
-                <div style={{ fontSize: 11, color: "var(--muted)" }}>
-                  {(p.id || "").toUpperCase().slice(0, 4)}
-                </div>
-                <div style={{ fontWeight: 600 }}>{p.name}</div>
-                <div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-start" }}>
-                    <TKPill>{p.cat}</TKPill>
-                    {p.sub && <TKPill variant="outline">{p.sub}</TKPill>}
+              <div key={p._id} style={{ borderBottom: "1px solid var(--line)", opacity: p.visible === false ? 0.5 : 1 }}>
+                <div style={{
+                  display: "grid", gridTemplateColumns: COL,
+                  gap: 12, padding: "14px 12px",
+                  fontSize: 13, alignItems: "center",
+                }}>
+                  <div style={{ fontSize: 11, color: "var(--muted)" }}>
+                    {(p.id || "").toUpperCase().slice(0, 4)}
+                  </div>
+                  <div style={{ fontWeight: 600 }}>{p.name}</div>
+                  <div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-start" }}>
+                      <TKPill>{p.cat}</TKPill>
+                      {p.sub && <TKPill variant="outline">{p.sub}</TKPill>}
+                    </div>
+                  </div>
+                  <div>{fmtARS(p.price || 0)}</div>
+                  <div style={{ fontSize: 12 }}>
+                    {sinDatos
+                      ? <span style={{ color: "var(--muted)" }}>—</span>
+                      : <span style={{ color: "var(--text)", fontWeight: 600 }}>{fmtARS(costo)}</span>
+                    }
+                  </div>
+                  <div style={{
+                    fontSize: 12,
+                    color: (p.stock || 0) < 5 ? "#c64138" : "var(--text)",
+                    fontWeight: (p.stock || 0) < 5 ? 700 : 400,
+                  }}>
+                    {p.stock ?? "—"}
+                  </div>
+                  {/* Disponibilidad calculada desde receta + inventario */}
+                  <div>
+                    <button
+                      onClick={() => setExpandido(abierto ? null : p._id)}
+                      title="Ver detalle de disponibilidad"
+                      style={{
+                        background: "none", border: "none", cursor: "pointer", padding: 0,
+                        display: "flex", alignItems: "center", gap: 6,
+                        color: disp.disponible ? "#4a7a52" : "#c64138", fontWeight: 700, fontSize: 13,
+                      }}
+                    >
+                      <span style={{ transition: "transform .2s", transform: abierto ? "rotate(90deg)" : "none" }}>›</span>
+                      {disp.disponible ? "Sí" : "No"}
+                      {disp.sinReceta && <span style={{ color: "var(--muted)", fontWeight: 400, fontSize: 11 }}>(s/receta)</span>}
+                    </button>
+                  </div>
+                  {/* Origen del diseño — solo backoffice */}
+                  <div style={{ fontSize: 12 }}>
+                    {p.origenUrl ? (
+                      <a href={p.origenUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>Link</a>
+                    ) : <span style={{ color: "var(--muted)" }}>—</span>}
+                  </div>
+                  {/* Visibility eye */}
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <button
+                      onClick={() => onToggleVisible(p)}
+                      title={p.visible === false ? "Oculto — clic para mostrar" : "Visible — clic para ocultar"}
+                      style={{
+                        background: "none", border: "none", cursor: "pointer", padding: 4,
+                        color: p.visible === false ? "#c64138" : "#4a7a52",
+                        display: "flex", alignItems: "center",
+                        transition: "color .2s",
+                      }}
+                    >
+                      {p.visible === false ? <Icon.eyeOff size={16}/> : <Icon.eye size={16}/>}
+                    </button>
+                  </div>
+                  <div style={{ display: "flex", gap: 4 }}>
+                    <button onClick={() => onEdit(p)} style={actionBtn} title="Editar"><Icon.spark size={14}/></button>
+                    <button onClick={() => onDelete(p._id)} style={{...actionBtn, color: "#c64138"}} title="Eliminar"><Icon.trash size={14}/></button>
                   </div>
                 </div>
-                <div>{fmtARS(p.price || 0)}</div>
-                <div style={{ fontSize: 12 }}>
-                  {sinDatos
-                    ? <span style={{ color: "var(--muted)" }}>—</span>
-                    : <span style={{ color: "var(--text)", fontWeight: 600 }}>{fmtARS(costo)}</span>
-                  }
-                </div>
-                <div style={{
-                  fontSize: 12,
-                  color: (p.stock || 0) < 5 ? "#c64138" : "var(--text)",
-                  fontWeight: (p.stock || 0) < 5 ? 700 : 400,
-                }}>
-                  {p.stock ?? "—"}
-                </div>
-                {/* Visibility eye */}
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <button
-                    onClick={() => onToggleVisible(p)}
-                    title={p.visible === false ? "Oculto — clic para mostrar" : "Visible — clic para ocultar"}
-                    style={{
-                      background: "none", border: "none", cursor: "pointer", padding: 4,
-                      color: p.visible === false ? "#c64138" : "#4a7a52",
-                      display: "flex", alignItems: "center",
-                      transition: "color .2s",
-                    }}
-                  >
-                    {p.visible === false ? <Icon.eyeOff size={16}/> : <Icon.eye size={16}/>}
-                  </button>
-                </div>
-                <div style={{ display: "flex", gap: 4 }}>
-                  <button onClick={() => onEdit(p)} style={actionBtn} title="Editar"><Icon.spark size={14}/></button>
-                  <button onClick={() => onDelete(p._id)} style={{...actionBtn, color: "#c64138"}} title="Eliminar"><Icon.trash size={14}/></button>
-                </div>
+
+                {abierto && <DisponibilidadDetalle disp={disp} producto={p}/>}
               </div>
             );
           })}
@@ -368,8 +469,169 @@ const actionBtn = {
   borderRadius: 4,
 };
 
+// ─── Detalle expandible de disponibilidad (solo backoffice) ───────────
+function DisponibilidadDetalle({ disp, producto }) {
+  if (disp.sinReceta) {
+    return (
+      <div style={{ padding: "12px 16px 16px 34px", background: "var(--bg-alt)", fontSize: 12, color: "var(--muted)" }}>
+        "{producto.name}" no tiene receta de consumo cargada, así que no se puede evaluar el
+        inventario y se considera disponible. Cargá la receta desde el formulario del producto.
+      </div>
+    );
+  }
+  return (
+    <div style={{ padding: "12px 16px 18px 34px", background: "var(--bg-alt)" }}>
+      <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 1.2, color: "var(--muted)", fontWeight: 700, marginBottom: 8 }}>
+        Receta vs. inventario — se exige {FACTOR_DISPONIBILIDAD}× el consumo de una unidad
+      </div>
+      <div style={{
+        display: "grid", gridTemplateColumns: "1.4fr 1fr 110px 120px 120px 90px",
+        gap: 10, padding: "8px 0", fontSize: 10, textTransform: "uppercase",
+        letterSpacing: 1.2, color: "var(--muted)", fontWeight: 700,
+      }}>
+        <div>Material</div><div>Color</div><div>Por unidad</div><div>Necesario (×{FACTOR_DISPONIBILIDAD})</div><div>En inventario</div><div>Estado</div>
+      </div>
+      {disp.detalle.map((d, i) => (
+        <div key={i} style={{
+          display: "grid", gridTemplateColumns: "1.4fr 1fr 110px 120px 120px 90px",
+          gap: 10, padding: "8px 0", fontSize: 12, borderTop: "1px solid var(--line)",
+          alignItems: "center",
+        }}>
+          <div style={{ fontWeight: 600 }}>{d.material}</div>
+          <div>{d.color}</div>
+          <div>{d.gramosPorUnidad} g</div>
+          <div style={{ fontWeight: 600 }}>{d.requerido} g</div>
+          <div style={{ color: d.ok ? "var(--text)" : "#c64138", fontWeight: d.ok ? 400 : 700 }}>
+            {d.existe ? `${d.enInventario} g` : "sin cargar"}
+          </div>
+          <div style={{ color: d.ok ? "#4a7a52" : "#c64138", fontWeight: 700 }}>{d.ok ? "OK" : "Falta"}</div>
+        </div>
+      ))}
+      {disp.faltantes.length > 0 && (
+        <ul style={{ margin: "12px 0 0", paddingLeft: 18, fontSize: 12, color: "#c64138", lineHeight: 1.7 }}>
+          {disp.faltantes.map((f, i) => <li key={i}>{motivoFaltante(f)}</li>)}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// ─── Editor de receta de consumo (dentro del ProductForm) ─────────────
+function RecetaEditor({ receta, setReceta, filamentos }) {
+  const materiales = [...new Set(filamentos.map(f => f.material).filter(Boolean))];
+  const colores = [...new Set(filamentos.map(f => f.color).filter(Boolean))];
+
+  const up = (i, patch) => setReceta(r => r.map((l, j) => j === i ? { ...l, ...patch } : l));
+  const quitar = (i) => setReceta(r => r.filter((_, j) => j !== i));
+  const agregar = () => setReceta(r => [...r, { material: "", color: "", gramos: 0 }]);
+
+  const totalGramos = receta.reduce((s, l) => s + (Number(l.gramos) || 0), 0);
+
+  return (
+    <div style={{ marginBottom: 16, paddingTop: 16, borderTop: "1px solid var(--line)" }}>
+      <div style={{ ...labelStyle, marginBottom: 4 }}>Receta de consumo</div>
+      <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 12, lineHeight: 1.5 }}>
+        Cuánto filamento consume <strong>una unidad</strong>. Un producto puede usar varios
+        materiales/colores. La disponibilidad exige tener al menos {FACTOR_DISPONIBILIDAD}× estos
+        gramos en inventario, para cada línea.
+      </div>
+
+      <datalist id="materiales-inventario">
+        {materiales.map(m => <option key={m} value={m}/>)}
+      </datalist>
+      <datalist id="colores-inventario">
+        {colores.map(c => <option key={c} value={c}/>)}
+      </datalist>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {receta.map((l, i) => (
+          <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 110px 36px", gap: 10, alignItems: "center" }}>
+            <input
+              list="materiales-inventario"
+              value={l.material}
+              onChange={e => up(i, { material: e.target.value })}
+              placeholder="Material (PLA)"
+              style={recetaInput}
+            />
+            <input
+              list="colores-inventario"
+              value={l.color}
+              onChange={e => up(i, { color: e.target.value })}
+              placeholder="Color (Negro)"
+              style={recetaInput}
+            />
+            <input
+              type="number"
+              value={l.gramos}
+              onChange={e => up(i, { gramos: e.target.value })}
+              placeholder="Gramos"
+              style={recetaInput}
+            />
+            <button onClick={() => quitar(i)} style={{ ...actionBtn, color: "#c64138", justifyContent: "center" }} title="Quitar línea">
+              <Icon.trash size={14}/>
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {receta.length === 0 && (
+        <div style={{ fontSize: 12, color: "var(--muted)", padding: "6px 0" }}>
+          Sin receta cargada: el producto no se bloquea por inventario.
+        </div>
+      )}
+
+      <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 12 }}>
+        <button onClick={agregar} style={{
+          background: "none", border: "1px dashed var(--line-strong)",
+          padding: "8px 14px", cursor: "pointer", color: "var(--muted)",
+          fontSize: 12, display: "flex", alignItems: "center", gap: 6,
+        }}>
+          <Icon.plus size={12}/> Agregar material
+        </button>
+        {receta.length > 0 && (
+          <span style={{ fontSize: 12, color: "var(--muted)" }}>
+            Total por unidad: <strong style={{ color: "var(--text)" }}>{totalGramos} g</strong>
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Preview en vivo de la disponibilidad mientras se edita la receta ──
+function DisponibilidadPreview({ receta, filamentos }) {
+  const limpia = receta
+    .filter(l => l.material.trim() && l.color.trim() && (Number(l.gramos) || 0) > 0)
+    .map(l => ({ material: l.material.trim(), color: l.color.trim(), gramos: Number(l.gramos) }));
+
+  if (limpia.length === 0) return null;
+
+  const disp = calcularDisponibilidad({ receta: limpia }, filamentos);
+  const color = disp.disponible ? "#4a7a52" : "#c64138";
+
+  return (
+    <div style={{ padding: "12px 14px", background: color + "12", borderLeft: `3px solid ${color}`, fontSize: 12, lineHeight: 1.6 }}>
+      <strong style={{ color }}>
+        {disp.disponible ? "Disponible con el inventario actual" : "No disponible con el inventario actual"}
+      </strong>
+      {disp.faltantes.length > 0 && (
+        <ul style={{ margin: "8px 0 0", paddingLeft: 18, color: "var(--muted)" }}>
+          {disp.faltantes.map((f, i) => <li key={i}>{motivoFaltante(f)}</li>)}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+const recetaInput = {
+  width: "100%", padding: "10px 12px", background: "var(--bg)",
+  border: "1px solid var(--line)", fontSize: 13, color: "var(--text)",
+  borderRadius: 4, outline: "none", boxSizing: "border-box",
+  fontFamily: "'DM Sans', system-ui, sans-serif",
+};
+
 // ─── Product Form (Create / Edit) ─────────────────────────────
-function ProductForm({ product, onSave, onCancel, categories = [] }) {
+function ProductForm({ product, onSave, onCancel, categories = [], filamentos = [] }) {
   // Normalize: existing products may have img (string) or images (array)
   const initImages = () => {
     if (product?.images?.length) return [...product.images, "", "", "", "", ""].slice(0, 5);
@@ -388,8 +650,17 @@ function ProductForm({ product, onSave, onCancel, categories = [] }) {
     stock: product?.stock || 0,
     visible: product?.visible !== false,
     specs: product?.specs || { material: "", tiempo: "", peso: "" },
+    origenUrl: product?.origenUrl || "",
+    notas: product?.notas || "",
   });
   const [images, setImages] = useState(initImages);
+  const [receta, setReceta] = useState(() =>
+    (product?.receta || []).map(l => ({
+      material: l.material || "",
+      color: l.color || "",
+      gramos: l.gramos ?? 0,
+    }))
+  );
 
   const up = (key, val) => setForm(f => ({ ...f, [key]: val }));
   const upSpec = (key, val) => setForm(f => ({ ...f, specs: { ...f.specs, [key]: val } }));
@@ -402,6 +673,13 @@ function ProductForm({ product, onSave, onCancel, categories = [] }) {
     if (!form.name.trim()) return alert("El nombre es obligatorio.");
     if (!form.price || form.price <= 0) return alert("El precio debe ser mayor a 0.");
     const cleanImages = images.filter(u => u.trim());
+    const cleanReceta = receta
+      .filter(l => l.material.trim() && l.color.trim() && (Number(l.gramos) || 0) > 0)
+      .map(l => ({
+        material: l.material.trim(),
+        color: l.color.trim(),
+        gramos: Number(l.gramos),
+      }));
     const data = {
       ...form,
       price: Number(form.price),
@@ -409,6 +687,9 @@ function ProductForm({ product, onSave, onCancel, categories = [] }) {
       visible: form.visible,
       images: cleanImages,
       img: cleanImages[0] || "",
+      receta: cleanReceta,
+      origenUrl: form.origenUrl.trim(),
+      notas: form.notas,
     };
     if (product?._id) data._id = product._id;
     onSave(data);
@@ -445,7 +726,7 @@ function ProductForm({ product, onSave, onCancel, categories = [] }) {
             </div>
 
             <TKInput label="Precio (ARS)" type="number" value={form.price} onChange={e => up("price", e.target.value)} />
-            <TKInput label="Stock" type="number" value={form.stock} onChange={e => up("stock", e.target.value)} />
+            <TKInput label="Stock manual (heredado)" type="number" value={form.stock} onChange={e => up("stock", e.target.value)} hint="La disponibilidad real sale de la receta + inventario" />
 
             <div style={{ gridColumn: "1 / -1" }}>
               <TKInput label="Descripción" value={form.desc} onChange={e => up("desc", e.target.value)} placeholder="Descripción del producto..." />
@@ -484,6 +765,45 @@ function ProductForm({ product, onSave, onCancel, categories = [] }) {
               <TKInput label="Material" value={form.specs.material} onChange={e => upSpec("material", e.target.value)} placeholder="PLA" />
               <TKInput label="Tiempo impresión" value={form.specs.tiempo} onChange={e => upSpec("tiempo", e.target.value)} placeholder="8h" />
               <TKInput label="Peso" value={form.specs.peso} onChange={e => upSpec("peso", e.target.value)} placeholder="180g" />
+            </div>
+          </div>
+
+          {/* Receta de consumo de filamento */}
+          <RecetaEditor receta={receta} setReceta={setReceta} filamentos={filamentos}/>
+
+          {/* Vista previa de disponibilidad con el inventario actual */}
+          <DisponibilidadPreview receta={receta} filamentos={filamentos}/>
+
+          {/* ── Datos internos: nunca se muestran en el catálogo público ── */}
+          <div style={{ marginTop: 24, paddingTop: 16, borderTop: "1px solid var(--line)" }}>
+            <div style={{ ...labelStyle, marginBottom: 4 }}>Datos internos</div>
+            <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 12 }}>
+              Visibles solo acá, en el backoffice. No se renderizan en el catálogo ni en el detalle público.
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <TKInput
+                label="Origen del diseño (URL)"
+                value={form.origenUrl}
+                onChange={e => up("origenUrl", e.target.value)}
+                placeholder="https://www.printables.com/model/..."
+                hint="Thingiverse, Printables, Cults3D, etc. Se muestra como link en la tabla de Productos."
+              />
+            </div>
+            <div>
+              <div style={{ ...labelStyle, marginBottom: 6 }}>Notas internas</div>
+              <textarea
+                value={form.notas}
+                onChange={e => up("notas", e.target.value)}
+                rows={4}
+                placeholder="Ajustes de impresión, problemas conocidos, proveedor del diseño..."
+                style={{
+                  width: "100%", padding: "12px 14px", background: "var(--bg)",
+                  border: "1px solid var(--line)", borderRadius: 4,
+                  fontFamily: "'DM Sans', system-ui, sans-serif", fontSize: 14,
+                  color: "var(--text)", outline: "none", resize: "vertical",
+                  boxSizing: "border-box",
+                }}
+              />
             </div>
           </div>
 

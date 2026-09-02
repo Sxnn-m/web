@@ -171,9 +171,31 @@ export function ProductImage({ src, alt, ratio = "1 / 1", overlay }) {
   );
 }
 
+// ---------- "Sin stock" badge ----------
+// El público nunca ve gramos ni datos de inventario: solo este cartel, que
+// sale del booleano "disponible" guardado en el propio producto.
+export function SinStockBadge({ size = "md" }) {
+  return (
+    <span style={{
+      display: "inline-block",
+      padding: size === "sm" ? "3px 8px" : "5px 12px",
+      background: "var(--anchor)", color: "#fff",
+      fontSize: size === "sm" ? 10 : 11,
+      fontWeight: 700, letterSpacing: 1,
+      textTransform: "uppercase", borderRadius: 2,
+    }}>
+      Sin stock
+    </span>
+  );
+}
+
+/** Un producto queda bloqueado solo si el backoffice lo marcó como no disponible. */
+export const sinStock = (product) => product?.disponible === false;
+
 // ---------- Product card ----------
 export function ProductCard({ product, onClick, onAdd, layout = "grid" }) {
-  const lowStock = product.stock != null && product.stock < 5;
+  const agotado = sinStock(product);
+  const lowStock = !agotado && product.stock != null && product.stock < 5;
 
   if (layout === "list") {
     return (
@@ -215,12 +237,18 @@ export function ProductCard({ product, onClick, onAdd, layout = "grid" }) {
           </div>
         </div>
         <div style={{ textAlign: "right" }}>
-          <div style={{ fontSize: 20, color: "var(--text)", marginBottom: 10 }}>
-            {fmtARS(product.price)}
-          </div>
-          <TKButton size="sm" icon={<Icon.ig size={13}/>} onClick={(e) => { e.stopPropagation(); onAdd?.(product); }}>
-            Consultar
-          </TKButton>
+          {agotado ? (
+            <SinStockBadge/>
+          ) : (
+            <>
+              <div style={{ fontSize: 20, color: "var(--text)", marginBottom: 10 }}>
+                {fmtARS(product.price)}
+              </div>
+              <TKButton size="sm" icon={<Icon.ig size={13}/>} onClick={(e) => { e.stopPropagation(); onAdd?.(product); }}>
+                Consultar
+              </TKButton>
+            </>
+          )}
         </div>
       </div>
     );
@@ -255,19 +283,25 @@ export function ProductCard({ product, onClick, onAdd, layout = "grid" }) {
             ¡Últimas {product.stock} unidad{product.stock === 1 ? "" : "es"}!
           </div>
         )}
-        <button
-          onClick={(e) => { e.stopPropagation(); onAdd?.(product); }}
-          style={{
-            position: "absolute", bottom: 0, right: 0,
-            background: "var(--anchor)", color: "#fff",
-            border: "none", padding: "12px 16px",
-            fontWeight: 600, fontSize: 12,
-            letterSpacing: 0.8, textTransform: "uppercase",
-            cursor: "pointer", display: "flex", alignItems: "center", gap: 6,
-          }}
-        >
-          <Icon.ig size={14}/> Consultar
-        </button>
+        {agotado ? (
+          <div style={{ position: "absolute", bottom: 0, right: 0 }}>
+            <SinStockBadge/>
+          </div>
+        ) : (
+          <button
+            onClick={(e) => { e.stopPropagation(); onAdd?.(product); }}
+            style={{
+              position: "absolute", bottom: 0, right: 0,
+              background: "var(--anchor)", color: "#fff",
+              border: "none", padding: "12px 16px",
+              fontWeight: 600, fontSize: 12,
+              letterSpacing: 0.8, textTransform: "uppercase",
+              cursor: "pointer", display: "flex", alignItems: "center", gap: 6,
+            }}
+          >
+            <Icon.ig size={14}/> Consultar
+          </button>
+        )}
       </div>
       <div>
         <div style={{ fontSize: 10, color: "var(--muted)", letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>
@@ -276,9 +310,13 @@ export function ProductCard({ product, onClick, onAdd, layout = "grid" }) {
         <div style={{ fontSize: 18, color: "var(--text)", letterSpacing: -0.2, lineHeight: 1.15, marginBottom: 8 }}>
           {product.name}
         </div>
-        <div style={{ fontSize: 16, color: "var(--accent)" }}>
-          {fmtARS(product.price)}
-        </div>
+        {agotado ? (
+          <SinStockBadge size="sm"/>
+        ) : (
+          <div style={{ fontSize: 16, color: "var(--accent)" }}>
+            {fmtARS(product.price)}
+          </div>
+        )}
       </div>
     </div>
   );
