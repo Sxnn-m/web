@@ -197,11 +197,16 @@ export async function marcarEntregado(pedido, entregado) {
  * Devuelve, para un pedido, las líneas de consumo que habrá que descontar:
  * una por cada material/color de la receta de cada producto del pedido.
  * Es lo que alimenta el modal de "gramos desperdiciados".
+ *
+ * El match es SOLO por _id (el ID del documento de Firestore, que es lo que
+ * guarda pedidos.items[].productoId y nunca cambia). No se compara contra el
+ * campo "id" visible (TKPx): ese se puede renumerar, y un match por ahí
+ * descontaría el filamento de otro producto sin avisar.
  */
 export function planDeConsumo(pedido, productos = []) {
   const plan = [];
   for (const item of pedido.items || []) {
-    const producto = productos.find(p => p._id === item.productoId || p.id === item.productoId);
+    const producto = productos.find(p => p._id === item.productoId);
     const receta = producto?.receta || [];
     for (const linea of receta) {
       const gramos = Number(linea.gramos) || 0;

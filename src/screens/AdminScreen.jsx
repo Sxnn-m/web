@@ -24,6 +24,8 @@ import {
 import {
   tiempoDeProducto, specsDeTiempo, formatTiempo, formatTiempoProducto,
 } from '../lib/tiempoImpresion.js';
+import { siguienteIdProducto, idsDuplicados, planDeRenumeracion } from '../lib/idsProducto.js';
+import { aplicarRenumeracionIds } from '../lib/migracionIds.js';
 
 // La fórmula de costo/precio/ganancia vive en src/lib/costos.js: una sola
 // implementación para la tabla de Rentabilidad y para la columna "Costo fab.".
@@ -144,6 +146,26 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
     setTiemposIlegibles(tiemposIlegibles || []);
   };
 
+  // Renumeración de IDs: escribe el plan exacto que se revisó en el modal.
+  const handleRenumerarIds = async (plan) => {
+    setMsg("Renumerando IDs...");
+    try {
+      const { actualizados, errores } = await aplicarRenumeracionIds(plan);
+      await loadProducts();
+      onProductsChange?.();
+      if (errores.length > 0) {
+        setMsg(
+          `Renumerados ${actualizados} productos, pero ${errores.length} fallaron: ` +
+          errores.map(e => e.nombre).join(", ") + ". Volvé a correr el botón para completarlos."
+        );
+      } else {
+        setMsg(`✓ ${actualizados} producto(s) renumerados. Los IDs quedaron correlativos y únicos.`);
+      }
+    } catch (err) {
+      setMsg("Error al renumerar: " + err.message);
+    }
+  };
+
   // Botón manual: mueve receta/origenUrl/notas del doc público a la subcolección
   const handleMigrarPrivados = async () => {
     const pendientes = products.filter(p => CAMPOS_PRIVADOS.some(c => p[c] !== undefined));
@@ -236,6 +258,13 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
         notas: notas || "",
         insumos: insumos || [],
       };
+
+      // Al crear, el ID visible se recalcula contra la lista fresca para que
+      // dos altas seguidas no puedan quedarse con el mismo número.
+      if (!_id) {
+        const frescos = await loadProducts();
+        publico.id = siguienteIdProducto(frescos);
+      }
 
       let productId = _id;
       if (productId) {
@@ -359,17 +388,19 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
           {tab === "dashboard" && <DashboardTab products={products} users={users} seedProducts={() => {}} categories={propCategories} onCategoriesChange={onCategoriesChange} onProductsChange={onProductsChange} setMsg={setMsg} />}
           {tab === "productos" && (
             showForm
-              ? <ProductForm product={editProduct} onSave={handleSave} onCancel={() => { setShowForm(false); setEditProduct(null); }} categories={propCategories} filamentos={filamentos} costs={costSettings}/>
+              ? <ProductForm product={editProduct} onSave={handleSave} onCancel={() => { setShowForm(false); setEditProduct(null); }} categories={propCategories} filamentos={filamentos} costs={costSettings} nextId={siguienteIdProducto(products)}/>
               : <ProductsTab
                   products={productosFull}
                   costs={costSettings}
                   filamentos={filamentos}
+                  categories={propCategories}
                   pendientesDeMigrar={products.filter(p => CAMPOS_PRIVADOS.some(c => p[c] !== undefined)).length}
                   onEdit={(p) => { setEditProduct(p); setShowForm(true); }}
                   onDelete={handleDelete}
                   onNew={() => { setEditProduct(null); setShowForm(true); }}
                   onRecalcular={handleRecalcular}
                   onMigrarPrivados={handleMigrarPrivados}
+                  onRenumerarIds={handleRenumerarIds}
                   tiemposIlegibles={tiemposIlegibles}
                   onCerrarTiempos={() => setTiemposIlegibles([])}
                   onToggleVisible={async (p) => {
@@ -431,20 +462,49 @@ function DashboardTab({ products, users, categories, onCategoriesChange, onProdu
 
 // ─── Products Table ─────────────────────────────────────
 function ProductsTab({
-  products, costs = DEFAULT_COSTS, filamentos = [], pendientesDeMigrar = 0,
+  products, costs = DEFAULT_COSTS, filamentos = [], categories = [], pendientesDeMigrar = 0,
   onEdit, onDelete, onNew, onToggleVisible, onRecalcular, onMigrarPrivados,
-  tiemposIlegibles = [], onCerrarTiempos,
+  onRenumerarIds, tiemposIlegibles = [], onCerrarTiempos,
 }) {
   const [search, setSearch] = useState("");
+  const [planRenumeracion, setPlanRenumeracion] = useState(null);
+  const [filtroCat, setFiltroCat] = useState("all");
+  const [filtroSub, setFiltroSub] = useState("all");
   const [expandido, setExpandido] = useState(null);
-  const filtered = products.filter(p =>
-    p.name?.toLowerCase().includes(search.toLowerCase()) ||
-    p.cat?.toLowerCase().includes(search.toLowerCase())
-  );
+
+  // Subcategorías del selector: las de la categoría elegida, o todas las
+  // existentes (sin repetir) cuando la categoría está en "Todas".
+  const subsDisponibles = useMemo(() => {
+    if (filtroCat !== "all") {
+      return categories.find(c => c.id === filtroCat)?.subs || [];
+    }
+    return [...new Set(categories.flatMap(c => c.subs || []))].sort((a, b) => a.localeCompare(b));
+  }, [categories, filtroCat]);
+
+  const elegirCat = (catId) => {
+    setFiltroCat(catId);
+    setFiltroSub("all"); // la subcategoría anterior puede no existir en la nueva
+  };
+
+  // Texto AND categoría AND subcategoría
+  const filtered = products.filter(p => {
+    const texto = search.trim().toLowerCase();
+    const coincideTexto = !texto ||
+      p.name?.toLowerCase().includes(texto) ||
+      p.cat?.toLowerCase().includes(texto) ||
+      p.id?.toLowerCase().includes(texto);
+    const coincideCat = filtroCat === "all" || p.cat === filtroCat;
+    const coincideSub = filtroSub === "all" || p.sub === filtroSub;
+    return coincideTexto && coincideCat && coincideSub;
+  });
+
+  const hayFiltros = Boolean(search.trim()) || filtroCat !== "all" || filtroSub !== "all";
+  const limpiarFiltros = () => { setSearch(""); setFiltroCat("all"); setFiltroSub("all"); };
 
   const sinReceta = products.filter(p => (p.receta || []).length === 0).length;
+  const duplicados = useMemo(() => idsDuplicados(products), [products]);
 
-  const COL = "50px 2fr 1fr 90px 90px 70px 110px 70px 70px 90px";
+  const COL = "70px 2fr 1fr 90px 90px 70px 110px 70px 70px 90px";
 
   return (
     <>
@@ -456,6 +516,13 @@ function ProductsTab({
               Migrar datos privados ({pendientesDeMigrar})
             </TKButton>
           )}
+          <TKButton
+            variant="outline"
+            onClick={() => setPlanRenumeracion(planDeRenumeracion(products))}
+            icon={<Icon.list size={14}/>}
+          >
+            Renumerar IDs
+          </TKButton>
           <TKButton variant="outline" onClick={onRecalcular} icon={<Icon.spark size={14}/>}>
             Recalcular desde recetas
           </TKButton>
@@ -463,18 +530,55 @@ function ProductsTab({
         </div>
       </div>
 
-      <div style={{ marginBottom: 16, maxWidth: 320 }}>
+      {/* Buscador + filtros en cascada (se combinan con AND) */}
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(200px, 320px) 1fr 1fr auto", gap: 12, alignItems: "end", marginBottom: 16 }} className="form-layout">
         <TKInput placeholder="Buscar producto..." icon={<Icon.search size={16}/>} value={search} onChange={e => setSearch(e.target.value)} />
+        <div>
+          <div style={{ ...labelStyle, marginBottom: 6 }}>Categoría</div>
+          <select value={filtroCat} onChange={e => elegirCat(e.target.value)} style={selectStyle}>
+            <option value="all">Todas</option>
+            {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <div style={{ ...labelStyle, marginBottom: 6 }}>Subcategoría</div>
+          <select
+            value={filtroSub}
+            onChange={e => setFiltroSub(e.target.value)}
+            disabled={subsDisponibles.length === 0}
+            style={{ ...selectStyle, opacity: subsDisponibles.length === 0 ? 0.5 : 1 }}
+          >
+            <option value="all">Todas</option>
+            {subsDisponibles.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+        {hayFiltros && (
+          <TKButton variant="ghost" onClick={limpiarFiltros} icon={<Icon.close size={14}/>}>Limpiar</TKButton>
+        )}
       </div>
 
       <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 12 }}>
         {filtered.length} producto{filtered.length !== 1 ? "s" : ""}
+        {hayFiltros && <> de {products.length}</>}
         {sinReceta > 0 && (
           <> · <span style={{ color: "#B56B3E", fontWeight: 700 }}>
             {sinReceta} sin receta (no disponibles hasta cargarla)
           </span></>
         )}
       </div>
+
+      {duplicados.size > 0 && (
+        <div style={{ padding: "12px 14px", background: "#B56B3E15", borderLeft: "3px solid #B56B3E", fontSize: 12, lineHeight: 1.6, marginBottom: 16 }}>
+          <strong style={{ color: "#B56B3E" }}>
+            {duplicados.size} ID de producto repetido{duplicados.size !== 1 ? "s" : ""}: {[...duplicados].join(", ")}
+          </strong>
+          <div style={{ color: "var(--muted)", marginTop: 4 }}>
+            Marcados en rojo en la columna ID. El catálogo público rutea el detalle por este ID, así
+            que con IDs repetidos siempre abre el primero de la lista. Los productos nuevos ya toman
+            un ID correlativo automático; los repetidos actuales hay que reasignarlos.
+          </div>
+        </div>
+      )}
 
       {tiemposIlegibles.length > 0 && (
         <div style={{ padding: "12px 14px", background: "#c6413812", borderLeft: "3px solid #c64138", fontSize: 12, lineHeight: 1.6, marginBottom: 16 }}>
@@ -512,7 +616,7 @@ function ProductsTab({
 
       {/* Table container with horizontal scroll for mobile */}
       <div style={{ overflowX: "auto", margin: "0 -16px", padding: "0 16px" }}>
-        <div style={{ minWidth: 1020 }}>
+        <div style={{ minWidth: 1040 }}>
           {/* Table header */}
           <div style={{
             display: "grid", gridTemplateColumns: COL,
@@ -534,8 +638,17 @@ function ProductsTab({
                   gap: 12, padding: "14px 12px",
                   fontSize: 13, alignItems: "center",
                 }}>
-                  <div style={{ fontSize: 11, color: "var(--muted)" }}>
-                    {(p.id || "").toUpperCase().slice(0, 4)}
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: duplicados.has((p.id || "").toUpperCase()) ? "#c64138" : "var(--muted)",
+                      fontWeight: duplicados.has((p.id || "").toUpperCase()) ? 700 : 400,
+                    }}
+                    title={duplicados.has((p.id || "").toUpperCase())
+                      ? `ID repetido: más de un producto usa ${p.id}`
+                      : undefined}
+                  >
+                    {p.id || "—"}
                   </div>
                   <div style={{ fontWeight: 600 }}>{p.name}</div>
                   <div>
@@ -613,6 +726,18 @@ function ProductsTab({
         </div>
       </div>
 
+      {planRenumeracion && (
+        <ModalRenumeracion
+          plan={planRenumeracion}
+          onClose={() => setPlanRenumeracion(null)}
+          onConfirm={async () => {
+            const plan = planRenumeracion;
+            setPlanRenumeracion(null);
+            await onRenumerarIds(plan);
+          }}
+        />
+      )}
+
       {filtered.length === 0 && (
         <div style={{ padding: 40, textAlign: "center", color: "var(--muted)" }}>
           No se encontraron productos.
@@ -627,6 +752,88 @@ const actionBtn = {
   cursor: "pointer", color: "var(--text)", display: "flex", alignItems: "center",
   borderRadius: 4,
 };
+
+// ─── Modal: revisar la renumeración antes de escribir ─────────────────
+function ModalRenumeracion({ plan, onClose, onConfirm }) {
+  const cambian = plan.filter(p => p.cambia);
+  const sinFecha = plan.filter(p => p.sinFecha).length;
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", zIndex: 200,
+        display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: "var(--bg)", border: "1px solid var(--line)",
+          maxWidth: 640, width: "100%", maxHeight: "85vh",
+          display: "flex", flexDirection: "column",
+          padding: 28, boxShadow: "0 20px 60px rgba(0,0,0,.3)",
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
+          <h3 style={{ fontSize: 24, margin: 0 }}>Renumerar IDs de producto</h3>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)" }}>
+            <Icon.close size={18}/>
+          </button>
+        </div>
+        <p style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.6, marginTop: 0, marginBottom: 8 }}>
+          Todo el catálogo pasa a TKP1…TKP{plan.length} por orden de creación. Se escribe
+          únicamente el campo <code>id</code> de cada producto: no se tocan las recetas, el
+          inventario, los pedidos ni los datos privados.
+        </p>
+        <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 14 }}>
+          <strong style={{ color: "var(--text)" }}>{cambian.length}</strong> de {plan.length} productos
+          cambian de ID.
+          {sinFecha > 0 && ` ${sinFecha} sin fecha de creación van al final, ordenados por nombre.`}
+        </div>
+
+        <div style={{ flex: 1, overflowY: "auto", border: "1px solid var(--line)", marginBottom: 20 }}>
+          <div style={{
+            display: "grid", gridTemplateColumns: "1fr 90px 20px 90px",
+            gap: 10, padding: "10px 12px", background: "var(--bg-alt)",
+            fontSize: 10, textTransform: "uppercase", letterSpacing: 1.2,
+            color: "var(--muted)", fontWeight: 700,
+            position: "sticky", top: 0,
+          }}>
+            <div>Producto</div><div>Antes</div><div/><div>Después</div>
+          </div>
+          {plan.map(item => (
+            <div key={item._id} style={{
+              display: "grid", gridTemplateColumns: "1fr 90px 20px 90px",
+              gap: 10, padding: "10px 12px", borderTop: "1px solid var(--line)",
+              fontSize: 12, alignItems: "center",
+              opacity: item.cambia ? 1 : 0.5,
+            }}>
+              <div style={{ fontWeight: 600 }}>
+                {item.nombre}
+                {item.sinFecha && <span style={{ color: "var(--muted)", fontWeight: 400 }}> · sin fecha</span>}
+              </div>
+              <div style={{ color: "var(--muted)", textDecoration: item.cambia ? "line-through" : "none" }}>
+                {item.idViejo}
+              </div>
+              <div style={{ color: "var(--muted)" }}>{item.cambia ? "→" : "="}</div>
+              <div style={{ fontWeight: 700, color: item.cambia ? "#4a7a52" : "var(--muted)" }}>
+                {item.idNuevo}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
+          <TKButton variant="outline" onClick={onClose}>Cancelar</TKButton>
+          <TKButton onClick={onConfirm} disabled={cambian.length === 0}>
+            {cambian.length === 0 ? "No hay nada que cambiar" : `Aplicar a ${cambian.length} producto(s)`}
+          </TKButton>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ─── Detalle expandible de disponibilidad (solo backoffice) ───────────
 function DisponibilidadDetalle({ disp, producto }) {
@@ -963,7 +1170,7 @@ const recetaInput = {
 };
 
 // ─── Product Form (Create / Edit) ─────────────────────────────
-function ProductForm({ product, onSave, onCancel, categories = [], filamentos = [], costs = DEFAULT_COSTS }) {
+function ProductForm({ product, onSave, onCancel, categories = [], filamentos = [], costs = DEFAULT_COSTS, nextId = "" }) {
   // Normalize: existing products may have img (string) or images (array)
   const initImages = () => {
     if (product?.images?.length) return [...product.images, "", "", "", "", ""].slice(0, 5);
@@ -972,7 +1179,7 @@ function ProductForm({ product, onSave, onCancel, categories = [], filamentos = 
   };
 
   const [form, setForm] = useState({
-    id: product?.id || "",
+    id: product?.id || nextId,
     name: product?.name || "",
     cat: product?.cat || (categories[0]?.id || "casa"),
     sub: product?.sub || "",
@@ -1102,7 +1309,21 @@ function ProductForm({ product, onSave, onCancel, categories = [], filamentos = 
         {/* ── Left: fields ── */}
         <div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
-            <TKInput label="ID producto" value={form.id} onChange={e => up("id", e.target.value)} placeholder="p17" />
+            {/* El ID se autogenera correlativo: no se carga a mano para que no
+                vuelvan a repetirse. Al crear, el definitivo se asigna al guardar. */}
+            <div>
+              <div style={{ ...labelStyle, marginBottom: 6 }}>ID producto</div>
+              <div style={{
+                padding: "12px 14px", background: "var(--bg-alt)",
+                border: "1px dashed var(--line)", borderRadius: 4,
+                fontSize: 14, fontWeight: 600, color: "var(--text)", boxSizing: "border-box",
+              }}>
+                {form.id || "—"}
+              </div>
+              <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 6 }}>
+                {product?._id ? "(no editable)" : "(autogenerado al guardar)"}
+              </div>
+            </div>
             <TKInput label="Nombre" value={form.name} onChange={e => up("name", e.target.value)} placeholder="Organizador..." />
 
             <div>
