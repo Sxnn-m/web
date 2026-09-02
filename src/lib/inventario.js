@@ -5,9 +5,10 @@
 import { db } from '../firebase.js';
 import {
   collection, getDocs, addDoc, updateDoc, deleteDoc, doc,
-  query, orderBy, increment, serverTimestamp,
+  query, orderBy, increment, serverTimestamp, deleteField,
 } from 'firebase/firestore';
 import { calcularDisponibilidad, buscarFilamento, specsDesdeReceta } from './disponibilidad.js';
+import { tiempoDeProducto, specsDeTiempo } from './tiempoImpresion.js';
 
 export const COL_FILAMENTOS = "filamentos";
 export const COL_PEDIDOS = "pedidos";
@@ -94,6 +95,8 @@ export async function recalcularDisponibilidad(productos = [], filamentos = []) 
   let actualizados = 0;
   let disponibilidadActualizada = 0;
   let specsActualizadas = 0;
+  let tiemposMigrados = 0;
+  const tiemposIlegibles = [];   // productos cuyo texto viejo no se pudo parsear
 
   for (const p of productos) {
     if (!p?._id) continue;
@@ -103,9 +106,25 @@ export async function recalcularDisponibilidad(productos = [], filamentos = []) 
     const patch = {};
 
     if (p.disponible !== disponible) patch.disponible = disponible;
-    // Notación de punto: actualiza solo estas claves y deja specs.tiempo intacto.
+    // Notación de punto: actualiza solo estas claves del mapa specs.
     if ((p.specs?.material || "") !== specs.material) patch["specs.material"] = specs.material;
     if ((p.specs?.peso || "") !== specs.peso) patch["specs.peso"] = specs.peso;
+
+    // Migración del tiempo: del texto libre viejo a los tres campos nuevos.
+    const tiempo = tiempoDeProducto(p);
+    if (tiempo.origen !== "campos") {
+      const nuevos = specsDeTiempo(tiempo.horas, tiempo.minutos);
+      patch["specs.tiempoHoras"] = nuevos.tiempoHoras;
+      patch["specs.tiempoMinutos"] = nuevos.tiempoMinutos;
+      patch["specs.tiempoImpresionHorasDecimal"] = nuevos.tiempoImpresionHorasDecimal;
+      if (tiempo.origen === "texto") tiemposMigrados++;
+      if (tiempo.origen === "ilegible") {
+        // Queda en 0/0 y se reporta para cargarlo a mano.
+        tiemposIlegibles.push({ nombre: p.name || p._id, texto: p.specs?.tiempo });
+      }
+    }
+    // El string libre deja de ser fuente de verdad.
+    if (p.specs?.tiempo !== undefined) patch["specs.tiempo"] = deleteField();
 
     if (Object.keys(patch).length === 0) continue;
 
@@ -115,7 +134,10 @@ export async function recalcularDisponibilidad(productos = [], filamentos = []) 
     if ("specs.material" in patch || "specs.peso" in patch) specsActualizadas++;
   }
 
-  return { actualizados, disponibilidadActualizada, specsActualizadas, total: productos.length };
+  return {
+    actualizados, disponibilidadActualizada, specsActualizadas,
+    tiemposMigrados, tiemposIlegibles, total: productos.length,
+  };
 }
 
 // ─── Pedidos ─────────────────────────────────────────────────────────

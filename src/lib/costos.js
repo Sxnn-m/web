@@ -3,6 +3,7 @@
 // tabla de Rentabilidad y por la columna "Costo fab." de Productos.
 
 import { normalizar } from './disponibilidad.js';
+import { horasDeImpresion } from './tiempoImpresion.js';
 
 /**
  * Margen fijo sobre el material: el precio de venta usa el costo del gramo
@@ -17,9 +18,6 @@ export const DEFAULT_COSTS = {
     "PETG": 100, "TPU": 130, "Resina": 200,
   },
 };
-
-/** "8h" → 8 · "1.5 hs" → 1.5 */
-export const parseHours = (str = "") => parseFloat(String(str).replace(/[^0-9.]/g, "")) || 0;
 
 /**
  * Agrupa la receta por MATERIAL, ignorando el color: todas las líneas que
@@ -78,7 +76,8 @@ export function costoPorGramo(material, costs = DEFAULT_COSTS) {
  */
 export function calcularRentabilidad(producto, costs = DEFAULT_COSTS) {
   const desglose = gramosPorMaterial(producto?.receta || []);
-  const horas = parseHours(producto?.specs?.tiempo);
+  // Horas decimales reales: 5h 30min son 5.5, no 530.
+  const horas = horasDeImpresion(producto);
   const gramosTotales = desglose.reduce((s, d) => s + d.gramos, 0);
 
   const materiales = desglose.map(d => ({ ...d, costoPorGramo: costoPorGramo(d.material, costs) }));

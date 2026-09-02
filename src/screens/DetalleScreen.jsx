@@ -1,6 +1,22 @@
 import { useState } from 'react';
 import { COLORS_FILAMENT } from '../data.js';
 import { TKButton, TKInput, TKPill, Icon, ProductCard, fmtARS, SinStockBadge, sinStock } from '../components/UI.jsx';
+import { formatTiempoProducto } from '../lib/tiempoImpresion.js';
+
+/**
+ * Specs que ve el público, con etiquetas legibles. Lista explícita a propósito:
+ * los campos internos del tiempo (tiempoHoras, tiempoMinutos,
+ * tiempoImpresionHorasDecimal) no deben aparecer nunca en el catálogo.
+ */
+function specsVisibles(product) {
+  const specs = product?.specs || {};
+  const tiempo = formatTiempoProducto(product);
+  return [
+    ["Material", specs.material],
+    ["Peso", specs.peso],
+    ["Tiempo de impresión", tiempo !== "—" ? tiempo : ""],
+  ].filter(([, valor]) => valor);
+}
 
 export function DetalleScreen({ go, addToCart, productId, detalleVariant = "A", products = [] }) {
   const product = products.find(p => p.id === productId) || products[0] || {};
@@ -166,7 +182,7 @@ export function DetalleScreen({ go, addToCart, productId, detalleVariant = "A", 
           {tab === "desc" && <p>{product.desc} Cada pieza es impresa bajo pedido en nuestro taller en CABA. Los tiempos de producción varían según la demanda y el nivel de detalle.</p>}
           {tab === "specs" && (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 20 }}>
-              {Object.entries(product.specs).filter(([, v]) => v).map(([k, v]) => (
+              {specsVisibles(product).map(([k, v]) => (
                 <div key={k} style={{ borderTop: "1px solid var(--line-strong)", paddingTop: 10 }}>
                   <div style={{ fontSize: 10, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>{k}</div>
                   <div style={{ fontSize: 18, color: "var(--text)" }}>{v}</div>
@@ -230,7 +246,7 @@ function DetalleB({ go, addToCart, productId, products = [] }) {
           <h3 style={{ fontSize: 24, letterSpacing: -0.3, margin: "0 0 16px" }}>Sobre esta pieza</h3>
           <p style={{ fontSize: 16, color: "var(--muted)", lineHeight: 1.7 }}>{product.desc}</p>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginTop: 32 }}>
-            {Object.entries(product.specs).filter(([, v]) => v).map(([k,v]) => (
+            {specsVisibles(product).map(([k,v]) => (
               <div key={k} style={{ borderTop: "1px solid var(--line-strong)", paddingTop: 10 }}>
                 <div style={{ fontSize: 10, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 1 }}>{k}</div>
                 <div style={{ fontSize: 18 }}>{v}</div>

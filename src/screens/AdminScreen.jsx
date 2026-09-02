@@ -21,6 +21,9 @@ import {
 import {
   DEFAULT_COSTS, MARGEN_MATERIAL, calcularRentabilidad, calcularPrecioSugerido,
 } from '../lib/costos.js';
+import {
+  tiempoDeProducto, specsDeTiempo, formatTiempo, formatTiempoProducto,
+} from '../lib/tiempoImpresion.js';
 
 // La fórmula de costo/precio/ganancia vive en src/lib/costos.js: una sola
 // implementación para la tabla de Rentabilidad y para la columna "Costo fab.".
@@ -38,6 +41,9 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
   const [filamentos, setFilamentos] = useState([]);
   const [pedidos, setPedidos] = useState([]);
   const [privados, setPrivados] = useState({});
+  // Productos cuyo tiempo de impresión viejo no se pudo parsear: hay que
+  // cargarlos a mano.
+  const [tiemposIlegibles, setTiemposIlegibles] = useState([]);
 
   // ─── Load data ──────────────────────────────────────────────
   const loadProducts = async () => {
@@ -100,7 +106,10 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
     } catch (err) {
       console.error(err);
       setMsg("Error al recalcular: " + err.message);
-      return { actualizados: 0, disponibilidadActualizada: 0, specsActualizadas: 0 };
+      return {
+        actualizados: 0, disponibilidadActualizada: 0, specsActualizadas: 0,
+        tiemposMigrados: 0, tiemposIlegibles: [],
+      };
     }
   };
 
@@ -122,15 +131,17 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
   const handleRecalcular = async () => {
     setMsg("Recalculando desde las recetas...");
     const { prodsFull, films } = await recargarTodo();
-    const { disponibilidadActualizada, specsActualizadas } =
+    const { disponibilidadActualizada, specsActualizadas, tiemposMigrados, tiemposIlegibles } =
       await sincronizarDisponibilidad(prodsFull, films);
     const sinReceta = prodsFull.filter(p => (p.receta || []).length === 0).length;
     setMsg(
       `✓ Recalculado sobre ${prodsFull.length} productos: ` +
       `${disponibilidadActualizada} con disponibilidad actualizada, ` +
-      `${specsActualizadas} con material/peso actualizados.` +
+      `${specsActualizadas} con material/peso actualizados, ` +
+      `${tiemposMigrados} con tiempo de impresión migrado.` +
       (sinReceta > 0 ? ` ${sinReceta} sin receta quedaron NO disponibles.` : "")
     );
+    setTiemposIlegibles(tiemposIlegibles || []);
   };
 
   // Botón manual: mueve receta/origenUrl/notas del doc público a la subcolección
@@ -359,6 +370,8 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
                   onNew={() => { setEditProduct(null); setShowForm(true); }}
                   onRecalcular={handleRecalcular}
                   onMigrarPrivados={handleMigrarPrivados}
+                  tiemposIlegibles={tiemposIlegibles}
+                  onCerrarTiempos={() => setTiemposIlegibles([])}
                   onToggleVisible={async (p) => {
                     await updateDoc(doc(db, "products", p._id), { visible: p.visible === false ? true : false });
                     await loadProducts();
@@ -420,6 +433,7 @@ function DashboardTab({ products, users, categories, onCategoriesChange, onProdu
 function ProductsTab({
   products, costs = DEFAULT_COSTS, filamentos = [], pendientesDeMigrar = 0,
   onEdit, onDelete, onNew, onToggleVisible, onRecalcular, onMigrarPrivados,
+  tiemposIlegibles = [], onCerrarTiempos,
 }) {
   const [search, setSearch] = useState("");
   const [expandido, setExpandido] = useState(null);
@@ -461,6 +475,32 @@ function ProductsTab({
           </span></>
         )}
       </div>
+
+      {tiemposIlegibles.length > 0 && (
+        <div style={{ padding: "12px 14px", background: "#c6413812", borderLeft: "3px solid #c64138", fontSize: 12, lineHeight: 1.6, marginBottom: 16 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+            <div>
+              <strong style={{ color: "#c64138" }}>
+                {tiemposIlegibles.length} producto(s) con tiempo de impresión que no se pudo migrar
+              </strong>
+              <div style={{ color: "var(--muted)", marginTop: 4 }}>
+                Quedaron en 0h 0min. Cargales el tiempo a mano desde el formulario:
+              </div>
+              <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
+                {tiemposIlegibles.map((t, i) => (
+                  <li key={i}>
+                    <strong style={{ color: "var(--text)" }}>{t.nombre}</strong>
+                    {t.texto ? <> — texto original: "{t.texto}"</> : null}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <button onClick={onCerrarTiempos} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)" }}>
+              <Icon.close size={14}/>
+            </button>
+          </div>
+        </div>
+      )}
 
       {pendientesDeMigrar > 0 && (
         <div style={{ padding: "12px 14px", background: "#B56B3E15", borderLeft: "3px solid #B56B3E", fontSize: 12, lineHeight: 1.6, marginBottom: 16 }}>
@@ -956,6 +996,12 @@ function ProductForm({ product, onSave, onCancel, categories = [], filamentos = 
   const [insumos, setInsumos] = useState(() =>
     (product?.insumos || []).map(i => ({ nombre: i.nombre || "", precio: i.precio ?? 0 }))
   );
+  // Tiempo de impresión: dos números. Si el producto todavía tiene el texto
+  // libre viejo, se parsea para precargar los campos.
+  const [tiempo, setTiempo] = useState(() => {
+    const t = tiempoDeProducto(product || {});
+    return { horas: t.horas, minutos: t.minutos };
+  });
   // El modo manual se persiste en el producto: si no, al reabrir el formulario
   // volvería a modo automático y el próximo guardado pisaría el precio a mano.
   const [precioManual, setPrecioManual] = useState(product?.precioManual === true);
@@ -987,12 +1033,17 @@ function ProductForm({ product, onSave, onCancel, categories = [], filamentos = 
   // Precio sugerido: misma fórmula que el tab de Costos (hora de máquina +
   // material con margen) más los insumos sumados sin margen. Se recalcula solo
   // al tocar receta, tiempo de impresión o insumos.
+  const specsTiempo = useMemo(
+    () => specsDeTiempo(tiempo.horas, tiempo.minutos),
+    [tiempo.horas, tiempo.minutos]
+  );
+
   const sugerido = useMemo(
     () => calcularPrecioSugerido(
-      { receta: recetaLimpia, insumos: insumosLimpios, specs: { tiempo: form.specs.tiempo } },
+      { receta: recetaLimpia, insumos: insumosLimpios, specs: specsTiempo },
       costs
     ),
-    [recetaLimpia, insumosLimpios, form.specs.tiempo, costs]
+    [recetaLimpia, insumosLimpios, specsTiempo, costs]
   );
 
   // En automático manda la fórmula; en manual, lo que escribió el usuario.
@@ -1010,6 +1061,8 @@ function ProductForm({ product, onSave, onCancel, categories = [], filamentos = 
   const handleSubmit = () => {
     if (!form.name.trim()) return alert("El nombre es obligatorio.");
     const cleanImages = images.filter(u => u.trim());
+    // Se descarta el texto libre viejo: al guardar el specs se reemplaza entero.
+    const { tiempo: _tiempoTextoViejo, ...specsBase } = form.specs;
     const data = {
       ...form,
       price: Number(precioFinal) || 0,
@@ -1020,12 +1073,14 @@ function ProductForm({ product, onSave, onCancel, categories = [], filamentos = 
       images: cleanImages,
       img: cleanImages[0] || "",
       receta: recetaLimpia,
-      // specs.material y specs.peso los setea el código desde la receta;
-      // solo specs.tiempo viene del formulario.
+      // specs.material y specs.peso salen de la receta; el tiempo, de los dos
+      // campos numéricos. El texto libre "5h 30min" ya no se guarda: se genera
+      // al mostrar a partir de tiempoHoras/tiempoMinutos.
       specs: {
-        ...form.specs,
+        ...specsBase,
         material: specsCalculadas.material,
         peso: specsCalculadas.peso,
+        ...specsTiempo,
       },
       origenUrl: form.origenUrl.trim(),
       notas: form.notas,
@@ -1113,7 +1168,35 @@ function ProductForm({ product, onSave, onCancel, categories = [], filamentos = 
                 valor={specsCalculadas.material}
                 vacio="Sin receta cargada"
               />
-              <TKInput label="Tiempo impresión" value={form.specs.tiempo} onChange={e => upSpec("tiempo", e.target.value)} placeholder="8h" />
+              <div>
+                <div style={{ ...labelStyle, marginBottom: 6 }}>Tiempo impresión</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <input
+                    type="number" min="0"
+                    value={tiempo.horas}
+                    onChange={e => setTiempo(t => ({ ...t, horas: e.target.value }))}
+                    placeholder="Horas"
+                    aria-label="Horas"
+                    style={recetaInput}
+                  />
+                  <input
+                    type="number" min="0" max="59"
+                    value={tiempo.minutos}
+                    onChange={e => setTiempo(t => ({ ...t, minutos: e.target.value }))}
+                    placeholder="Minutos"
+                    aria-label="Minutos"
+                    style={recetaInput}
+                  />
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
+                  <span>Horas</span><span>Minutos</span>
+                </div>
+                <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>
+                  {formatTiempo(tiempo.horas, tiempo.minutos)}
+                  {specsTiempo.tiempoImpresionHorasDecimal > 0 &&
+                    ` = ${specsTiempo.tiempoImpresionHorasDecimal.toFixed(2)} h para el precio`}
+                </div>
+              </div>
               <SpecCalculada
                 label="Peso"
                 valor={specsCalculadas.peso}
@@ -1802,7 +1885,7 @@ function CostosTab({ products, setMsg }) {
                         ))}
                 </div>
 
-                <div style={{ fontSize: 12, color: "var(--muted)" }}>{p.specs?.tiempo || "—"}</div>
+                <div style={{ fontSize: 12, color: "var(--muted)" }}>{formatTiempoProducto(p)}</div>
                 <div style={{ fontWeight: 600 }}>
                   {rent.calculable ? fmtARS(rent.costoFabricacion) : noCalc}
                 </div>
