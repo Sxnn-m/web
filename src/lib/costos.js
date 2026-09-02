@@ -111,6 +111,34 @@ export function calcularRentabilidad(producto, costs = DEFAULT_COSTS) {
   };
 }
 
+/** Suma de los precios de los insumos (imanes, tornillos, cable, etc.). */
+export function totalInsumos(insumos = []) {
+  return insumos.reduce((total, i) => total + (Number(i?.precio) || 0), 0);
+}
+
+/**
+ * Precio sugerido de venta de un producto:
+ *
+ *   precio = (horas × horaMaquina) + Σ (gramos × costoPorGramo × MARGEN_MATERIAL)
+ *          + Σ (precios de insumos)
+ *
+ * Los insumos se suman tal cual, sin margen. Si la receta no permite calcular
+ * (sin receta, o material sin costo configurado), precio vuelve null.
+ *
+ * @returns {{calculable, motivo, base, insumos, precio: number|null}}
+ */
+export function calcularPrecioSugerido(producto, costs = DEFAULT_COSTS) {
+  const rent = calcularRentabilidad(producto, costs);
+  const insumos = totalInsumos(producto?.insumos || []);
+  return {
+    calculable: rent.calculable,
+    motivo: rent.motivo,
+    base: rent.precioVenta,          // material con margen + hora de máquina
+    insumos,
+    precio: rent.calculable ? rent.precioVenta + insumos : null,
+  };
+}
+
 /** "PLA, PETG" — materiales distintos de la receta, para la columna Material/es. */
 export const listaMateriales = (producto) =>
   gramosPorMaterial(producto?.receta || []).map(d => d.material).join(", ");

@@ -1,8 +1,9 @@
 // ─── Datos privados de producto ───────────────────────────────────────
-// receta, origenUrl y notas NO viven en el doc de "products" (que es de
-// lectura pública), sino en products/{id}/privado/data, restringido a
+// receta, origenUrl, notas e insumos NO viven en el doc de "products" (que
+// es de lectura pública), sino en products/{id}/privado/data, restringido a
 // admins por reglas. El catálogo público solo lee el booleano "disponible"
-// del doc principal.
+// del doc principal. Los insumos van acá porque son costos internos
+// (proveedor y precio de cada componente), del mismo tipo que la receta.
 
 import { db } from './../firebase.js';
 import {
@@ -14,15 +15,16 @@ import {
 export const DOC_PRIVADO = "data";
 
 /** Campos que se mudaron fuera del doc público de products. */
-export const CAMPOS_PRIVADOS = ["receta", "origenUrl", "notas"];
+export const CAMPOS_PRIVADOS = ["receta", "origenUrl", "notas", "insumos"];
 
-export const privadoVacio = () => ({ receta: [], origenUrl: "", notas: "" });
+export const privadoVacio = () => ({ receta: [], origenUrl: "", notas: "", insumos: [] });
 
 /** Normaliza lo que venga de Firestore a la forma esperada por la UI. */
 const normalizar = (data = {}) => ({
   receta: Array.isArray(data.receta) ? data.receta : [],
   origenUrl: data.origenUrl || "",
   notas: data.notas || "",
+  insumos: Array.isArray(data.insumos) ? data.insumos : [],
 });
 
 /** Lee los datos privados de un solo producto. */
@@ -63,11 +65,12 @@ export async function cargarPrivados(productos = []) {
 }
 
 /** Escribe (reemplazando) los datos privados de un producto. */
-export async function guardarPrivado(productId, { receta = [], origenUrl = "", notas = "" }) {
+export async function guardarPrivado(productId, { receta = [], origenUrl = "", notas = "", insumos = [] }) {
   await setDoc(doc(db, "products", productId, "privado", DOC_PRIVADO), {
     receta,
     origenUrl,
     notas,
+    insumos,
     updatedAt: serverTimestamp(),
   });
 }
@@ -100,13 +103,15 @@ export async function migrarDatosPrivados(productos = []) {
     // solo se limpia el doc público.
     const yaPrivado = await cargarPrivado(p._id);
     const tienePrivado =
-      yaPrivado.receta.length > 0 || yaPrivado.origenUrl || yaPrivado.notas;
+      yaPrivado.receta.length > 0 || yaPrivado.origenUrl || yaPrivado.notas ||
+      yaPrivado.insumos.length > 0;
 
     if (!tienePrivado) {
       await guardarPrivado(p._id, {
         receta: Array.isArray(p.receta) ? p.receta : [],
         origenUrl: p.origenUrl || "",
         notas: p.notas || "",
+        insumos: Array.isArray(p.insumos) ? p.insumos : [],
       });
     }
 
@@ -114,6 +119,7 @@ export async function migrarDatosPrivados(productos = []) {
       receta: deleteField(),
       origenUrl: deleteField(),
       notas: deleteField(),
+      insumos: deleteField(),
     });
 
     migrados++;
