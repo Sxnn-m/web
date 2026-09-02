@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { TKButton, TKInput, TKPill, Icon, fmtARS } from '../components/UI.jsx';
 import { db } from '../firebase.js';
 import {
   collection, getDocs, addDoc, updateDoc, deleteDoc, doc,
-  getDoc, setDoc, serverTimestamp,
+  getDoc, setDoc, serverTimestamp, deleteField,
 } from 'firebase/firestore';
 import { PRODUCTS as SEED_PRODUCTS, CATEGORIES } from '../data.js';
 import { InventarioTab } from './admin/InventarioTab.jsx';
@@ -14,6 +14,10 @@ import {
 import {
   cargarFilamentos, cargarPedidos, recalcularDisponibilidad,
 } from '../lib/inventario.js';
+import {
+  cargarPrivados, guardarPrivado, enriquecerProductos, migrarDatosPrivados,
+  CAMPOS_PRIVADOS,
+} from '../lib/productosPrivados.js';
 
 // ─── Shared cost helpers (used by ProductsTab & CostosTab) ───────────
 
@@ -51,6 +55,7 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
   const [costSettings, setCostSettings] = useState(DEFAULT_COSTS);
   const [filamentos, setFilamentos] = useState([]);
   const [pedidos, setPedidos] = useState([]);
+  const [privados, setPrivados] = useState({});
 
   // ─── Load data ──────────────────────────────────────────────
   const loadProducts = async () => {
@@ -61,6 +66,25 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
       return list;
     } catch (err) { console.error(err); return []; }
   };
+
+  // receta / origenUrl / notas viven en products/{id}/privado/data
+  const loadPrivados = async (lista) => {
+    try {
+      const mapa = await cargarPrivados(lista || products);
+      setPrivados(mapa);
+      return mapa;
+    } catch (err) { console.error(err); return {}; }
+  };
+
+  /**
+   * Productos + sus datos privados. Todo lo que necesite la receta
+   * (disponibilidad, plan de consumo de un pedido, formulario) usa ESTA
+   * lista; el doc público de "products" ya no la tiene.
+   */
+  const productosFull = useMemo(
+    () => enriquecerProductos(products, privados),
+    [products, privados]
+  );
 
   const loadFilamentos = async () => {
     try {
@@ -81,10 +105,11 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
   /**
    * Punto único donde el catálogo público se entera de un cambio de stock:
    * recalcula el booleano "disponible" de cada producto y lo persiste.
+   * Recibe siempre productos ya enriquecidos con su receta privada.
    */
-  const sincronizarDisponibilidad = async (prods, films) => {
+  const sincronizarDisponibilidad = async (prodsFull, films) => {
     try {
-      const { actualizados } = await recalcularDisponibilidad(prods, films);
+      const { actualizados } = await recalcularDisponibilidad(prodsFull, films);
       if (actualizados > 0) {
         await loadProducts();
         onProductsChange?.();
@@ -97,11 +122,53 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
     }
   };
 
+  /** Recarga productos + recetas privadas + inventario y devuelve todo fresco. */
+  const recargarTodo = async () => {
+    const [prods, films] = await Promise.all([loadProducts(), loadFilamentos()]);
+    const privs = await loadPrivados(prods);
+    return { prodsFull: enriquecerProductos(prods, privs), films };
+  };
+
   // Inventario cambió (alta/edición de filamento o restock) → recalcular productos
   const handleInventarioChange = async () => {
-    const films = await loadFilamentos();
-    const prods = await loadProducts();
-    await sincronizarDisponibilidad(prods, films);
+    const { prodsFull, films } = await recargarTodo();
+    await sincronizarDisponibilidad(prodsFull, films);
+  };
+
+  // Botón manual: recalcula la disponibilidad de todo el catálogo
+  const handleRecalcular = async () => {
+    setMsg("Recalculando disponibilidad...");
+    const { prodsFull, films } = await recargarTodo();
+    const actualizados = await sincronizarDisponibilidad(prodsFull, films);
+    const sinReceta = prodsFull.filter(p => (p.receta || []).length === 0).length;
+    setMsg(
+      `✓ Disponibilidad recalculada sobre ${prodsFull.length} productos ` +
+      `(${actualizados} actualizado${actualizados !== 1 ? "s" : ""}).` +
+      (sinReceta > 0 ? ` ${sinReceta} sin receta quedaron NO disponibles.` : "")
+    );
+  };
+
+  // Botón manual: mueve receta/origenUrl/notas del doc público a la subcolección
+  const handleMigrarPrivados = async () => {
+    const pendientes = products.filter(p => CAMPOS_PRIVADOS.some(c => p[c] !== undefined));
+    if (pendientes.length === 0) {
+      return setMsg("✓ No hay datos privados en el documento público: nada para migrar.");
+    }
+    if (!confirm(
+      `Se moverán receta/origen/notas de ${pendientes.length} producto(s) a la subcolección ` +
+      `privada y se borrarán del documento público. ¿Continuar?`
+    )) return;
+
+    setMsg("Migrando datos privados...");
+    try {
+      const { migrados } = await migrarDatosPrivados(pendientes);
+      const { prodsFull, films } = await recargarTodo();
+      await sincronizarDisponibilidad(prodsFull, films);
+      onProductsChange?.();
+      setMsg(`✓ ${migrados} producto(s) migrados a products/{id}/privado/data.`);
+    } catch (err) {
+      setMsg("Error al migrar: " + err.message);
+    }
   };
 
   const loadUsers = async () => {
@@ -120,6 +187,7 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
       } catch (e) { /* silently ignore, use defaults */ }
     };
     Promise.all([loadProducts(), loadUsers(), loadCosts(), loadFilamentos(), loadPedidos()])
+      .then(([prods]) => loadPrivados(prods))
       .then(() => setLoading(false));
   }, []);
 
@@ -162,19 +230,37 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
       // El catálogo público solo lee este booleano: se recalcula al guardar,
       // porque la receta pudo haber cambiado.
       const disponible = calcularDisponibilidad(data, filamentos).disponible;
-      if (data._id) {
-        const { _id, ...rest } = data;
-        await updateDoc(doc(db, "products", _id), { ...rest, disponible });
+
+      // El doc público NO lleva receta/origenUrl/notas: van a la subcolección
+      // privada, que solo pueden leer los admins.
+      const { _id, receta, origenUrl, notas, ...publico } = data;
+      const privado = { receta: receta || [], origenUrl: origenUrl || "", notas: notas || "" };
+
+      let productId = _id;
+      if (productId) {
+        // deleteField() limpia los campos que hayan quedado en el doc público
+        // de antes de la mudanza: guardar un producto lo migra solo.
+        await updateDoc(doc(db, "products", productId), {
+          ...publico,
+          disponible,
+          receta: deleteField(),
+          origenUrl: deleteField(),
+          notas: deleteField(),
+        });
         setMsg("✓ Producto actualizado.");
       } else {
-        await addDoc(collection(db, "products"), {
-          ...data,
+        const ref = await addDoc(collection(db, "products"), {
+          ...publico,
           disponible,
           createdAt: serverTimestamp(),
         });
+        productId = ref.id;
         setMsg("✓ Producto creado.");
       }
-      await loadProducts();
+      await guardarPrivado(productId, privado);
+
+      const prods = await loadProducts();
+      await loadPrivados(prods);
       setShowForm(false);
       setEditProduct(null);
       onProductsChange?.();
@@ -272,11 +358,21 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
           {tab === "productos" && (
             showForm
               ? <ProductForm product={editProduct} onSave={handleSave} onCancel={() => { setShowForm(false); setEditProduct(null); }} categories={propCategories} filamentos={filamentos}/>
-              : <ProductsTab products={products} costs={costSettings} filamentos={filamentos} onEdit={(p) => { setEditProduct(p); setShowForm(true); }} onDelete={handleDelete} onNew={() => { setEditProduct(null); setShowForm(true); }} onToggleVisible={async (p) => {
-                  await updateDoc(doc(db, "products", p._id), { visible: p.visible === false ? true : false });
-                  await loadProducts();
-                  onProductsChange?.();
-                }}/>
+              : <ProductsTab
+                  products={productosFull}
+                  costs={costSettings}
+                  filamentos={filamentos}
+                  pendientesDeMigrar={products.filter(p => CAMPOS_PRIVADOS.some(c => p[c] !== undefined)).length}
+                  onEdit={(p) => { setEditProduct(p); setShowForm(true); }}
+                  onDelete={handleDelete}
+                  onNew={() => { setEditProduct(null); setShowForm(true); }}
+                  onRecalcular={handleRecalcular}
+                  onMigrarPrivados={handleMigrarPrivados}
+                  onToggleVisible={async (p) => {
+                    await updateDoc(doc(db, "products", p._id), { visible: p.visible === false ? true : false });
+                    await loadProducts();
+                    onProductsChange?.();
+                  }}/>
           )}
           {tab === "categorias" && <CategoriesTab categories={propCategories} products={products} onCategoriesChange={onCategoriesChange} setMsg={setMsg}/>}
           {tab === "inventario" && (
@@ -285,7 +381,7 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
           {tab === "pedidos" && (
             <PedidosTab
               pedidos={pedidos}
-              productos={products}
+              productos={productosFull}
               filamentos={filamentos}
               onPedidosChange={loadPedidos}
               onInventarioChange={handleInventarioChange}
@@ -330,7 +426,10 @@ function DashboardTab({ products, users, categories, onCategoriesChange, onProdu
 }
 
 // ─── Products Table ─────────────────────────────────────
-function ProductsTab({ products, costs = DEFAULT_COSTS, filamentos = [], onEdit, onDelete, onNew, onToggleVisible }) {
+function ProductsTab({
+  products, costs = DEFAULT_COSTS, filamentos = [], pendientesDeMigrar = 0,
+  onEdit, onDelete, onNew, onToggleVisible, onRecalcular, onMigrarPrivados,
+}) {
   const [search, setSearch] = useState("");
   const [expandido, setExpandido] = useState(null);
   const filtered = products.filter(p =>
@@ -338,13 +437,25 @@ function ProductsTab({ products, costs = DEFAULT_COSTS, filamentos = [], onEdit,
     p.cat?.toLowerCase().includes(search.toLowerCase())
   );
 
+  const sinReceta = products.filter(p => (p.receta || []).length === 0).length;
+
   const COL = "50px 2fr 1fr 90px 90px 70px 110px 70px 70px 90px";
 
   return (
     <>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
         <h2 style={{ fontSize: 28, margin: 0 }}>Productos</h2>
-        <TKButton onClick={onNew} icon={<Icon.plus size={14}/>}>Nuevo producto</TKButton>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          {pendientesDeMigrar > 0 && (
+            <TKButton variant="outline" onClick={onMigrarPrivados} icon={<Icon.layers size={14}/>}>
+              Migrar datos privados ({pendientesDeMigrar})
+            </TKButton>
+          )}
+          <TKButton variant="outline" onClick={onRecalcular} icon={<Icon.spark size={14}/>}>
+            Recalcular disponibilidad
+          </TKButton>
+          <TKButton onClick={onNew} icon={<Icon.plus size={14}/>}>Nuevo producto</TKButton>
+        </div>
       </div>
 
       <div style={{ marginBottom: 16, maxWidth: 320 }}>
@@ -353,7 +464,20 @@ function ProductsTab({ products, costs = DEFAULT_COSTS, filamentos = [], onEdit,
 
       <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 12 }}>
         {filtered.length} producto{filtered.length !== 1 ? "s" : ""}
+        {sinReceta > 0 && (
+          <> · <span style={{ color: "#B56B3E", fontWeight: 700 }}>
+            {sinReceta} sin receta (no disponibles hasta cargarla)
+          </span></>
+        )}
       </div>
+
+      {pendientesDeMigrar > 0 && (
+        <div style={{ padding: "12px 14px", background: "#B56B3E15", borderLeft: "3px solid #B56B3E", fontSize: 12, lineHeight: 1.6, marginBottom: 16 }}>
+          Hay {pendientesDeMigrar} producto(s) con receta, origen o notas todavía guardados en el
+          documento público de <code>products</code>. Usá "Migrar datos privados" para moverlos a
+          <code> products/&#123;id&#125;/privado/data</code> y borrarlos del documento público.
+        </div>
+      )}
 
       {/* Table container with horizontal scroll for mobile */}
       <div style={{ overflowX: "auto", margin: "0 -16px", padding: "0 16px" }}>
@@ -404,20 +528,25 @@ function ProductsTab({ products, costs = DEFAULT_COSTS, filamentos = [], onEdit,
                   }}>
                     {p.stock ?? "—"}
                   </div>
-                  {/* Disponibilidad calculada desde receta + inventario */}
+                  {/* Disponibilidad calculada desde receta + inventario.
+                      "Sin receta" y "No" comparten el color de alerta pero se
+                      distinguen: uno se arregla cargando la receta, el otro
+                      reponiendo filamento. */}
                   <div>
                     <button
                       onClick={() => setExpandido(abierto ? null : p._id)}
-                      title="Ver detalle de disponibilidad"
+                      title={disp.sinReceta
+                        ? "Sin receta cargada — no disponible"
+                        : "Ver detalle de disponibilidad"}
                       style={{
                         background: "none", border: "none", cursor: "pointer", padding: 0,
                         display: "flex", alignItems: "center", gap: 6,
-                        color: disp.disponible ? "#4a7a52" : "#c64138", fontWeight: 700, fontSize: 13,
+                        color: disp.disponible ? "#4a7a52" : "#c64138",
+                        fontWeight: 700, fontSize: disp.sinReceta ? 12 : 13,
                       }}
                     >
                       <span style={{ transition: "transform .2s", transform: abierto ? "rotate(90deg)" : "none" }}>›</span>
-                      {disp.disponible ? "Sí" : "No"}
-                      {disp.sinReceta && <span style={{ color: "var(--muted)", fontWeight: 400, fontSize: 11 }}>(s/receta)</span>}
+                      {disp.disponible ? "Sí" : disp.sinReceta ? "Sin receta" : "No"}
                     </button>
                   </div>
                   {/* Origen del diseño — solo backoffice */}
@@ -473,9 +602,13 @@ const actionBtn = {
 function DisponibilidadDetalle({ disp, producto }) {
   if (disp.sinReceta) {
     return (
-      <div style={{ padding: "12px 16px 16px 34px", background: "var(--bg-alt)", fontSize: 12, color: "var(--muted)" }}>
-        "{producto.name}" no tiene receta de consumo cargada, así que no se puede evaluar el
-        inventario y se considera disponible. Cargá la receta desde el formulario del producto.
+      <div style={{ padding: "12px 16px 16px 34px", background: "var(--bg-alt)", fontSize: 12, color: "#c64138", lineHeight: 1.6 }}>
+        <strong>"{producto.name}" no tiene receta de consumo cargada.</strong>{" "}
+        <span style={{ color: "var(--muted)" }}>
+          Sin receta no se puede evaluar el inventario, así que queda NO disponible y en el catálogo
+          público aparece como "Sin stock". Cargá la receta desde el formulario del producto para
+          habilitarlo.
+        </span>
       </div>
     );
   }
@@ -575,8 +708,8 @@ function RecetaEditor({ receta, setReceta, filamentos }) {
       </div>
 
       {receta.length === 0 && (
-        <div style={{ fontSize: 12, color: "var(--muted)", padding: "6px 0" }}>
-          Sin receta cargada: el producto no se bloquea por inventario.
+        <div style={{ fontSize: 12, color: "#c64138", padding: "6px 0" }}>
+          Sin receta cargada: el producto queda NO disponible en el catálogo.
         </div>
       )}
 
@@ -604,7 +737,17 @@ function DisponibilidadPreview({ receta, filamentos }) {
     .filter(l => l.material.trim() && l.color.trim() && (Number(l.gramos) || 0) > 0)
     .map(l => ({ material: l.material.trim(), color: l.color.trim(), gramos: Number(l.gramos) }));
 
-  if (limpia.length === 0) return null;
+  if (limpia.length === 0) {
+    return (
+      <div style={{ padding: "12px 14px", background: "#c6413812", borderLeft: "3px solid #c64138", fontSize: 12, lineHeight: 1.6 }}>
+        <strong style={{ color: "#c64138" }}>Sin receta: el producto queda NO disponible</strong>
+        <div style={{ color: "var(--muted)", marginTop: 4 }}>
+          En el catálogo público se muestra con el badge "Sin stock" hasta que cargues al menos
+          una línea de consumo.
+        </div>
+      </div>
+    );
+  }
 
   const disp = calcularDisponibilidad({ receta: limpia }, filamentos);
   const color = disp.disponible ? "#4a7a52" : "#c64138";

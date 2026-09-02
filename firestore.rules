@@ -35,16 +35,32 @@ service cloud.firestore {
 
     // ── Catálogo público ───────────────────────────────────────────────
     // Lectura abierta (incluye el booleano "disponible", que es el único
-    // dato de stock que ve el público). Escritura solo admin: así nadie
-    // puede tocar receta, origenUrl, notas ni disponible.
+    // dato de stock que ve el público). Escritura solo admin.
+    //
+    // Las reglas NO se heredan hacia las subcolecciones: products/{id}/privado
+    // queda cubierto exclusivamente por su propio match de abajo, así que la
+    // lectura pública de acá no lo alcanza.
     match /products/{productId} {
       allow read: if true;
       allow write: if esAdmin();
+
+      // receta, origenUrl y notas: ni lectura ni escritura pública.
+      match /privado/{docId} {
+        allow read, write: if esAdmin();
+      }
     }
 
     match /categories/{categoryId} {
       allow read: if true;
       allow write: if esAdmin();
+    }
+
+    // Consulta de collection group sobre "privado": el backoffice trae las
+    // recetas de todo el catálogo en una sola lectura. Firestore NO habilita
+    // collection group con el match anidado de arriba, hace falta este match
+    // con comodín recursivo. Sigue siendo admin-only.
+    match /{path=**}/privado/{docId} {
+      allow read: if esAdmin();
     }
 
     // ── Configuración de costos (backoffice) ───────────────────────────
