@@ -2,6 +2,21 @@ rules_version = '2';
 
 // TKPrints — reglas de Firestore
 //
+// ╔══════════════════════════════════════════════════════════════════════╗
+// ║  ESTE ARCHIVO NO SE DESPLIEGA SOLO.                                  ║
+// ║                                                                      ║
+// ║  Mergear a main NO lo aplica: no hay CI que lo despliegue. Mientras  ║
+// ║  no corras el deploy, Firestore sigue usando las reglas viejas y el  ║
+// ║  backoffice falla con "Missing or insufficient permissions".         ║
+// ║                                                                      ║
+// ║      npm run deploy:rules                                            ║
+// ║                                                                      ║
+// ║  (equivale a: npx firebase-tools deploy --only firestore:rules)      ║
+// ║  Requiere haber corrido antes `npx firebase-tools login`.            ║
+// ║  Alternativa sin CLI: consola de Firebase → Firestore Database →     ║
+// ║  pestaña Rules → pegar este archivo → Publish.                       ║
+// ╚══════════════════════════════════════════════════════════════════════╝
+//
 // Modelo de roles: /users/{uid}.role == "admin".
 // El catálogo público solo necesita leer "products" y "categories".
 // El inventario de filamento y los pedidos son 100% privados del backoffice.
