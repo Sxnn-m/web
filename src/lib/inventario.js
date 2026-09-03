@@ -140,6 +140,10 @@ export function siguienteNumeroOrden(pedidos = []) {
 export async function crearPedido({ numeroOrden, clienteNombre, items }) {
   const lineas = items.map(i => ({
     productoId: i.productoId,
+    // Código visible (TKPx) al momento del pedido: se guarda como snapshot
+    // para que la línea siga siendo identificable aunque el producto se
+    // renumere o se borre del catálogo.
+    productoCodigo: i.productoCodigo || "",
     productoNombre: i.productoNombre,
     cantidad: Number(i.cantidad) || 0,
     precioUnitario: Number(i.precioUnitario) || 0,

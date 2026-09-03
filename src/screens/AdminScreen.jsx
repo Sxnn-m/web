@@ -2388,9 +2388,9 @@ function CostosTab({ products, setMsg }) {
           Rentabilidad por producto
         </div>
         <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.6 }}>
-          Ordenado de menor a mayor margen. Costo fab. = gramos × costo/g por material (los insumos
-          no son costo de fabricación). Precio venta = el precio real del producto: el cargado a mano
-          si tiene precio manual, si no hora de máquina + gramos × costo/g × {MARGEN_MATERIAL} + insumos.
+          Ordenado de menor a mayor margen. Costo fab. = gramos × costo/g por material + insumos
+          (plata real que se paga para producir). Precio venta = el precio real del producto: el
+          cargado a mano si tiene precio manual, si no hora de máquina + gramos × costo/g × {MARGEN_MATERIAL} + insumos.
           {noCalculables > 0 && (
             <> · <span style={{ color: "#B56B3E", fontWeight: 700 }}>
               {noCalculables} sin calcular (falta receta o costo de material)
@@ -2465,7 +2465,16 @@ function CostosTab({ products, setMsg }) {
 
                 <div style={{ fontSize: 12, color: "var(--muted)" }}>{formatTiempoProducto(p)}</div>
                 <div style={{ fontWeight: 600 }}>
-                  {rent.calculable ? fmtARS(rent.costoFabricacion) : noCalc}
+                  {rent.calculable ? (
+                    <>
+                      {fmtARS(rent.costoFabricacion)}
+                      {rent.insumos > 0 && (
+                        <div style={{ fontSize: 10, color: "var(--muted)", fontWeight: 400 }}>
+                          {fmtARS(rent.costoMaterial)} mat. + {fmtARS(rent.insumos)} ins.
+                        </div>
+                      )}
+                    </>
+                  ) : noCalc}
                 </div>
                 <div style={{ fontWeight: 600 }}>
                   {rent.calculable ? (

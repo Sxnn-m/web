@@ -57,7 +57,8 @@ export function costoPorGramo(material, costs = DEFAULT_COSTS) {
 /**
  * Rentabilidad de un producto según su receta y la configuración de costos.
  *
- *   costoFabricacion = Σ (gramos × costoPorGramo)                    [solo material]
+ *   costoFabricacion = Σ (gramos × costoPorGramo)                    [material]
+ *                    + Σ (cantidad × precioUnidad)                   [insumos]
  *   precioFormulaBase = horas × horaMaquina
  *                     + Σ (gramos × costoPorGramo × MARGEN_MATERIAL)
  *   precioFormula    = precioFormulaBase + Σ (insumos)               [sin margen]
@@ -65,8 +66,9 @@ export function costoPorGramo(material, costs = DEFAULT_COSTS) {
  *                      "Editar precio manualmente" activo, si no precioFormula
  *   ganancia         = precioVenta − costoFabricacion
  *
- * Los insumos son un pass-through: entran al precio pero NO al costo de
- * fabricación, que sigue siendo solo material.
+ * Los insumos entran en las dos puntas: son plata real que se paga para
+ * producir la pieza, así que suman al costo de fabricación, y además se
+ * trasladan al precio sin margen.
  *
  * No es calculable si el producto no tiene receta, o si algún material de la
  * receta no está en la lista de costos configurada: en esos casos los importes
@@ -74,7 +76,8 @@ export function costoPorGramo(material, costs = DEFAULT_COSTS) {
  *
  * @returns {{
  *   calculable: boolean, motivo: string|null,
- *   costoFabricacion: number|null, precioVenta: number|null,
+ *   costoFabricacion: number|null, costoMaterial: number|null,
+ *   precioVenta: number|null,
  *   precioFormulaBase: number|null, precioFormula: number|null,
  *   insumos: number, esManual: boolean,
  *   ganancia: number|null, margen: number|null,
@@ -96,7 +99,7 @@ export function calcularRentabilidad(producto, costs = DEFAULT_COSTS) {
 
   const noCalculable = (motivo) => ({
     calculable: false, motivo,
-    costoFabricacion: null, precioVenta: null,
+    costoFabricacion: null, costoMaterial: null, precioVenta: null,
     precioFormulaBase: null, precioFormula: null,
     insumos, esManual,
     ganancia: null, margen: null,
@@ -110,7 +113,9 @@ export function calcularRentabilidad(producto, costs = DEFAULT_COSTS) {
     );
   }
 
-  const costoFabricacion = materiales.reduce((s, m) => s + m.gramos * m.costoPorGramo, 0);
+  const costoMaterial = materiales.reduce((s, m) => s + m.gramos * m.costoPorGramo, 0);
+  // Los insumos son costo de fabricación: se pagan para producir la pieza.
+  const costoFabricacion = costoMaterial + insumos;
   const precioFormulaBase =
     horas * (Number(costs.horaMaquina) || 0) +
     materiales.reduce((s, m) => s + m.gramos * m.costoPorGramo * MARGEN_MATERIAL, 0);
@@ -123,7 +128,7 @@ export function calcularRentabilidad(producto, costs = DEFAULT_COSTS) {
 
   return {
     calculable: true, motivo: null,
-    costoFabricacion, precioVenta,
+    costoFabricacion, costoMaterial, precioVenta,
     precioFormulaBase, precioFormula,
     insumos, esManual,
     ganancia,
