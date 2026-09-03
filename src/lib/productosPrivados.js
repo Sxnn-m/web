@@ -4,6 +4,10 @@
 // admins por reglas. El catálogo público solo lee el booleano "disponible"
 // del doc principal. Los insumos van acá porque son costos internos
 // (proveedor y precio de cada componente), del mismo tipo que la receta.
+//
+// Todo está parametrizado por colección porque "personalizados" usa el mismo
+// esquema (personalizados/{id}/privado/data). Por defecto es "products", así
+// que las llamadas viejas siguen funcionando igual.
 
 import { db } from './../firebase.js';
 import {
@@ -27,9 +31,11 @@ const normalizar = (data = {}) => ({
   insumos: Array.isArray(data.insumos) ? data.insumos : [],
 });
 
-/** Lee los datos privados de un solo producto. */
-export async function cargarPrivado(productId) {
-  const snap = await getDoc(doc(db, "products", productId, "privado", DOC_PRIVADO));
+export const COL_PRODUCTS = "products";
+
+/** Lee los datos privados de un solo documento. */
+export async function cargarPrivado(productId, coleccion = COL_PRODUCTS) {
+  const snap = await getDoc(doc(db, coleccion, productId, "privado", DOC_PRIVADO));
   return snap.exists() ? normalizar(snap.data()) : privadoVacio();
 }
 
@@ -40,11 +46,14 @@ export async function cargarPrivado(productId) {
  * Intenta una sola consulta de collection group; si el proyecto la rechaza
  * (falta de índice, por ejemplo) cae a una lectura por producto.
  */
-export async function cargarPrivados(productos = []) {
+export async function cargarPrivados(productos = [], coleccion = COL_PRODUCTS) {
   const mapa = {};
   try {
     const snap = await getDocs(collectionGroup(db, "privado"));
     snap.docs.forEach(d => {
+      // El collection group trae los "privado" de TODAS las colecciones padre,
+      // así que hay que quedarse solo con los de la que se pidió.
+      if (d.ref.parent.parent?.parent?.id !== coleccion) return;
       const productoId = d.ref.parent.parent?.id;
       if (productoId) mapa[productoId] = normalizar(d.data());
     });
@@ -56,7 +65,7 @@ export async function cargarPrivados(productos = []) {
   await Promise.all(productos.map(async p => {
     if (!p?._id) return;
     try {
-      mapa[p._id] = await cargarPrivado(p._id);
+      mapa[p._id] = await cargarPrivado(p._id, coleccion);
     } catch (e) {
       console.error(`No se pudieron leer los datos privados de ${p._id}:`, e);
     }
@@ -65,8 +74,10 @@ export async function cargarPrivados(productos = []) {
 }
 
 /** Escribe (reemplazando) los datos privados de un producto. */
-export async function guardarPrivado(productId, { receta = [], origenUrl = "", notas = "", insumos = [] }) {
-  await setDoc(doc(db, "products", productId, "privado", DOC_PRIVADO), {
+export async function guardarPrivado(
+  productId, { receta = [], origenUrl = "", notas = "", insumos = [] }, coleccion = COL_PRODUCTS
+) {
+  await setDoc(doc(db, coleccion, productId, "privado", DOC_PRIVADO), {
     receta,
     origenUrl,
     notas,
