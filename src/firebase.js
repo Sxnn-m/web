@@ -4,13 +4,14 @@ import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyANsvCFPhN98uqqpRzk231gDZBgzCJ7D3w",
-  authDomain: "tkprints-74d09.firebaseapp.com",
-  projectId: "tkprints-74d09",
-  storageBucket: "tkprints-74d09.firebasestorage.app",
-  messagingSenderId: "76351828788",
-  appId: "1:76351828788:web:9359a8edbd6a417cea6b61",
-  measurementId: "G-0MK2755Z3X"
+  apiKey: "AIzaSyCqhdEDn5L7jWIuWMLu5Tr5lYHvgzIhBbQ",
+  authDomain: "tk-web-b37f2.firebaseapp.com",
+  databaseURL: "https://tk-web-b37f2-default-rtdb.firebaseio.com",
+  projectId: "tk-web-b37f2",
+  storageBucket: "tk-web-b37f2.firebasestorage.app",
+  messagingSenderId: "1024181888015",
+  appId: "1:1024181888015:web:8b5fc93840d59e0cbcaf7a",
+  measurementId: "G-5SL862X5L1"
 };
 
 const app = initializeApp(firebaseConfig);
