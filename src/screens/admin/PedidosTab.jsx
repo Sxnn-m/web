@@ -5,6 +5,10 @@ import {
   cargarPedidos, siguienteNumeroOrden, crearPedido, eliminarPedido,
   marcarEntregado, marcarPedidoImpreso, planDeConsumo, planDeInsumos,
 } from '../../lib/inventario.js';
+import {
+  agruparConsumo, validarStock, textoFaltante,
+} from '../../lib/consumoPedido.js';
+import { buscarFilamento } from '../../lib/disponibilidad.js';
 
 const actionBtn = {
   background: "none", border: "1px solid var(--line)", padding: "6px 8px",
@@ -307,11 +311,31 @@ function ModalImpresion({ pedido, productos, filamentos, insumos = [], onClose, 
   const planInsumos = useMemo(() => planDeInsumos(pedido, productos), [pedido, productos]);
   const [desperdicios, setDesperdicios] = useState({});
   const [guardando, setGuardando] = useState(false);
+  const [errorStock, setErrorStock] = useState("");   // faltante detectado por la transacción
+
+  // Validación en vivo, con la MISMA lógica que corre dentro de la transacción:
+  // se recalcula con cada cambio de desperdicio.
+  const validacion = useMemo(() => {
+    const consumo = agruparConsumo(plan, desperdicios, planInsumos);
+    return validarStock(
+      consumo,
+      (f) => {
+        const encontrado = buscarFilamento(filamentos, f.material, f.color);
+        return encontrado ? { id: encontrado._id, disponible: Number(encontrado.cantidadGramos) || 0 } : null;
+      },
+      (i) => {
+        const encontrado = insumos.find(x => x._id === i.insumoId);
+        return encontrado ? { id: encontrado._id, disponible: Number(encontrado.cantidadDisponible) || 0 } : null;
+      }
+    );
+  }, [plan, desperdicios, planInsumos, filamentos, insumos]);
 
   const totalPorLinea = (l) => l.cantidadConsumida + (Number(desperdicios[l.clave]) || 0);
 
   const confirmar = async () => {
+    if (!validacion.ok) return;   // el botón ya está deshabilitado, pero por las dudas
     setGuardando(true);
+    setErrorStock("");
     try {
       const { advertencias } = await marcarPedidoImpreso(
         pedido, plan, desperdicios, filamentos, planInsumos, insumos
@@ -320,7 +344,16 @@ function ModalImpresion({ pedido, productos, filamentos, insumos = [], onClose, 
       await onDone(advertencias.length ? `${base} Atención: ${advertencias.join(" ")}` : base);
     } catch (err) {
       setGuardando(false);
-      alert("Error al descontar inventario: " + err.message);
+      if (err.name === "StockInsuficienteError") {
+        // La transacción releyó el stock y ya no alcanza: alguien descontó en
+        // el medio. No se escribió nada.
+        setErrorStock(
+          err.message +
+          " El stock cambió desde que abriste el modal; cerrá y volvé a intentar."
+        );
+      } else {
+        alert("Error al descontar inventario: " + err.message);
+      }
     }
   };
 
@@ -416,10 +449,42 @@ function ModalImpresion({ pedido, productos, filamentos, insumos = [], onClose, 
           </div>
         )}
 
+        {(!validacion.ok || errorStock) && (
+          <div style={{
+            padding: "14px 16px", background: "#c6413812",
+            borderLeft: "3px solid #c64138", marginBottom: 20,
+            fontSize: 13, lineHeight: 1.6,
+          }}>
+            <strong style={{ color: "#c64138" }}>
+              {errorStock || "No se puede marcar como impreso: falta stock."}
+            </strong>
+            {!errorStock && (
+              <ul style={{ margin: "8px 0 0", paddingLeft: 18, color: "var(--muted)" }}>
+                {validacion.faltantes.map((f, i) => (
+                  <li key={i}>
+                    {textoFaltante(f)}
+                    {!f.existe && " — no está cargado en inventario"}
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div style={{ color: "var(--muted)", marginTop: 8, fontSize: 12 }}>
+              Cargá el stock que falta desde
+              {" "}{validacion.faltantes.some(f => f.unidad === "g") ? "Inventario" : ""}
+              {validacion.faltantes.some(f => f.unidad === "g") &&
+               validacion.faltantes.some(f => f.unidad === "u.") ? " e " : ""}
+              {validacion.faltantes.some(f => f.unidad === "u.") ? "Insumos" : ""}
+              {" "}y volvé a intentar.
+            </div>
+          </div>
+        )}
+
         <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
           <TKButton variant="outline" onClick={onClose}>Cancelar</TKButton>
-          <TKButton onClick={confirmar} disabled={guardando}>
-            {guardando ? "Procesando..." : "Confirmar impresión"}
+          <TKButton onClick={confirmar} disabled={guardando || !validacion.ok}>
+            {guardando ? "Procesando..."
+              : !validacion.ok ? "Falta stock"
+              : "Confirmar impresión"}
           </TKButton>
         </div>
       </div>
