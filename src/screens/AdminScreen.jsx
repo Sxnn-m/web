@@ -2171,8 +2171,9 @@ function CostosTab({ products, setMsg }) {
           Rentabilidad por producto
         </div>
         <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.6 }}>
-          Ordenado de menor a mayor margen. Costo y precio salen de la receta de cada producto:
-          costo = gramos × costo/g por material; precio = hora de máquina + gramos × costo/g × {MARGEN_MATERIAL}.
+          Ordenado de menor a mayor margen. Costo fab. = gramos × costo/g por material (los insumos
+          no son costo de fabricación). Precio venta = el precio real del producto: el cargado a mano
+          si tiene precio manual, si no hora de máquina + gramos × costo/g × {MARGEN_MATERIAL} + insumos.
           {noCalculables > 0 && (
             <> · <span style={{ color: "#B56B3E", fontWeight: 700 }}>
               {noCalculables} sin calcular (falta receta o costo de material)
@@ -2250,7 +2251,23 @@ function CostosTab({ products, setMsg }) {
                   {rent.calculable ? fmtARS(rent.costoFabricacion) : noCalc}
                 </div>
                 <div style={{ fontWeight: 600 }}>
-                  {rent.calculable ? fmtARS(rent.precioVenta) : noCalc}
+                  {rent.calculable ? (
+                    <>
+                      {fmtARS(rent.precioVenta)}
+                      {rent.esManual ? (
+                        <div
+                          style={{ fontSize: 10, color: "#B56B3E", fontWeight: 700 }}
+                          title={`Precio cargado a mano. La fórmula daría ${fmtARS(rent.precioFormula)}.`}
+                        >
+                          (manual)
+                        </div>
+                      ) : rent.insumos > 0 ? (
+                        <div style={{ fontSize: 10, color: "var(--muted)", fontWeight: 400 }}>
+                          incl. {fmtARS(rent.insumos)} insumos
+                        </div>
+                      ) : null}
+                    </>
+                  ) : noCalc}
                 </div>
                 <div>
                   {!rent.calculable ? noCalc : (

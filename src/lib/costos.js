@@ -58,9 +58,15 @@ export function costoPorGramo(material, costs = DEFAULT_COSTS) {
  * Rentabilidad de un producto según su receta y la configuración de costos.
  *
  *   costoFabricacion = Σ (gramos × costoPorGramo)                    [solo material]
- *   precioVenta      = horas × horaMaquina
- *                    + Σ (gramos × costoPorGramo × MARGEN_MATERIAL)
+ *   precioFormulaBase = horas × horaMaquina
+ *                     + Σ (gramos × costoPorGramo × MARGEN_MATERIAL)
+ *   precioFormula    = precioFormulaBase + Σ (insumos)               [sin margen]
+ *   precioVenta      = el precio REAL: el cargado a mano si el producto tiene
+ *                      "Editar precio manualmente" activo, si no precioFormula
  *   ganancia         = precioVenta − costoFabricacion
+ *
+ * Los insumos son un pass-through: entran al precio pero NO al costo de
+ * fabricación, que sigue siendo solo material.
  *
  * No es calculable si el producto no tiene receta, o si algún material de la
  * receta no está en la lista de costos configurada: en esos casos los importes
@@ -69,6 +75,8 @@ export function costoPorGramo(material, costs = DEFAULT_COSTS) {
  * @returns {{
  *   calculable: boolean, motivo: string|null,
  *   costoFabricacion: number|null, precioVenta: number|null,
+ *   precioFormulaBase: number|null, precioFormula: number|null,
+ *   insumos: number, esManual: boolean,
  *   ganancia: number|null, margen: number|null,
  *   materiales: Array<{material, gramos, costoPorGramo: number|null}>,
  *   sinCosto: string[], gramosTotales: number, horas: number
@@ -83,9 +91,15 @@ export function calcularRentabilidad(producto, costs = DEFAULT_COSTS) {
   const materiales = desglose.map(d => ({ ...d, costoPorGramo: costoPorGramo(d.material, costs) }));
   const sinCosto = materiales.filter(m => m.costoPorGramo === null).map(m => m.material);
 
+  const insumos = totalInsumos(producto?.insumos || []);
+  const esManual = producto?.precioManual === true;
+
   const noCalculable = (motivo) => ({
     calculable: false, motivo,
-    costoFabricacion: null, precioVenta: null, ganancia: null, margen: null,
+    costoFabricacion: null, precioVenta: null,
+    precioFormulaBase: null, precioFormula: null,
+    insumos, esManual,
+    ganancia: null, margen: null,
     materiales, sinCosto, gramosTotales, horas,
   });
 
@@ -97,14 +111,22 @@ export function calcularRentabilidad(producto, costs = DEFAULT_COSTS) {
   }
 
   const costoFabricacion = materiales.reduce((s, m) => s + m.gramos * m.costoPorGramo, 0);
-  const precioVenta =
+  const precioFormulaBase =
     horas * (Number(costs.horaMaquina) || 0) +
     materiales.reduce((s, m) => s + m.gramos * m.costoPorGramo * MARGEN_MATERIAL, 0);
+  const precioFormula = precioFormulaBase + insumos;
+
+  // El precio real es el que se le cobra al cliente: con precio manual activo
+  // manda el valor cargado a mano, no la fórmula.
+  const precioVenta = esManual ? (Number(producto?.price) || 0) : precioFormula;
   const ganancia = precioVenta - costoFabricacion;
 
   return {
     calculable: true, motivo: null,
-    costoFabricacion, precioVenta, ganancia,
+    costoFabricacion, precioVenta,
+    precioFormulaBase, precioFormula,
+    insumos, esManual,
+    ganancia,
     margen: precioVenta > 0 ? (ganancia / precioVenta) * 100 : 0,
     materiales, sinCosto, gramosTotales, horas,
   };
@@ -140,13 +162,13 @@ export function totalInsumos(insumos = []) {
  */
 export function calcularPrecioSugerido(producto, costs = DEFAULT_COSTS) {
   const rent = calcularRentabilidad(producto, costs);
-  const insumos = totalInsumos(producto?.insumos || []);
   return {
     calculable: rent.calculable,
     motivo: rent.motivo,
-    base: rent.precioVenta,          // material con margen + hora de máquina
-    insumos,
-    precio: rent.calculable ? rent.precioVenta + insumos : null,
+    base: rent.precioFormulaBase,    // material con margen + hora de máquina
+    insumos: rent.insumos,
+    // Siempre el precio de fórmula: es una SUGERENCIA, no mira el precio manual.
+    precio: rent.precioFormula,
   };
 }
 

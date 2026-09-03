@@ -5,12 +5,12 @@
 import { db } from '../firebase.js';
 import {
   collection, getDocs, addDoc, updateDoc, deleteDoc, doc,
-  query, orderBy, increment, serverTimestamp, deleteField,
+  serverTimestamp, deleteField,
 } from 'firebase/firestore';
 import {
   calcularDisponibilidad, buscarFilamento, specsDesdeReceta, lineasDeInsumo,
 } from './disponibilidad.js';
-import { descontarInsumo } from './insumos.js';
+import { registrarGastoEn } from './historial.js';
 import { tiempoDeProducto, specsDeTiempo } from './tiempoImpresion.js';
 
 export const COL_FILAMENTOS = "filamentos";
@@ -51,36 +51,8 @@ export async function eliminarFilamento(id) {
   await deleteDoc(doc(db, COL_FILAMENTOS, id));
 }
 
-// ─── Historiales (subcolecciones, para no inflar el doc principal) ────
-
-export async function cargarGastos(filamentoId) {
-  const snap = await getDocs(
-    query(collection(db, COL_FILAMENTOS, filamentoId, "gastos"), orderBy("fecha", "desc"))
-  );
-  return snap.docs.map(d => ({ _id: d.id, ...d.data() }));
-}
-
-export async function cargarRestocks(filamentoId) {
-  const snap = await getDocs(
-    query(collection(db, COL_FILAMENTOS, filamentoId, "restocks"), orderBy("fecha", "desc"))
-  );
-  return snap.docs.map(d => ({ _id: d.id, ...d.data() }));
-}
-
-/** Carga manual de filamento: registra el restock y suma a cantidadGramos. */
-export async function registrarRestock(filamentoId, cantidadAgregada, nota = "") {
-  const cantidad = Number(cantidadAgregada) || 0;
-  if (cantidad <= 0) throw new Error("La cantidad a agregar debe ser mayor a 0.");
-  await addDoc(collection(db, COL_FILAMENTOS, filamentoId, "restocks"), {
-    cantidadAgregada: cantidad,
-    nota: String(nota || "").trim(),
-    fecha: serverTimestamp(),
-  });
-  await updateDoc(doc(db, COL_FILAMENTOS, filamentoId), {
-    cantidadGramos: increment(cantidad),
-    updatedAt: serverTimestamp(),
-  });
-}
+// Los historiales (gastos y restocks) viven en src/lib/historial.js,
+// parametrizados por colección: los comparten filamentos e insumos.
 
 // ─── Recálculo del booleano público "disponible" ─────────────────────
 
@@ -289,18 +261,12 @@ export async function marcarPedidoImpreso(
       continue;
     }
 
-    await addDoc(collection(db, COL_FILAMENTOS, filamento._id, "gastos"), {
+    await registrarGastoEn(COL_FILAMENTOS, filamento._id, {
       producto: linea.productoNombre,
       cantidadConsumida: linea.cantidadConsumida,
       cantidadDesperdiciada: desperdiciada,
       numeroOrden: pedido.numeroOrden,
-      fecha: serverTimestamp(),
-    });
-
-    await updateDoc(doc(db, COL_FILAMENTOS, filamento._id), {
-      cantidadGramos: increment(-total),
-      updatedAt: serverTimestamp(),
-    });
+    }, total);
   }
 
   // Insumos: descuento directo de unidades, sin desperdicio ni historial.
@@ -314,7 +280,11 @@ export async function marcarPedidoImpreso(
       continue;
     }
     try {
-      await descontarInsumo(linea.insumoId, linea.unidadesConsumidas);
+      await registrarGastoEn("insumos", linea.insumoId, {
+        producto: linea.productoNombre,
+        cantidadConsumida: linea.unidadesConsumidas,
+        numeroOrden: pedido.numeroOrden,
+      }, linea.unidadesConsumidas);
     } catch (err) {
       advertencias.push(`${linea.nombre}: no se pudo descontar (${err.message}).`);
     }
