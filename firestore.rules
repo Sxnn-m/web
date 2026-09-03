@@ -98,6 +98,19 @@ service cloud.firestore {
       }
     }
 
+    // ── Personalizados ─────────────────────────────────────────────────
+    // Piezas a pedido de un cliente puntual. A diferencia de "products",
+    // NO son de lectura pública: nunca salen al catálogo. Llevan el mismo
+    // esquema de datos privados (receta, insumos, origen, notas) en su
+    // subcolección, que no hereda la regla del padre.
+    match /personalizados/{personalizadoId} {
+      allow read, write: if esAdmin();
+
+      match /privado/{docId} {
+        allow read, write: if esAdmin();
+      }
+    }
+
     // ── Catálogo de insumos ────────────────────────────────────────────
     // Imanes, tornillos, LEDs: precios de costo y stock interno. Igual que
     // filamentos, sin lectura ni escritura pública, con los mismos dos

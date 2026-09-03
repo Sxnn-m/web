@@ -13,6 +13,9 @@ import {
   FACTOR_DISPONIBILIDAD, specsDesdeReceta,
 } from '../lib/disponibilidad.js';
 import { cargarInsumos } from '../lib/insumos.js';
+import {
+  cargarPersonalizadosCompletos, guardarPersonalizado, eliminarPersonalizado,
+} from '../lib/personalizados.js';
 import { InsumosTab } from './admin/InsumosTab.jsx';
 import {
   cargarFilamentos, cargarPedidos, recalcularDisponibilidad,
@@ -46,6 +49,9 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
   const [filamentos, setFilamentos] = useState([]);
   const [pedidos, setPedidos] = useState([]);
   const [insumos, setInsumos] = useState([]);
+  const [personalizados, setPersonalizados] = useState([]);
+  const [editPersonalizado, setEditPersonalizado] = useState(null);
+  const [showFormPers, setShowFormPers] = useState(false);
   const [privados, setPrivados] = useState({});
   // Productos cuyo tiempo de impresión viejo no se pudo parsear: hay que
   // cargarlos a mano.
@@ -94,6 +100,34 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
       setInsumos(list);
       return list;
     } catch (err) { console.error(err); return []; }
+  };
+
+  const loadPersonalizados = async () => {
+    try {
+      const list = await cargarPersonalizadosCompletos();
+      setPersonalizados(list);
+      return list;
+    } catch (err) { console.error(err); return []; }
+  };
+
+  // ─── Personalizados: alta/edición/borrado ───────────────────
+  const handleSavePersonalizado = async (data) => {
+    try {
+      await guardarPersonalizado(data);
+      setMsg(data._id ? "✓ Personalizado actualizado." : "✓ Personalizado creado.");
+      await loadPersonalizados();
+      setShowFormPers(false);
+      setEditPersonalizado(null);
+    } catch (err) { setMsg("Error: " + err.message); }
+  };
+
+  const handleDeletePersonalizado = async (p) => {
+    if (!confirm(`¿Eliminar el personalizado "${p.name}" de ${p.clienteNombre || "—"}?`)) return;
+    try {
+      await eliminarPersonalizado(p._id);
+      setMsg("✓ Personalizado eliminado.");
+      await loadPersonalizados();
+    } catch (err) { setMsg("Error: " + err.message); }
   };
 
   const loadPedidos = async () => {
@@ -218,7 +252,7 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
         if (snap.exists()) setCostSettings(snap.data());
       } catch (e) { /* silently ignore, use defaults */ }
     };
-    Promise.all([loadProducts(), loadUsers(), loadCosts(), loadFilamentos(), loadPedidos(), loadInsumos()])
+    Promise.all([loadProducts(), loadUsers(), loadCosts(), loadFilamentos(), loadPedidos(), loadInsumos(), loadPersonalizados()])
       .then(([prods]) => loadPrivados(prods))
       .then(() => setLoading(false));
   }, []);
@@ -333,6 +367,7 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
   const navItems = [
     { id: "dashboard", label: "Dashboard", icon: <Icon.home size={16}/> },
     { id: "productos", label: "Productos", icon: <Icon.grid size={16}/> },
+    { id: "personalizados", label: "Personalizados", icon: <Icon.spark size={16}/> },
     { id: "categorias", label: "Categorías", icon: <Icon.layers size={16}/> },
     { id: "inventario", label: "Inventario", icon: <Icon.layers size={16}/> },
     { id: "insumos", label: "Insumos", icon: <Icon.grid size={16}/> },
@@ -426,6 +461,27 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
                     await loadProducts();
                     onProductsChange?.();
                   }}/>
+          )}
+          {tab === "personalizados" && (
+            showFormPers
+              ? <ProductForm
+                  modo="personalizado"
+                  product={editPersonalizado}
+                  onSave={handleSavePersonalizado}
+                  onCancel={() => { setShowFormPers(false); setEditPersonalizado(null); }}
+                  filamentos={filamentos}
+                  costs={costSettings}
+                  catalogoInsumos={insumos}
+                />
+              : <PersonalizadosTab
+                  personalizados={personalizados}
+                  costs={costSettings}
+                  filamentos={filamentos}
+                  insumos={insumos}
+                  onEdit={(p) => { setEditPersonalizado(p); setShowFormPers(true); }}
+                  onDelete={handleDeletePersonalizado}
+                  onNew={() => { setEditPersonalizado(null); setShowFormPers(true); }}
+                />
           )}
           {tab === "categorias" && <CategoriesTab categories={propCategories} products={products} onCategoriesChange={onCategoriesChange} setMsg={setMsg}/>}
           {tab === "inventario" && (
@@ -774,6 +830,123 @@ const actionBtn = {
   cursor: "pointer", color: "var(--text)", display: "flex", alignItems: "center",
   borderRadius: 4,
 };
+
+
+// ─── Personalizados: listado ─────────────────────────────────────────
+// Piezas a pedido de un cliente puntual. Mismo formato de tabla que
+// Productos, pero con "Cliente" en vez de ID y sin Categoría/Subcategoría.
+// Estos documentos NUNCA se consultan desde el catálogo público.
+function PersonalizadosTab({
+  personalizados, costs = DEFAULT_COSTS, filamentos = [], insumos = [],
+  onEdit, onDelete, onNew,
+}) {
+  const [search, setSearch] = useState("");
+  const [expandido, setExpandido] = useState(null);
+
+  const filtered = personalizados.filter(p => {
+    const t = search.trim().toLowerCase();
+    return !t ||
+      p.name?.toLowerCase().includes(t) ||
+      p.clienteNombre?.toLowerCase().includes(t);
+  });
+
+  const COL = "1.2fr 1.6fr 100px 100px 110px 70px 90px";
+
+  return (
+    <>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+        <h2 style={{ fontSize: 28, margin: 0 }}>Personalizados</h2>
+        <TKButton onClick={onNew} icon={<Icon.plus size={14}/>}>Nuevo personalizado</TKButton>
+      </div>
+
+      <div style={{ padding: "10px 12px", background: "var(--bg-alt)", borderLeft: "3px solid var(--accent)", fontSize: 12, color: "var(--muted)", lineHeight: 1.5, marginBottom: 16 }}>
+        Piezas hechas a pedido de un cliente. <strong style={{ color: "var(--text)" }}>Nunca
+        aparecen en el catálogo público</strong>, sin importar cómo estén cargadas.
+      </div>
+
+      <div style={{ marginBottom: 16, maxWidth: 320 }}>
+        <TKInput placeholder="Buscar por pieza o cliente..." icon={<Icon.search size={16}/>}
+          value={search} onChange={e => setSearch(e.target.value)} />
+      </div>
+
+      <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 12 }}>
+        {filtered.length} personalizado{filtered.length !== 1 ? "s" : ""}
+        {search.trim() && <> de {personalizados.length}</>}
+      </div>
+
+      <div style={{ overflowX: "auto", margin: "0 -16px", padding: "0 16px" }}>
+        <div style={{ minWidth: 860 }}>
+          <div style={{
+            display: "grid", gridTemplateColumns: COL,
+            gap: 12, padding: "10px 12px", background: "var(--bg-alt)",
+            fontSize: 10, textTransform: "uppercase",
+            letterSpacing: 1.5, color: "var(--muted)", fontWeight: 700,
+          }}>
+            <div>Cliente</div><div>Pieza</div><div>Precio</div><div>Costo fab.</div>
+            <div>Disponible</div><div>Origen</div><div>Acciones</div>
+          </div>
+
+          {filtered.map(p => {
+            const rent = calcularRentabilidad(p, costs);
+            const disp = calcularDisponibilidad(p, filamentos, insumos);
+            const abierto = expandido === p._id;
+            return (
+              <div key={p._id} style={{ borderBottom: "1px solid var(--line)" }}>
+                <div style={{
+                  display: "grid", gridTemplateColumns: COL,
+                  gap: 12, padding: "14px 12px", fontSize: 13, alignItems: "center",
+                }}>
+                  <div style={{ fontWeight: 600 }}>{p.clienteNombre || "—"}</div>
+                  <div>{p.name}</div>
+                  <div>{fmtARS(p.price || 0)}</div>
+                  <div style={{ fontSize: 12 }}>
+                    {rent.calculable
+                      ? <span style={{ fontWeight: 600 }}>{fmtARS(rent.costoFabricacion)}</span>
+                      : <span style={{ color: "var(--muted)" }} title={rent.motivo}>—</span>}
+                  </div>
+                  <div>
+                    <button
+                      onClick={() => setExpandido(abierto ? null : p._id)}
+                      title={disp.sinReceta ? "Sin receta cargada" : "Ver detalle de disponibilidad"}
+                      style={{
+                        background: "none", border: "none", cursor: "pointer", padding: 0,
+                        display: "flex", alignItems: "center", gap: 6,
+                        color: disp.disponible ? "#4a7a52" : "#c64138",
+                        fontWeight: 700, fontSize: disp.sinReceta ? 12 : 13,
+                      }}
+                    >
+                      <span style={{ transition: "transform .2s", transform: abierto ? "rotate(90deg)" : "none" }}>›</span>
+                      {disp.disponible ? "Sí" : disp.sinReceta ? "Sin receta" : "No"}
+                    </button>
+                  </div>
+                  <div style={{ fontSize: 12 }}>
+                    {p.origenUrl
+                      ? <a href={p.origenUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>Link</a>
+                      : <span style={{ color: "var(--muted)" }}>—</span>}
+                  </div>
+                  <div style={{ display: "flex", gap: 4 }}>
+                    <button onClick={() => onEdit(p)} style={actionBtn} title="Editar"><Icon.spark size={14}/></button>
+                    <button onClick={() => onDelete(p)} style={{...actionBtn, color: "#c64138"}} title="Eliminar"><Icon.trash size={14}/></button>
+                  </div>
+                </div>
+
+                {abierto && <DisponibilidadDetalle disp={disp} producto={p}/>}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {filtered.length === 0 && (
+        <div style={{ padding: 40, textAlign: "center", color: "var(--muted)" }}>
+          {personalizados.length === 0
+            ? "No hay personalizados cargados."
+            : "No se encontraron personalizados con ese criterio."}
+        </div>
+      )}
+    </>
+  );
+}
 
 // ─── Modal: revisar la renumeración antes de escribir ─────────────────
 function ModalRenumeracion({ plan, onClose, onConfirm }) {
@@ -1286,7 +1459,13 @@ const recetaInput = {
 };
 
 // ─── Product Form (Create / Edit) ─────────────────────────────
-function ProductForm({ product, onSave, onCancel, categories = [], filamentos = [], costs = DEFAULT_COSTS, nextId = "", catalogoInsumos = [] }) {
+function ProductForm({
+  product, onSave, onCancel, categories = [], filamentos = [], costs = DEFAULT_COSTS,
+  nextId = "", catalogoInsumos = [], modo = "producto",
+}) {
+  // modo "personalizado": sin categoría, subcategoría, tag ni visible, y el ID
+  // correlativo se reemplaza por el nombre del cliente.
+  const esPersonalizado = modo === "personalizado";
   // Normalize: existing products may have img (string) or images (array)
   const initImages = () => {
     if (product?.images?.length) return [...product.images, "", "", "", "", ""].slice(0, 5);
@@ -1296,6 +1475,7 @@ function ProductForm({ product, onSave, onCancel, categories = [], filamentos = 
 
   const [form, setForm] = useState({
     id: product?.id || nextId,
+    clienteNombre: product?.clienteNombre || "",
     name: product?.name || "",
     cat: product?.cat || (categories[0]?.id || "casa"),
     sub: product?.sub || "",
@@ -1405,6 +1585,9 @@ function ProductForm({ product, onSave, onCancel, categories = [], filamentos = 
 
   const handleSubmit = () => {
     if (!form.name.trim()) return alert("El nombre es obligatorio.");
+    if (esPersonalizado && !form.clienteNombre.trim()) {
+      return alert("El nombre del cliente es obligatorio.");
+    }
     const cleanImages = images.filter(u => u.trim());
     // Se descarta el texto libre viejo: al guardar el specs se reemplaza entero.
     const { tiempo: _tiempoTextoViejo, ...specsBase } = form.specs;
@@ -1430,6 +1613,18 @@ function ProductForm({ product, onSave, onCancel, categories = [], filamentos = 
       origenUrl: form.origenUrl.trim(),
       notas: form.notas,
     };
+    if (esPersonalizado) {
+      // Se sacan los campos que no aplican para que no queden en el documento.
+      delete data.id;
+      delete data.cat;
+      delete data.sub;
+      delete data.tag;
+      delete data.visible;
+      data.clienteNombre = form.clienteNombre.trim();
+    } else {
+      delete data.clienteNombre;
+    }
+
     if (product?._id) data._id = product._id;
     onSave(data);
   };
@@ -1438,7 +1633,9 @@ function ProductForm({ product, onSave, onCancel, categories = [], filamentos = 
     <>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
         <h2 style={{ fontSize: 28, margin: 0 }}>
-          {product?._id ? "Editar producto" : "Nuevo producto"}
+          {product?._id
+            ? (esPersonalizado ? "Editar personalizado" : "Editar producto")
+            : (esPersonalizado ? "Nuevo personalizado" : "Nuevo producto")}
         </h2>
         <TKButton variant="ghost" onClick={onCancel} icon={<Icon.back size={14}/>}>Volver</TKButton>
       </div>
@@ -1447,36 +1644,50 @@ function ProductForm({ product, onSave, onCancel, categories = [], filamentos = 
         {/* ── Left: fields ── */}
         <div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
-            {/* El ID se autogenera correlativo: no se carga a mano para que no
-                vuelvan a repetirse. Al crear, el definitivo se asigna al guardar. */}
-            <div>
-              <div style={{ ...labelStyle, marginBottom: 6 }}>ID producto</div>
-              <div style={{
-                padding: "12px 14px", background: "var(--bg-alt)",
-                border: "1px dashed var(--line)", borderRadius: 4,
-                fontSize: 14, fontWeight: 600, color: "var(--text)", boxSizing: "border-box",
-              }}>
-                {form.id || "—"}
+            {/* En productos el ID es correlativo y no se carga a mano; en
+                personalizados lo reemplaza el nombre del cliente, texto libre. */}
+            {esPersonalizado ? (
+              <TKInput
+                label="Nombre del cliente"
+                value={form.clienteNombre}
+                onChange={e => up("clienteNombre", e.target.value)}
+                placeholder="Ana Pérez"
+                hint="Obligatorio"
+              />
+            ) : (
+              <div>
+                <div style={{ ...labelStyle, marginBottom: 6 }}>ID producto</div>
+                <div style={{
+                  padding: "12px 14px", background: "var(--bg-alt)",
+                  border: "1px dashed var(--line)", borderRadius: 4,
+                  fontSize: 14, fontWeight: 600, color: "var(--text)", boxSizing: "border-box",
+                }}>
+                  {form.id || "—"}
+                </div>
+                <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 6 }}>
+                  {product?._id ? "(no editable)" : "(autogenerado al guardar)"}
+                </div>
               </div>
-              <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 6 }}>
-                {product?._id ? "(no editable)" : "(autogenerado al guardar)"}
-              </div>
-            </div>
+            )}
             <TKInput label="Nombre" value={form.name} onChange={e => up("name", e.target.value)} placeholder="Organizador..." />
 
-            <div>
-              <div style={labelStyle}>Categoría</div>
-              <select value={form.cat} onChange={e => { up("cat", e.target.value); up("sub", ""); }} style={selectStyle}>
-                {(categories.length ? categories : []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-            </div>
-            <div>
-              <div style={labelStyle}>Subcategoría</div>
-              <select value={form.sub} onChange={e => up("sub", e.target.value)} style={selectStyle}>
-                <option value="">Seleccionar...</option>
-                {currentCat?.subs.map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
-            </div>
+            {!esPersonalizado && (
+              <>
+                <div>
+                  <div style={labelStyle}>Categoría</div>
+                  <select value={form.cat} onChange={e => { up("cat", e.target.value); up("sub", ""); }} style={selectStyle}>
+                    {(categories.length ? categories : []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <div style={labelStyle}>Subcategoría</div>
+                  <select value={form.sub} onChange={e => up("sub", e.target.value)} style={selectStyle}>
+                    <option value="">Seleccionar...</option>
+                    {currentCat?.subs.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+              </>
+            )}
 
             <PrecioField
               manual={precioManual}
@@ -1492,30 +1703,36 @@ function ProductForm({ product, onSave, onCancel, categories = [], filamentos = 
               <TKInput label="Descripción" value={form.desc} onChange={e => up("desc", e.target.value)} placeholder="Descripción del producto..." />
             </div>
 
-            <div>
-              <div style={labelStyle}>Tag</div>
-              <select value={form.tag} onChange={e => up("tag", e.target.value)} style={selectStyle}>
-                <option value="">Sin tag</option>
-                <option value="Best seller">Best seller</option>
-                <option value="Nuevo">Nuevo</option>
-                <option value="Premium">Premium</option>
-              </select>
-            </div>
+            {/* Tag y "visible en el catálogo" no aplican a un personalizado:
+                nunca sale al catálogo público. */}
+            {!esPersonalizado && (
+              <>
+                <div>
+                  <div style={labelStyle}>Tag</div>
+                  <select value={form.tag} onChange={e => up("tag", e.target.value)} style={selectStyle}>
+                    <option value="">Sin tag</option>
+                    <option value="Best seller">Best seller</option>
+                    <option value="Nuevo">Nuevo</option>
+                    <option value="Premium">Premium</option>
+                  </select>
+                </div>
 
-            {/* Visible toggle */}
-            <div style={{ display: "flex", alignItems: "center", gap: 10, gridColumn: "1 / -1", padding: "12px 0", borderTop: "1px solid var(--line)" }}>
-              <input
-                id="visible-check"
-                type="checkbox"
-                checked={form.visible}
-                onChange={e => up("visible", e.target.checked)}
-                style={{ width: 18, height: 18, accentColor: "var(--accent)", cursor: "pointer" }}
-              />
-              <label htmlFor="visible-check" style={{ fontSize: 14, fontWeight: 600, color: "var(--text)", cursor: "pointer" }}>
-                Visible en el catálogo
-              </label>
-              {!form.visible && <span style={{ fontSize: 12, color: "#c64138",  }}>OCULTO</span>}
-            </div>
+                {/* Visible toggle */}
+                <div style={{ display: "flex", alignItems: "center", gap: 10, gridColumn: "1 / -1", padding: "12px 0", borderTop: "1px solid var(--line)" }}>
+                  <input
+                    id="visible-check"
+                    type="checkbox"
+                    checked={form.visible}
+                    onChange={e => up("visible", e.target.checked)}
+                    style={{ width: 18, height: 18, accentColor: "var(--accent)", cursor: "pointer" }}
+                  />
+                  <label htmlFor="visible-check" style={{ fontSize: 14, fontWeight: 600, color: "var(--text)", cursor: "pointer" }}>
+                    Visible en el catálogo
+                  </label>
+                  {!form.visible && <span style={{ fontSize: 12, color: "#c64138",  }}>OCULTO</span>}
+                </div>
+              </>
+            )}
           </div>
 
           {/* Specs — material y peso derivan de la receta, no se editan a mano */}
