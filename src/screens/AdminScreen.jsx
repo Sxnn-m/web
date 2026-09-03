@@ -9,8 +9,11 @@ import { PRODUCTS as SEED_PRODUCTS, CATEGORIES } from '../data.js';
 import { InventarioTab } from './admin/InventarioTab.jsx';
 import { PedidosTab } from './admin/PedidosTab.jsx';
 import {
-  calcularDisponibilidad, motivoFaltante, FACTOR_DISPONIBILIDAD, specsDesdeReceta,
+  calcularDisponibilidad, motivoFaltante, motivoFaltanteInsumo,
+  FACTOR_DISPONIBILIDAD, specsDesdeReceta,
 } from '../lib/disponibilidad.js';
+import { cargarInsumos } from '../lib/insumos.js';
+import { InsumosTab } from './admin/InsumosTab.jsx';
 import {
   cargarFilamentos, cargarPedidos, recalcularDisponibilidad,
 } from '../lib/inventario.js';
@@ -42,6 +45,7 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
   const [costSettings, setCostSettings] = useState(DEFAULT_COSTS);
   const [filamentos, setFilamentos] = useState([]);
   const [pedidos, setPedidos] = useState([]);
+  const [insumos, setInsumos] = useState([]);
   const [privados, setPrivados] = useState({});
   // Productos cuyo tiempo de impresión viejo no se pudo parsear: hay que
   // cargarlos a mano.
@@ -84,6 +88,14 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
     } catch (err) { console.error(err); return []; }
   };
 
+  const loadInsumos = async () => {
+    try {
+      const list = await cargarInsumos();
+      setInsumos(list);
+      return list;
+    } catch (err) { console.error(err); return []; }
+  };
+
   const loadPedidos = async () => {
     try {
       const list = await cargarPedidos();
@@ -97,9 +109,9 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
    * recalcula el booleano "disponible" de cada producto y lo persiste.
    * Recibe siempre productos ya enriquecidos con su receta privada.
    */
-  const sincronizarDisponibilidad = async (prodsFull, films) => {
+  const sincronizarDisponibilidad = async (prodsFull, films, insus) => {
     try {
-      const resultado = await recalcularDisponibilidad(prodsFull, films);
+      const resultado = await recalcularDisponibilidad(prodsFull, films, insus);
       if (resultado.actualizados > 0) {
         await loadProducts();
         onProductsChange?.();
@@ -117,24 +129,26 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
 
   /** Recarga productos + recetas privadas + inventario y devuelve todo fresco. */
   const recargarTodo = async () => {
-    const [prods, films] = await Promise.all([loadProducts(), loadFilamentos()]);
+    const [prods, films, insus] = await Promise.all([
+      loadProducts(), loadFilamentos(), loadInsumos(),
+    ]);
     const privs = await loadPrivados(prods);
-    return { prodsFull: enriquecerProductos(prods, privs), films };
+    return { prodsFull: enriquecerProductos(prods, privs), films, insus };
   };
 
   // Inventario cambió (alta/edición de filamento o restock) → recalcular productos
   const handleInventarioChange = async () => {
-    const { prodsFull, films } = await recargarTodo();
-    await sincronizarDisponibilidad(prodsFull, films);
+    const { prodsFull, films, insus } = await recargarTodo();
+    await sincronizarDisponibilidad(prodsFull, films, insus);
   };
 
   // Botón manual: recalcula desde la receta todo lo derivado — disponibilidad
   // y specs.material / specs.peso — sobre el catálogo completo.
   const handleRecalcular = async () => {
     setMsg("Recalculando desde las recetas...");
-    const { prodsFull, films } = await recargarTodo();
+    const { prodsFull, films, insus } = await recargarTodo();
     const { disponibilidadActualizada, specsActualizadas, tiemposMigrados, tiemposIlegibles } =
-      await sincronizarDisponibilidad(prodsFull, films);
+      await sincronizarDisponibilidad(prodsFull, films, insus);
     const sinReceta = prodsFull.filter(p => (p.receta || []).length === 0).length;
     setMsg(
       `✓ Recalculado sobre ${prodsFull.length} productos: ` +
@@ -180,8 +194,8 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
     setMsg("Migrando datos privados...");
     try {
       const { migrados } = await migrarDatosPrivados(pendientes);
-      const { prodsFull, films } = await recargarTodo();
-      await sincronizarDisponibilidad(prodsFull, films);
+      const { prodsFull, films, insus } = await recargarTodo();
+      await sincronizarDisponibilidad(prodsFull, films, insus);
       onProductsChange?.();
       setMsg(`✓ ${migrados} producto(s) migrados a products/{id}/privado/data.`);
     } catch (err) {
@@ -204,7 +218,7 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
         if (snap.exists()) setCostSettings(snap.data());
       } catch (e) { /* silently ignore, use defaults */ }
     };
-    Promise.all([loadProducts(), loadUsers(), loadCosts(), loadFilamentos(), loadPedidos()])
+    Promise.all([loadProducts(), loadUsers(), loadCosts(), loadFilamentos(), loadPedidos(), loadInsumos()])
       .then(([prods]) => loadPrivados(prods))
       .then(() => setLoading(false));
   }, []);
@@ -247,16 +261,18 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
     try {
       // El catálogo público solo lee este booleano: se recalcula al guardar,
       // porque la receta pudo haber cambiado.
-      const disponible = calcularDisponibilidad(data, filamentos).disponible;
+      const disponible = calcularDisponibilidad(data, filamentos, insumos).disponible;
 
-      // El doc público NO lleva receta/origenUrl/notas: van a la subcolección
-      // privada, que solo pueden leer los admins.
-      const { _id, receta, origenUrl, notas, insumos, ...publico } = data;
+      // El doc público NO lleva receta/origenUrl/notas/insumos: van a la
+      // subcolección privada, que solo pueden leer los admins.
+      // Se renombra al destructurar para no tapar el estado `insumos` (el
+      // catálogo), que se usa arriba en el mismo bloque.
+      const { _id, receta, origenUrl, notas, insumos: insumosProducto, ...publico } = data;
       const privado = {
         receta: receta || [],
         origenUrl: origenUrl || "",
         notas: notas || "",
-        insumos: insumos || [],
+        insumos: insumosProducto || [],
       };
 
       // Al crear, el ID visible se recalcula contra la lista fresca para que
@@ -319,6 +335,7 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
     { id: "productos", label: "Productos", icon: <Icon.grid size={16}/> },
     { id: "categorias", label: "Categorías", icon: <Icon.layers size={16}/> },
     { id: "inventario", label: "Inventario", icon: <Icon.layers size={16}/> },
+    { id: "insumos", label: "Insumos", icon: <Icon.grid size={16}/> },
     { id: "pedidos", label: "Pedidos", icon: <Icon.truck size={16}/> },
     { id: "usuarios", label: "Usuarios", icon: <Icon.user size={16}/> },
     { id: "costos", label: "Costos", icon: <Icon.spark size={16}/> },
@@ -388,11 +405,12 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
           {tab === "dashboard" && <DashboardTab products={products} users={users} seedProducts={() => {}} categories={propCategories} onCategoriesChange={onCategoriesChange} onProductsChange={onProductsChange} setMsg={setMsg} />}
           {tab === "productos" && (
             showForm
-              ? <ProductForm product={editProduct} onSave={handleSave} onCancel={() => { setShowForm(false); setEditProduct(null); }} categories={propCategories} filamentos={filamentos} costs={costSettings} nextId={siguienteIdProducto(products)}/>
+              ? <ProductForm product={editProduct} onSave={handleSave} onCancel={() => { setShowForm(false); setEditProduct(null); }} categories={propCategories} filamentos={filamentos} costs={costSettings} nextId={siguienteIdProducto(products)} catalogoInsumos={insumos}/>
               : <ProductsTab
                   products={productosFull}
                   costs={costSettings}
                   filamentos={filamentos}
+                  insumos={insumos}
                   categories={propCategories}
                   pendientesDeMigrar={products.filter(p => CAMPOS_PRIVADOS.some(c => p[c] !== undefined)).length}
                   onEdit={(p) => { setEditProduct(p); setShowForm(true); }}
@@ -413,11 +431,15 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
           {tab === "inventario" && (
             <InventarioTab filamentos={filamentos} onChanged={handleInventarioChange} setMsg={setMsg}/>
           )}
+          {tab === "insumos" && (
+            <InsumosTab insumos={insumos} onChanged={handleInventarioChange} setMsg={setMsg}/>
+          )}
           {tab === "pedidos" && (
             <PedidosTab
               pedidos={pedidos}
               productos={productosFull}
               filamentos={filamentos}
+              insumos={insumos}
               onPedidosChange={loadPedidos}
               onInventarioChange={handleInventarioChange}
               setMsg={setMsg}
@@ -462,7 +484,7 @@ function DashboardTab({ products, users, categories, onCategoriesChange, onProdu
 
 // ─── Products Table ─────────────────────────────────────
 function ProductsTab({
-  products, costs = DEFAULT_COSTS, filamentos = [], categories = [], pendientesDeMigrar = 0,
+  products, costs = DEFAULT_COSTS, filamentos = [], insumos = [], categories = [], pendientesDeMigrar = 0,
   onEdit, onDelete, onNew, onToggleVisible, onRecalcular, onMigrarPrivados,
   onRenumerarIds, tiemposIlegibles = [], onCerrarTiempos,
 }) {
@@ -629,7 +651,7 @@ function ProductsTab({
 
           {filtered.map(p => {
             const rent = calcularRentabilidad(p, costs);
-            const disp = calcularDisponibilidad(p, filamentos);
+            const disp = calcularDisponibilidad(p, filamentos, insumos);
             const abierto = expandido === p._id;
             return (
               <div key={p._id} style={{ borderBottom: "1px solid var(--line)", opacity: p.visible === false ? 0.5 : 1 }}>
@@ -882,6 +904,42 @@ function DisponibilidadDetalle({ disp, producto }) {
           {disp.faltantes.map((f, i) => <li key={i}>{motivoFaltante(f)}</li>)}
         </ul>
       )}
+
+      {/* Insumos: mismo criterio pero a 1x, no el doble */}
+      {(disp.detalleInsumos || []).length > 0 && (
+        <>
+          <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 1.2, color: "var(--muted)", fontWeight: 700, margin: "18px 0 8px" }}>
+            Insumos vs. catálogo — alcanza con tener lo que consume una unidad
+          </div>
+          <div style={{
+            display: "grid", gridTemplateColumns: "2.4fr 110px 120px 120px 90px",
+            gap: 10, padding: "8px 0", fontSize: 10, textTransform: "uppercase",
+            letterSpacing: 1.2, color: "var(--muted)", fontWeight: 700,
+          }}>
+            <div>Insumo</div><div>Por unidad</div><div>Necesario</div><div>En catálogo</div><div>Estado</div>
+          </div>
+          {disp.detalleInsumos.map((d, i) => (
+            <div key={i} style={{
+              display: "grid", gridTemplateColumns: "2.4fr 110px 120px 120px 90px",
+              gap: 10, padding: "8px 0", fontSize: 12, borderTop: "1px solid var(--line)",
+              alignItems: "center",
+            }}>
+              <div style={{ fontWeight: 600 }}>{d.nombre || "(sin nombre)"}</div>
+              <div>{d.cantidadPorUnidad} u.</div>
+              <div style={{ fontWeight: 600 }}>{d.requerido} u.</div>
+              <div style={{ color: d.ok ? "var(--text)" : "#c64138", fontWeight: d.ok ? 400 : 700 }}>
+                {d.existe ? `${d.enCatalogo} u.` : "no está en el catálogo"}
+              </div>
+              <div style={{ color: d.ok ? "#4a7a52" : "#c64138", fontWeight: 700 }}>{d.ok ? "OK" : "Falta"}</div>
+            </div>
+          ))}
+          {disp.faltantesInsumos.length > 0 && (
+            <ul style={{ margin: "12px 0 0", paddingLeft: 18, fontSize: 12, color: "#c64138", lineHeight: 1.7 }}>
+              {disp.faltantesInsumos.map((f, i) => <li key={i}>{motivoFaltanteInsumo(f)}</li>)}
+            </ul>
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -1042,60 +1100,117 @@ function PrecioField({ manual, onToggleManual, valorManual, onChangeManual, suge
   );
 }
 
-// ─── Editor de insumos (opcional) ─────────────────────────────────────
-function InsumosEditor({ insumos, setInsumos }) {
-  const up = (i, patch) => setInsumos(list => list.map((l, j) => j === i ? { ...l, ...patch } : l));
-  const quitar = (i) => setInsumos(list => list.filter((_, j) => j !== i));
-  const agregar = () => setInsumos(list => [...list, { nombre: "", precio: 0 }]);
+// ─── Editor de insumos del producto (opcional) ────────────────────────
+// Cada línea elige un insumo del catálogo y cuántas unidades consume UNA
+// unidad del producto. El precio no se escribe a mano: sale de
+// cantidad × precioUnidad del catálogo, igual que Material y Peso.
+function InsumosEditor({ lineas, setLineas, catalogo }) {
+  const up = (i, patch) => setLineas(list => list.map((l, j) => j === i ? { ...l, ...patch } : l));
+  const quitar = (i) => setLineas(list => list.filter((_, j) => j !== i));
+  const agregar = () => setLineas(list => [...list, { insumoId: "", cantidad: 1 }]);
 
-  const total = insumos.reduce((s, i) => s + (Number(i.precio) || 0), 0);
+  /** Precio vigente del catálogo; si el insumo ya no existe, el del snapshot. */
+  const precioDe = (l) => {
+    const insumo = catalogo.find(i => i._id === l.insumoId);
+    return insumo ? Number(insumo.precioUnidad) || 0 : Number(l.precioUnidad) || 0;
+  };
+  const subtotalDe = (l) => precioDe(l) * Math.max(1, Number(l.cantidad) || 1);
+
+  const total = lineas.filter(l => l.insumoId).reduce((s, l) => s + subtotalDe(l), 0);
+  const yaElegidos = new Set(lineas.map(l => l.insumoId).filter(Boolean));
 
   return (
     <div style={{ marginBottom: 16, paddingTop: 16, borderTop: "1px solid var(--line)" }}>
       <div style={{ ...labelStyle, marginBottom: 4 }}>Insumos (opcional)</div>
       <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 12, lineHeight: 1.5 }}>
-        Componentes que no son filamento (imanes, tornillos, cable, LEDs). Su precio se suma al
-        precio final <strong>sin margen</strong>, tal cual.
+        Componentes que no son filamento, tomados del catálogo del tab Insumos. Su precio se suma
+        al precio final <strong>sin margen</strong>. La cantidad es por <strong>una</strong> unidad
+        del producto (ej. 2 imanes por pieza).
       </div>
+
+      {catalogo.length === 0 && (
+        <div style={{ padding: "10px 12px", background: "#B56B3E15", borderLeft: "3px solid #B56B3E", fontSize: 12, marginBottom: 12 }}>
+          El catálogo de insumos está vacío. Cargá los insumos en el tab Insumos para poder usarlos acá.
+        </div>
+      )}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {insumos.map((l, i) => (
-          <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 130px 36px", gap: 10, alignItems: "center" }}>
-            <input
-              value={l.nombre}
-              onChange={e => up(i, { nombre: e.target.value })}
-              placeholder="Imán neodimio 10mm"
-              style={recetaInput}
-            />
-            <input
-              type="number"
-              value={l.precio}
-              onChange={e => up(i, { precio: e.target.value })}
-              placeholder="Precio ARS"
-              style={recetaInput}
-            />
-            <button onClick={() => quitar(i)} style={{ ...actionBtn, color: "#c64138", justifyContent: "center" }} title="Quitar insumo">
-              <Icon.trash size={14}/>
-            </button>
-          </div>
-        ))}
+        {lineas.map((l, i) => {
+          const insumo = catalogo.find(x => x._id === l.insumoId);
+          const huerfano = l.insumoId && !insumo;
+          return (
+            <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 90px 120px 36px", gap: 10, alignItems: "center" }}>
+              <div>
+                {i === 0 && <div style={{ ...labelStyle, marginBottom: 4 }}>Insumo</div>}
+                <select
+                  value={l.insumoId}
+                  onChange={e => up(i, { insumoId: e.target.value })}
+                  style={{ ...selectStyle, borderColor: huerfano ? "#c64138" : "var(--line)" }}
+                >
+                  <option value="">Seleccionar insumo...</option>
+                  {catalogo.map(x => (
+                    <option key={x._id} value={x._id} disabled={yaElegidos.has(x._id) && x._id !== l.insumoId}>
+                      {x.nombre} — {fmtARS(x.precioUnidad || 0)}/u ({x.cantidadDisponible ?? 0} disp.)
+                    </option>
+                  ))}
+                </select>
+                {huerfano && (
+                  <div style={{ fontSize: 11, color: "#c64138", marginTop: 4 }}>
+                    "{l.nombre || "insumo"}" ya no está en el catálogo. Elegí otro o quitá la línea.
+                  </div>
+                )}
+              </div>
+              <div>
+                {i === 0 && <div style={{ ...labelStyle, marginBottom: 4 }}>Cantidad</div>}
+                <input
+                  type="number" min="1"
+                  value={l.cantidad}
+                  onChange={e => up(i, { cantidad: e.target.value })}
+                  style={recetaInput}
+                />
+              </div>
+              <div>
+                {i === 0 && <div style={{ ...labelStyle, marginBottom: 4 }}>Subtotal</div>}
+                <div style={{
+                  padding: "10px 12px", background: "var(--bg-alt)",
+                  border: "1px dashed var(--line)", borderRadius: 4,
+                  fontSize: 13, fontWeight: 600, boxSizing: "border-box",
+                }}>
+                  {l.insumoId ? fmtARS(subtotalDe(l)) : "—"}
+                </div>
+              </div>
+              <button
+                onClick={() => quitar(i)}
+                style={{ ...actionBtn, color: "#c64138", justifyContent: "center", height: 40, marginTop: i === 0 ? 20 : 0 }}
+                title="Quitar insumo"
+              >
+                <Icon.trash size={14}/>
+              </button>
+            </div>
+          );
+        })}
       </div>
 
-      {insumos.length === 0 && (
+      {lineas.length === 0 && (
         <div style={{ fontSize: 12, color: "var(--muted)", padding: "6px 0" }}>
           Sin insumos: el precio sale solo de la receta y la hora de máquina.
         </div>
       )}
 
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 12 }}>
-        <button onClick={agregar} style={{
-          background: "none", border: "1px dashed var(--line-strong)",
-          padding: "8px 14px", cursor: "pointer", color: "var(--muted)",
-          fontSize: 12, display: "flex", alignItems: "center", gap: 6,
-        }}>
+        <button
+          onClick={agregar}
+          disabled={catalogo.length === 0}
+          style={{
+            background: "none", border: "1px dashed var(--line-strong)",
+            padding: "8px 14px", cursor: catalogo.length === 0 ? "not-allowed" : "pointer",
+            color: "var(--muted)", opacity: catalogo.length === 0 ? 0.5 : 1,
+            fontSize: 12, display: "flex", alignItems: "center", gap: 6,
+          }}
+        >
           <Icon.plus size={12}/> Agregar insumo
         </button>
-        {insumos.length > 0 && (
+        {lineas.length > 0 && (
           <span style={{ fontSize: 12, color: "var(--muted)" }}>
             Total insumos: <strong style={{ color: "var(--text)" }}>{fmtARS(total)}</strong>
           </span>
@@ -1128,7 +1243,7 @@ function SpecCalculada({ label, valor, vacio }) {
 }
 
 // ─── Preview en vivo de la disponibilidad mientras se edita la receta ──
-function DisponibilidadPreview({ receta, filamentos }) {
+function DisponibilidadPreview({ receta, filamentos, insumos = [], catalogoInsumos = [] }) {
   const limpia = receta
     .filter(l => l.material.trim() && l.color.trim() && (Number(l.gramos) || 0) > 0)
     .map(l => ({ material: l.material.trim(), color: l.color.trim(), gramos: Number(l.gramos) }));
@@ -1145,7 +1260,7 @@ function DisponibilidadPreview({ receta, filamentos }) {
     );
   }
 
-  const disp = calcularDisponibilidad({ receta: limpia }, filamentos);
+  const disp = calcularDisponibilidad({ receta: limpia, insumos }, filamentos, catalogoInsumos);
   const color = disp.disponible ? "#4a7a52" : "#c64138";
 
   return (
@@ -1153,9 +1268,10 @@ function DisponibilidadPreview({ receta, filamentos }) {
       <strong style={{ color }}>
         {disp.disponible ? "Disponible con el inventario actual" : "No disponible con el inventario actual"}
       </strong>
-      {disp.faltantes.length > 0 && (
+      {(disp.faltantes.length > 0 || disp.faltantesInsumos.length > 0) && (
         <ul style={{ margin: "8px 0 0", paddingLeft: 18, color: "var(--muted)" }}>
-          {disp.faltantes.map((f, i) => <li key={i}>{motivoFaltante(f)}</li>)}
+          {disp.faltantes.map((f, i) => <li key={`f${i}`}>{motivoFaltante(f)}</li>)}
+          {disp.faltantesInsumos.map((f, i) => <li key={`i${i}`}>{motivoFaltanteInsumo(f)}</li>)}
         </ul>
       )}
     </div>
@@ -1170,7 +1286,7 @@ const recetaInput = {
 };
 
 // ─── Product Form (Create / Edit) ─────────────────────────────
-function ProductForm({ product, onSave, onCancel, categories = [], filamentos = [], costs = DEFAULT_COSTS, nextId = "" }) {
+function ProductForm({ product, onSave, onCancel, categories = [], filamentos = [], costs = DEFAULT_COSTS, nextId = "", catalogoInsumos = [] }) {
   // Normalize: existing products may have img (string) or images (array)
   const initImages = () => {
     if (product?.images?.length) return [...product.images, "", "", "", "", ""].slice(0, 5);
@@ -1200,8 +1316,17 @@ function ProductForm({ product, onSave, onCancel, categories = [], filamentos = 
       gramos: l.gramos ?? 0,
     }))
   );
-  const [insumos, setInsumos] = useState(() =>
-    (product?.insumos || []).map(i => ({ nombre: i.nombre || "", precio: i.precio ?? 0 }))
+  // Líneas de insumo del producto. Se conserva el snapshot (nombre/precioUnidad)
+  // por si el insumo desapareció del catálogo.
+  const [lineasInsumo, setLineasInsumo] = useState(() =>
+    (product?.insumos || [])
+      .filter(i => i && i.insumoId)
+      .map(i => ({
+        insumoId: i.insumoId,
+        cantidad: Math.max(1, Number(i.cantidad) || 1),
+        nombre: i.nombre || "",
+        precioUnidad: Number(i.precioUnidad) || 0,
+      }))
   );
   // Tiempo de impresión: dos números. Si el producto todavía tiene el texto
   // libre viejo, se parsea para precargar los campos.
@@ -1233,9 +1358,22 @@ function ProductForm({ product, onSave, onCancel, categories = [], filamentos = 
   // Material y peso salen de la receta y se recalculan en vivo mientras se edita.
   const specsCalculadas = useMemo(() => specsDesdeReceta(recetaLimpia), [recetaLimpia]);
 
-  const insumosLimpios = useMemo(() => insumos
-    .filter(i => i.nombre.trim())
-    .map(i => ({ nombre: i.nombre.trim(), precio: Number(i.precio) || 0 })), [insumos]);
+  // Snapshot al guardar: nombre y precioUnidad quedan congelados en el producto,
+  // así cambiar el precio en el catálogo no reescribe el histórico.
+  const insumosLimpios = useMemo(() => lineasInsumo
+    .filter(l => l.insumoId)
+    .map(l => {
+      const insumo = catalogoInsumos.find(x => x._id === l.insumoId);
+      const cantidad = Math.max(1, Number(l.cantidad) || 1);
+      const precioUnidad = insumo ? Number(insumo.precioUnidad) || 0 : Number(l.precioUnidad) || 0;
+      return {
+        insumoId: l.insumoId,
+        nombre: insumo?.nombre || l.nombre || "",
+        cantidad,
+        precioUnidad,
+        subtotal: cantidad * precioUnidad,
+      };
+    }), [lineasInsumo, catalogoInsumos]);
 
   // Precio sugerido: misma fórmula que el tab de Costos (hora de máquina +
   // material con margen) más los insumos sumados sin margen. Se recalcula solo
@@ -1430,10 +1568,11 @@ function ProductForm({ product, onSave, onCancel, categories = [], filamentos = 
           <RecetaEditor receta={receta} setReceta={setReceta} filamentos={filamentos}/>
 
           {/* Insumos opcionales (imanes, tornillos, cable...) */}
-          <InsumosEditor insumos={insumos} setInsumos={setInsumos}/>
+          <InsumosEditor lineas={lineasInsumo} setLineas={setLineasInsumo} catalogo={catalogoInsumos}/>
 
           {/* Vista previa de disponibilidad con el inventario actual */}
-          <DisponibilidadPreview receta={receta} filamentos={filamentos}/>
+          <DisponibilidadPreview receta={receta} filamentos={filamentos}
+            insumos={insumosLimpios} catalogoInsumos={catalogoInsumos}/>
 
           {/* ── Datos internos: nunca se muestran en el catálogo público ── */}
           <div style={{ marginTop: 24, paddingTop: 16, borderTop: "1px solid var(--line)" }}>

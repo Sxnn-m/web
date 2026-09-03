@@ -98,6 +98,13 @@ service cloud.firestore {
       }
     }
 
+    // ── Catálogo de insumos ────────────────────────────────────────────
+    // Imanes, tornillos, LEDs: precios de costo y stock interno. Igual que
+    // filamentos, sin lectura ni escritura pública.
+    match /insumos/{insumoId} {
+      allow read, write: if esAdmin();
+    }
+
     // ── Pedidos ────────────────────────────────────────────────────────
     match /pedidos/{pedidoId} {
       allow read, write: if esAdmin();

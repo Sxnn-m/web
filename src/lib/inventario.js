@@ -7,7 +7,10 @@ import {
   collection, getDocs, addDoc, updateDoc, deleteDoc, doc,
   query, orderBy, increment, serverTimestamp, deleteField,
 } from 'firebase/firestore';
-import { calcularDisponibilidad, buscarFilamento, specsDesdeReceta } from './disponibilidad.js';
+import {
+  calcularDisponibilidad, buscarFilamento, specsDesdeReceta, lineasDeInsumo,
+} from './disponibilidad.js';
+import { descontarInsumo } from './insumos.js';
 import { tiempoDeProducto, specsDeTiempo } from './tiempoImpresion.js';
 
 export const COL_FILAMENTOS = "filamentos";
@@ -91,7 +94,7 @@ export async function registrarRestock(filamentoId, cantidadAgregada, nota = "")
  *
  * @returns {{actualizados, disponibilidadActualizada, specsActualizadas, total}}
  */
-export async function recalcularDisponibilidad(productos = [], filamentos = []) {
+export async function recalcularDisponibilidad(productos = [], filamentos = [], insumos = []) {
   let actualizados = 0;
   let disponibilidadActualizada = 0;
   let specsActualizadas = 0;
@@ -101,7 +104,7 @@ export async function recalcularDisponibilidad(productos = [], filamentos = []) 
   for (const p of productos) {
     if (!p?._id) continue;
 
-    const { disponible } = calcularDisponibilidad(p, filamentos);
+    const { disponible } = calcularDisponibilidad(p, filamentos, insumos);
     const specs = specsDesdeReceta(p.receta || []);
     const patch = {};
 
@@ -227,17 +230,50 @@ export function planDeConsumo(pedido, productos = []) {
 }
 
 /**
+ * Insumos que consume un pedido: una línea por cada insumo de cada producto,
+ * con el total de unidades a descontar del catálogo.
+ *
+ * A diferencia del filamento no hay desperdicio: un imán entra o no entra.
+ */
+export function planDeInsumos(pedido, productos = []) {
+  const plan = [];
+  for (const item of pedido.items || []) {
+    const producto = productos.find(p => p._id === item.productoId);
+    if (!producto) continue;
+    const cantidadPedido = Number(item.cantidad) || 0;
+    for (const linea of lineasDeInsumo(producto)) {
+      plan.push({
+        clave: `${item.productoId}|${linea.insumoId}`,
+        productoId: item.productoId,
+        productoNombre: item.productoNombre,
+        insumoId: linea.insumoId,
+        nombre: linea.nombre,
+        cantidadPorUnidad: linea.cantidad,
+        cantidad: cantidadPedido,
+        unidadesConsumidas: linea.cantidad * cantidadPedido,
+      });
+    }
+  }
+  return plan;
+}
+
+/**
  * Marca un pedido como impreso: por cada línea del plan de consumo descuenta
  * del filamento (consumo de receta × cantidad + desperdicio informado) y
- * escribe el gasto en el historial del filamento.
+ * escribe el gasto en el historial del filamento. Además descuenta del
+ * catálogo las unidades de insumo que consumió el pedido.
  *
  * @param {object} pedido
  * @param {Array}  plan        salida de planDeConsumo()
  * @param {object} desperdicios mapa clave-del-plan → gramos desperdiciados
  * @param {Array}  filamentos  inventario actual
- * @returns {{advertencias: string[]}} filamentos de receta que no existen en inventario
+ * @param {Array}  planInsumos salida de planDeInsumos()
+ * @param {Array}  insumos     catálogo actual
+ * @returns {{advertencias: string[]}} filamentos/insumos que no se pudieron descontar
  */
-export async function marcarPedidoImpreso(pedido, plan, desperdicios = {}, filamentos = []) {
+export async function marcarPedidoImpreso(
+  pedido, plan, desperdicios = {}, filamentos = [], planInsumos = [], insumos = []
+) {
   const advertencias = [];
 
   for (const linea of plan) {
@@ -265,6 +301,23 @@ export async function marcarPedidoImpreso(pedido, plan, desperdicios = {}, filam
       cantidadGramos: increment(-total),
       updatedAt: serverTimestamp(),
     });
+  }
+
+  // Insumos: descuento directo de unidades, sin desperdicio ni historial.
+  for (const linea of planInsumos) {
+    const insumo = insumos.find(i => i._id === linea.insumoId);
+    if (!insumo) {
+      advertencias.push(
+        `${linea.nombre} (${linea.productoNombre}): ya no está en el catálogo de insumos, ` +
+        `no se descontaron ${linea.unidadesConsumidas} u.`
+      );
+      continue;
+    }
+    try {
+      await descontarInsumo(linea.insumoId, linea.unidadesConsumidas);
+    } catch (err) {
+      advertencias.push(`${linea.nombre}: no se pudo descontar (${err.message}).`);
+    }
   }
 
   await updateDoc(doc(db, COL_PEDIDOS, pedido._id), {
