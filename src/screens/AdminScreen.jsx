@@ -17,6 +17,7 @@ import {
   cargarPersonalizadosCompletos, guardarPersonalizado, eliminarPersonalizado,
 } from '../lib/personalizados.js';
 import { InsumosTab } from './admin/InsumosTab.jsx';
+import { EstadisticasTab } from './admin/EstadisticasTab.jsx';
 import {
   cargarFilamentos, cargarPedidos, recalcularDisponibilidad,
 } from '../lib/inventario.js';
@@ -372,6 +373,7 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
     { id: "inventario", label: "Inventario", icon: <Icon.layers size={16}/> },
     { id: "insumos", label: "Insumos", icon: <Icon.grid size={16}/> },
     { id: "pedidos", label: "Pedidos", icon: <Icon.truck size={16}/> },
+    { id: "estadisticas", label: "Estadísticas", icon: <Icon.list size={16}/> },
     { id: "usuarios", label: "Usuarios", icon: <Icon.user size={16}/> },
     { id: "costos", label: "Costos", icon: <Icon.spark size={16}/> },
   ];
@@ -500,6 +502,16 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
               onPedidosChange={loadPedidos}
               onInventarioChange={handleInventarioChange}
               setMsg={setMsg}
+            />
+          )}
+          {tab === "estadisticas" && (
+            <EstadisticasTab
+              pedidos={pedidos}
+              productos={productosFull}
+              personalizados={personalizados}
+              filamentos={filamentos}
+              categories={propCategories}
+              costs={costSettings}
             />
           )}
           {tab === "usuarios" && <UsersTab users={users} onToggleRole={toggleRole} />}
