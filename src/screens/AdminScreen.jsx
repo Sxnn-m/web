@@ -494,6 +494,7 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
             <PedidosTab
               pedidos={pedidos}
               productos={productosFull}
+              personalizados={personalizados}
               filamentos={filamentos}
               insumos={insumos}
               onPedidosChange={loadPedidos}

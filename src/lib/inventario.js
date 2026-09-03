@@ -140,6 +140,9 @@ export function siguienteNumeroOrden(pedidos = []) {
 export async function crearPedido({ numeroOrden, clienteNombre, items }) {
   const lineas = items.map(i => ({
     productoId: i.productoId,
+    // De qué colección salió la línea. Sin esto, al marcar el pedido como
+    // impreso no se sabría dónde buscar la receta.
+    tipo: i.tipo === "personalizado" ? "personalizado" : "catalogo",
     // Código visible (TKPx) al momento del pedido: se guarda como snapshot
     // para que la línea siga siendo identificable aunque el producto se
     // renumere o se borre del catálogo.
@@ -177,6 +180,16 @@ export async function marcarEntregado(pedido, entregado) {
 }
 
 /**
+ * Resuelve el producto de una línea de pedido en la colección que corresponda.
+ * Las líneas sin "tipo" son de pedidos anteriores a Personalizados, cuando
+ * todo salía de "products".
+ */
+export function buscarProductoDeLinea(item, productos = [], personalizados = []) {
+  const lista = item?.tipo === "personalizado" ? personalizados : productos;
+  return lista.find(p => p._id === item.productoId) || null;
+}
+
+/**
  * Devuelve, para un pedido, las líneas de consumo que habrá que descontar:
  * una por cada material/color de la receta de cada producto del pedido.
  * Es lo que alimenta el modal de "gramos desperdiciados".
@@ -185,11 +198,14 @@ export async function marcarEntregado(pedido, entregado) {
  * guarda pedidos.items[].productoId y nunca cambia). No se compara contra el
  * campo "id" visible (TKPx): ese se puede renumerar, y un match por ahí
  * descontaría el filamento de otro producto sin avisar.
+ *
+ * La línea puede venir de "products" o de "personalizados": lo dice su campo
+ * "tipo". Los pedidos viejos no lo tienen y son todos de catálogo.
  */
-export function planDeConsumo(pedido, productos = []) {
+export function planDeConsumo(pedido, productos = [], personalizados = []) {
   const plan = [];
   for (const item of pedido.items || []) {
-    const producto = productos.find(p => p._id === item.productoId);
+    const producto = buscarProductoDeLinea(item, productos, personalizados);
     const receta = producto?.receta || [];
     for (const linea of receta) {
       const gramos = Number(linea.gramos) || 0;
@@ -215,10 +231,10 @@ export function planDeConsumo(pedido, productos = []) {
  *
  * A diferencia del filamento no hay desperdicio: un imán entra o no entra.
  */
-export function planDeInsumos(pedido, productos = []) {
+export function planDeInsumos(pedido, productos = [], personalizados = []) {
   const plan = [];
   for (const item of pedido.items || []) {
-    const producto = productos.find(p => p._id === item.productoId);
+    const producto = buscarProductoDeLinea(item, productos, personalizados);
     if (!producto) continue;
     const cantidadPedido = Number(item.cantidad) || 0;
     for (const linea of lineasDeInsumo(producto)) {
