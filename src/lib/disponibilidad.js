@@ -5,6 +5,15 @@
 /** Gramos por debajo de los cuales un filamento se marca para restock. */
 export const UMBRAL_RESTOCK = 350;
 
+/** Unidades en o por debajo de las cuales un insumo se marca para restock. */
+export const UMBRAL_RESTOCK_INSUMO = 5;
+
+/**
+ * A diferencia del filamento, de los insumos alcanza con tener exactamente lo
+ * que consume una unidad del producto: no se exige el doble.
+ */
+export const FACTOR_DISPONIBILIDAD_INSUMO = 1;
+
 /**
  * Un producto está disponible si, para cada material/color de su receta,
  * el inventario tiene al menos este múltiplo de lo que consume una unidad.
@@ -21,6 +30,32 @@ export const claveFilamento = (material, color) =>
 /** ¿Este filamento necesita restock? */
 export const necesitaRestock = (filamento) =>
   Number(filamento?.cantidadGramos || 0) < UMBRAL_RESTOCK;
+
+/** ¿Este insumo del catálogo necesita restock? */
+export const necesitaRestockInsumo = (insumo) =>
+  Number(insumo?.cantidadDisponible || 0) <= UMBRAL_RESTOCK_INSUMO;
+
+/** Busca un insumo del catálogo por su id de documento. */
+export function buscarInsumo(insumos = [], insumoId) {
+  if (!insumoId) return null;
+  return insumos.find(i => i._id === insumoId) || null;
+}
+
+/**
+ * Normaliza las líneas de insumo de un producto.
+ * Shape actual: { insumoId, nombre, cantidad, precioUnidad, subtotal }.
+ * Se ignoran las líneas sin insumoId (formato viejo de texto libre): no se
+ * pueden chequear contra el catálogo.
+ */
+export function lineasDeInsumo(producto) {
+  return (producto?.insumos || [])
+    .filter(l => l && l.insumoId)
+    .map(l => ({
+      insumoId: l.insumoId,
+      nombre: l.nombre || "",
+      cantidad: Math.max(1, Number(l.cantidad) || 1),
+    }));
+}
 
 /**
  * Agrupa las líneas de una receta que apuntan al mismo material/color,
@@ -103,22 +138,51 @@ export function buscarFilamento(filamentos = [], material, color) {
  * Un producto sin receta también queda NO disponible: sin receta no hay forma
  * de saber si se puede imprimir, así que no se vende hasta cargarla.
  *
- * @param {object} producto  documento de "products" (usa producto.receta)
+ * Los insumos (imanes, tornillos) se chequean con el mismo criterio pero a 1x:
+ * alcanza con tener en el catálogo lo que consume una unidad del producto.
+ *
+ * @param {object} producto  documento de "products" (usa producto.receta e insumos)
  * @param {Array}  filamentos documentos de "filamentos"
+ * @param {Array}  insumos    documentos de "insumos"
  * @returns {{
  *   disponible: boolean,
  *   sinReceta: boolean,
  *   detalle: Array<{material,color,gramosPorUnidad,requerido,enInventario,existe,ok}>,
- *   faltantes: Array<object>
+ *   faltantes: Array<object>,
+ *   detalleInsumos: Array<{insumoId,nombre,cantidadPorUnidad,requerido,enCatalogo,existe,ok}>,
+ *   faltantesInsumos: Array<object>
  * }}
  */
-export function calcularDisponibilidad(producto, filamentos = []) {
+export function calcularDisponibilidad(producto, filamentos = [], insumos = []) {
   const receta = agruparReceta(producto?.receta || []);
+
+  // Los insumos se evalúan siempre, incluso sin receta, para que el detalle
+  // del backoffice muestre el panorama completo.
+  const detalleInsumos = lineasDeInsumo(producto).map(linea => {
+    const insumo = buscarInsumo(insumos, linea.insumoId);
+    const enCatalogo = insumo ? Number(insumo.cantidadDisponible) || 0 : 0;
+    const requerido = linea.cantidad * FACTOR_DISPONIBILIDAD_INSUMO;
+    return {
+      insumoId: linea.insumoId,
+      // El nombre del catálogo manda; el del producto es un snapshot viejo.
+      nombre: insumo?.nombre || linea.nombre,
+      cantidadPorUnidad: linea.cantidad,
+      requerido,
+      enCatalogo,
+      existe: Boolean(insumo),
+      ok: Boolean(insumo) && enCatalogo >= requerido,
+    };
+  });
+  const faltantesInsumos = detalleInsumos.filter(d => !d.ok);
 
   // Sin receta cargada no hay forma de evaluar el consumo: el producto no
   // se ofrece hasta que se cargue.
   if (receta.length === 0) {
-    return { disponible: false, sinReceta: true, detalle: [], faltantes: [] };
+    return {
+      disponible: false, sinReceta: true,
+      detalle: [], faltantes: [],
+      detalleInsumos, faltantesInsumos,
+    };
   }
 
   const detalle = receta.map(item => {
@@ -139,16 +203,19 @@ export function calcularDisponibilidad(producto, filamentos = []) {
 
   const faltantes = detalle.filter(d => !d.ok);
   return {
-    disponible: faltantes.length === 0,
+    // Tiene que cumplir las dos condiciones: filamento (2x) e insumos (1x).
+    disponible: faltantes.length === 0 && faltantesInsumos.length === 0,
     sinReceta: false,
     detalle,
     faltantes,
+    detalleInsumos,
+    faltantesInsumos,
   };
 }
 
 /** Atajo booleano, útil para mapear listas de productos. */
-export const esDisponible = (producto, filamentos) =>
-  calcularDisponibilidad(producto, filamentos).disponible;
+export const esDisponible = (producto, filamentos, insumos) =>
+  calcularDisponibilidad(producto, filamentos, insumos).disponible;
 
 /** Texto corto explicando por qué un filamento de la receta no alcanza. */
 export function motivoFaltante(item) {
@@ -158,4 +225,13 @@ export function motivoFaltante(item) {
   }
   return `${etiqueta}: ${item.enInventario} g disponibles vs. ${item.requerido} g necesarios ` +
     `(${item.gramosPorUnidad} g × ${FACTOR_DISPONIBILIDAD})`;
+}
+
+/** Texto corto explicando por qué un insumo de la receta no alcanza. */
+export function motivoFaltanteInsumo(item) {
+  if (!item.existe) {
+    return `${item.nombre || "insumo"}: ya no está en el catálogo de insumos ` +
+      `(necesita ${item.requerido} u.)`;
+  }
+  return `${item.nombre}: ${item.enCatalogo} u. disponibles vs. ${item.requerido} u. necesarias`;
 }

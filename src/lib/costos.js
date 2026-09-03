@@ -110,9 +110,21 @@ export function calcularRentabilidad(producto, costs = DEFAULT_COSTS) {
   };
 }
 
-/** Suma de los precios de los insumos (imanes, tornillos, cable, etc.). */
+/**
+ * Suma de los insumos de un producto (imanes, tornillos, cable, etc.).
+ *
+ * Shape actual: { insumoId, nombre, cantidad, precioUnidad, subtotal }.
+ * Se acepta también el shape viejo { nombre, precio } de antes del catálogo,
+ * para que un producto sin migrar no pierda su precio.
+ */
 export function totalInsumos(insumos = []) {
-  return insumos.reduce((total, i) => total + (Number(i?.precio) || 0), 0);
+  return insumos.reduce((total, i) => {
+    if (i?.subtotal !== undefined) return total + (Number(i.subtotal) || 0);
+    if (i?.precioUnidad !== undefined) {
+      return total + (Number(i.precioUnidad) || 0) * (Number(i.cantidad) || 0);
+    }
+    return total + (Number(i?.precio) || 0);   // formato viejo
+  }, 0);
 }
 
 /**

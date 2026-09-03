@@ -3,7 +3,7 @@ import { TKButton, TKInput, TKPill, Icon, fmtARS } from '../../components/UI.jsx
 import { fmtFecha } from './InventarioTab.jsx';
 import {
   cargarPedidos, siguienteNumeroOrden, crearPedido, eliminarPedido,
-  marcarEntregado, marcarPedidoImpreso, planDeConsumo,
+  marcarEntregado, marcarPedidoImpreso, planDeConsumo, planDeInsumos,
 } from '../../lib/inventario.js';
 
 const actionBtn = {
@@ -26,7 +26,7 @@ const labelStyle = {
 const lineaVacia = () => ({ productoId: "", cantidad: 1, precioUnitario: 0 });
 
 // ─── Tab Pedidos ─────────────────────────────────────────────────────
-export function PedidosTab({ pedidos, productos, filamentos, onPedidosChange, onInventarioChange, setMsg }) {
+export function PedidosTab({ pedidos, productos, filamentos, insumos = [], onPedidosChange, onInventarioChange, setMsg }) {
   const [showForm, setShowForm] = useState(false);
   const [cliente, setCliente] = useState("");
   const [lineas, setLineas] = useState([lineaVacia()]);
@@ -287,6 +287,7 @@ export function PedidosTab({ pedidos, productos, filamentos, onPedidosChange, on
           pedido={imprimiendo}
           productos={productos}
           filamentos={filamentos}
+          insumos={insumos}
           onClose={() => setImprimiendo(null)}
           onDone={async (mensaje) => {
             setImprimiendo(null);
@@ -301,8 +302,9 @@ export function PedidosTab({ pedidos, productos, filamentos, onPedidosChange, on
 }
 
 // ─── Modal: marcar como impreso + gramos desperdiciados ──────────────
-function ModalImpresion({ pedido, productos, filamentos, onClose, onDone }) {
+function ModalImpresion({ pedido, productos, filamentos, insumos = [], onClose, onDone }) {
   const plan = useMemo(() => planDeConsumo(pedido, productos), [pedido, productos]);
+  const planInsumos = useMemo(() => planDeInsumos(pedido, productos), [pedido, productos]);
   const [desperdicios, setDesperdicios] = useState({});
   const [guardando, setGuardando] = useState(false);
 
@@ -311,7 +313,9 @@ function ModalImpresion({ pedido, productos, filamentos, onClose, onDone }) {
   const confirmar = async () => {
     setGuardando(true);
     try {
-      const { advertencias } = await marcarPedidoImpreso(pedido, plan, desperdicios, filamentos);
+      const { advertencias } = await marcarPedidoImpreso(
+        pedido, plan, desperdicios, filamentos, planInsumos, insumos
+      );
       const base = `✓ Pedido ${pedido.numeroOrden} marcado como impreso e inventario descontado.`;
       await onDone(advertencias.length ? `${base} Atención: ${advertencias.join(" ")}` : base);
     } catch (err) {
@@ -347,6 +351,41 @@ function ModalImpresion({ pedido, productos, filamentos, onClose, onDone }) {
           Al confirmar se descuenta del inventario el consumo de receta más el desperdicio, y se
           registra el gasto en el historial de cada filamento.
         </p>
+
+        {planInsumos.length > 0 && (
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.2, textTransform: "uppercase", color: "var(--muted)", marginBottom: 8 }}>
+              Insumos a descontar
+            </div>
+            <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 10, lineHeight: 1.5 }}>
+              Se descuentan del catálogo automáticamente. No llevan desperdicio.
+            </div>
+            {planInsumos.map(l => {
+              const enCatalogo = insumos.find(i => i._id === l.insumoId);
+              const alcanza = enCatalogo && (Number(enCatalogo.cantidadDisponible) || 0) >= l.unidadesConsumidas;
+              return (
+                <div key={l.clave} style={{
+                  display: "grid", gridTemplateColumns: "1.6fr 1fr 110px",
+                  gap: 10, padding: "8px 0", fontSize: 12, borderTop: "1px solid var(--line)",
+                  alignItems: "center",
+                }}>
+                  <div style={{ fontWeight: 600 }}>{l.nombre}</div>
+                  <div style={{ color: "var(--muted)" }}>
+                    {l.productoNombre} — {l.cantidadPorUnidad} × {l.cantidad} u.
+                  </div>
+                  <div style={{ fontWeight: 700, color: alcanza ? "var(--text)" : "#c64138" }}>
+                    −{l.unidadesConsumidas} u.
+                    {!alcanza && (
+                      <div style={{ fontSize: 10, fontWeight: 400 }}>
+                        {enCatalogo ? "queda negativo" : "no está en el catálogo"}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
 
         {plan.length === 0 ? (
           <div style={{ padding: "16px 18px", background: "#B56B3E15", borderLeft: "3px solid #B56B3E", fontSize: 13, marginBottom: 20 }}>
