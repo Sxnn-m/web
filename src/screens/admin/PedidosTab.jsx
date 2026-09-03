@@ -3,7 +3,7 @@ import { TKButton, TKInput, TKPill, Icon, fmtARS } from '../../components/UI.jsx
 import { fmtFecha } from './InventarioTab.jsx';
 import {
   cargarPedidos, siguienteNumeroOrden, crearPedido, eliminarPedido,
-  marcarEntregado, marcarPedidoImpreso, planDeConsumo, planDeInsumos,
+  marcarEntregado, marcarPagado, estaPagado, marcarPedidoImpreso, planDeConsumo, planDeInsumos,
   buscarProductoDeLinea,
 } from '../../lib/inventario.js';
 import {
@@ -226,6 +226,15 @@ export function PedidosTab({ pedidos, productos, personalizados = [], filamentos
     } catch (err) { setMsg("Error: " + err.message); }
   };
 
+  const togglePagado = async (pedido) => {
+    const pagado = !estaPagado(pedido);
+    try {
+      await marcarPagado(pedido, pagado);
+      setMsg(`✓ Pedido ${pedido.numeroOrden} marcado como ${pagado ? "pagado" : "pago pendiente"}.`);
+      await onPedidosChange();
+    } catch (err) { setMsg("Error: " + err.message); }
+  };
+
   const borrarPedido = async (pedido) => {
     if (!confirm(`¿Eliminar el pedido ${pedido.numeroOrden}? No se revierte el inventario.`)) return;
     try {
@@ -235,7 +244,7 @@ export function PedidosTab({ pedidos, productos, personalizados = [], filamentos
     } catch (err) { setMsg("Error: " + err.message); }
   };
 
-  const COL = "110px 1.4fr 90px 120px 110px 110px 110px";
+  const COL = "105px 1.3fr 80px 110px 105px 105px 105px 110px";
 
   return (
     <>
@@ -337,6 +346,11 @@ export function PedidosTab({ pedidos, productos, personalizados = [], filamentos
         {pedidos.length} pedido{pedidos.length !== 1 ? "s" : ""} ·{" "}
         {pedidos.filter(p => p.estadoImpresion !== "impreso").length} pendiente
         {pedidos.filter(p => p.estadoImpresion !== "impreso").length !== 1 ? "s" : ""} de impresión
+        {pedidos.filter(p => !estaPagado(p)).length > 0 && (
+          <> · <span style={{ color: "#B56B3E", fontWeight: 700 }}>
+            {pedidos.filter(p => !estaPagado(p)).length} sin cobrar
+          </span></>
+        )}
       </div>
 
       <div style={{ overflowX: "auto", margin: "0 -16px", padding: "0 16px" }}>
@@ -348,7 +362,7 @@ export function PedidosTab({ pedidos, productos, personalizados = [], filamentos
             color: "var(--muted)", fontWeight: 700,
           }}>
             <div>Orden</div><div>Cliente</div><div>Productos</div><div>Total</div>
-            <div>Impresión</div><div>Entrega</div><div>Acciones</div>
+            <div>Impresión</div><div>Entrega</div><div>Pago</div><div>Acciones</div>
           </div>
 
           {pedidos.map(pedido => {
@@ -376,6 +390,11 @@ export function PedidosTab({ pedidos, productos, personalizados = [], filamentos
                   <div>
                     <TKPill variant={pedido.entregado ? "dark" : "outline"}>{pedido.entregado ? "Entregado" : "Sin entregar"}</TKPill>
                   </div>
+                  <div>
+                    <TKPill variant={estaPagado(pedido) ? "accent" : "outline"}>
+                      {estaPagado(pedido) ? "Pagado" : "Impago"}
+                    </TKPill>
+                  </div>
                   <div style={{ display: "flex", gap: 4 }}>
                     <button
                       onClick={() => !impreso && setImprimiendo(pedido)}
@@ -391,6 +410,13 @@ export function PedidosTab({ pedidos, productos, personalizados = [], filamentos
                       title={pedido.entregado ? "Marcar como no entregado" : "Marcar como entregado"}
                     >
                       <Icon.truck size={14}/>
+                    </button>
+                    <button
+                      onClick={() => togglePagado(pedido)}
+                      style={{ ...actionBtn, color: estaPagado(pedido) ? "#4a7a52" : "var(--text)" }}
+                      title={estaPagado(pedido) ? "Marcar como pago pendiente" : "Marcar como pagado"}
+                    >
+                      <Icon.check size={14}/>
                     </button>
                     <button onClick={() => borrarPedido(pedido)} style={{ ...actionBtn, color: "#c64138" }} title="Eliminar">
                       <Icon.trash size={14}/>
@@ -430,6 +456,9 @@ export function PedidosTab({ pedidos, productos, personalizados = [], filamentos
                       <span>Creado: {fmtFecha(pedido.createdAt)}</span>
                       <span>Impreso: {fmtFecha(pedido.impresoAt)}</span>
                       <span>Entregado: {fmtFecha(pedido.entregadoAt)}</span>
+                      <span>
+                        Pago: {estaPagado(pedido) ? `pagado ${fmtFecha(pedido.pagadoAt)}` : "pendiente"}
+                      </span>
                     </div>
                   </div>
                 )}

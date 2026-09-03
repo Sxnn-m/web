@@ -158,11 +158,15 @@ export async function crearPedido({ numeroOrden, clienteNombre, items }) {
     clienteNombre: String(clienteNombre).trim(),
     items: lineas,
     precioTotal,
+    // Los tres estados son independientes entre sí: se puede cobrar antes de
+    // imprimir, o entregar sin haber cobrado.
     estadoImpresion: "pendiente",
     entregado: false,
+    estadoPago: "pendiente",
     createdAt: serverTimestamp(),
     impresoAt: null,
     entregadoAt: null,
+    pagadoAt: null,
   });
   return ref.id;
 }
@@ -178,6 +182,21 @@ export async function marcarEntregado(pedido, entregado) {
     entregadoAt: entregado ? serverTimestamp() : null,
   });
 }
+
+/**
+ * Toggle simple de pago. Sin validación ni efectos: no toca inventario ni
+ * depende de impresión ni de entrega. Se puede cobrar una seña antes de
+ * imprimir, o entregar sin haber cobrado.
+ */
+export async function marcarPagado(pedido, pagado) {
+  await updateDoc(doc(db, COL_PEDIDOS, pedido._id), {
+    estadoPago: pagado ? "pagado" : "pendiente",
+    pagadoAt: pagado ? serverTimestamp() : null,
+  });
+}
+
+/** Los pedidos anteriores a este campo se leen como pendientes. */
+export const estaPagado = (pedido) => pedido?.estadoPago === "pagado";
 
 /**
  * Resuelve el producto de una línea de pedido en la colección que corresponda.
