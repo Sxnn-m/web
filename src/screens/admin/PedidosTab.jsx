@@ -29,6 +29,19 @@ const labelStyle = {
 
 const lineaVacia = () => ({ productoId: "", cantidad: 1, precioUnitario: 0 });
 
+/**
+ * Código visible de una línea de pedido. Prioriza el snapshot guardado al
+ * crear el pedido; si es un pedido viejo que no lo tiene, lo resuelve contra
+ * el catálogo actual, y si el producto ya no existe muestra el ID de
+ * documento como último recurso.
+ */
+function codigoDeLinea(item, productos = []) {
+  if (item.productoCodigo) return item.productoCodigo;
+  const p = productos.find(x => x._id === item.productoId);
+  if (p?.id) return p.id;
+  return item.productoId ? `doc ${item.productoId.slice(0, 8)}…` : "—";
+}
+
 // ─── Tab Pedidos ─────────────────────────────────────────────────────
 export function PedidosTab({ pedidos, productos, filamentos, insumos = [], onPedidosChange, onInventarioChange, setMsg }) {
   const [showForm, setShowForm] = useState(false);
@@ -75,6 +88,7 @@ export function PedidosTab({ pedidos, productos, filamentos, insumos = [], onPed
           const p = productos.find(x => x._id === l.productoId);
           return {
             productoId: l.productoId,
+            productoCodigo: p?.id || "",
             productoNombre: p?.name || "Producto",
             cantidad: Number(l.cantidad) || 0,
             precioUnitario: Number(l.precioUnitario) || 0,
@@ -132,7 +146,9 @@ export function PedidosTab({ pedidos, productos, filamentos, insumos = [], onPed
                   <select value={l.productoId} onChange={e => elegirProducto(i, e.target.value)} style={selectStyle}>
                     <option value="">Seleccionar producto...</option>
                     {productosOrdenados.map(p => (
-                      <option key={p._id} value={p._id}>{p.name}</option>
+                      <option key={p._id} value={p._id}>
+                        {p.id ? `${p.id} — ${p.name}` : p.name}
+                      </option>
                     ))}
                   </select>
                 </div>
@@ -261,7 +277,12 @@ export function PedidosTab({ pedidos, productos, filamentos, insumos = [], onPed
                         display: "grid", gridTemplateColumns: "2fr 90px 130px 130px",
                         gap: 10, padding: "8px 0", fontSize: 13, borderTop: "1px solid var(--line)",
                       }}>
-                        <div style={{ fontWeight: 600 }}>{it.productoNombre}</div>
+                        <div>
+                          <div style={{ fontWeight: 600 }}>{it.productoNombre}</div>
+                          <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>
+                            {codigoDeLinea(it, productos)}
+                          </div>
+                        </div>
                         <div>{it.cantidad}</div>
                         <div>{fmtARS(it.precioUnitario || 0)}</div>
                         <div style={{ fontWeight: 600 }}>{fmtARS(it.subtotal || 0)}</div>
