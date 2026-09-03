@@ -4,6 +4,7 @@ import { fmtFecha } from './InventarioTab.jsx';
 import {
   cargarPedidos, siguienteNumeroOrden, crearPedido, eliminarPedido,
   marcarEntregado, marcarPedidoImpreso, planDeConsumo, planDeInsumos,
+  buscarProductoDeLinea,
 } from '../../lib/inventario.js';
 import {
   agruparConsumo, validarStock, textoFaltante,
@@ -27,7 +28,7 @@ const labelStyle = {
   textTransform: "uppercase", color: "var(--muted)", marginBottom: 6,
 };
 
-const lineaVacia = () => ({ productoId: "", cantidad: 1, precioUnitario: 0 });
+const lineaVacia = () => ({ tipo: "catalogo", productoId: "", cantidad: 1, precioUnitario: 0 });
 
 /**
  * Código visible de una línea de pedido. Prioriza el snapshot guardado al
@@ -35,15 +36,101 @@ const lineaVacia = () => ({ productoId: "", cantidad: 1, precioUnitario: 0 });
  * el catálogo actual, y si el producto ya no existe muestra el ID de
  * documento como último recurso.
  */
-function codigoDeLinea(item, productos = []) {
+function codigoDeLinea(item, productos = [], personalizados = []) {
   if (item.productoCodigo) return item.productoCodigo;
-  const p = productos.find(x => x._id === item.productoId);
+  const p = buscarProductoDeLinea(item, productos, personalizados);
   if (p?.id) return p.id;
+  if (p?.clienteNombre) return p.clienteNombre;
   return item.productoId ? `doc ${item.productoId.slice(0, 8)}…` : "—";
 }
 
+/** Badge chico de origen de la línea. */
+function BadgeTipo({ tipo }) {
+  const esPers = tipo === "personalizado";
+  return (
+    <span style={{
+      display: "inline-block", padding: "2px 7px", borderRadius: 2,
+      background: esPers ? "#B56B3E18" : "var(--beige)",
+      color: esPers ? "#B56B3E" : "var(--anchor)",
+      fontSize: 9, fontWeight: 700, letterSpacing: 0.8, textTransform: "uppercase",
+    }}>
+      {esPers ? "Personalizado" : "Catálogo"}
+    </span>
+  );
+}
+
+/**
+ * Buscador con autocompletado: filtra en vivo por nombre o por código y
+ * muestra las coincidencias para elegir con un clic. Misma UI para catálogo
+ * y personalizados; solo cambia la fuente y qué campos entran en la búsqueda.
+ */
+function BuscadorProducto({ opciones, valorId, onSelect, placeholder }) {
+  const [texto, setTexto] = useState("");
+  const [abierto, setAbierto] = useState(false);
+
+  const elegida = opciones.find(o => o._id === valorId) || null;
+  const q = texto.trim().toLowerCase();
+  const coincidencias = q
+    ? opciones.filter(o => o.busqueda.includes(q))
+    : opciones;
+
+  const elegir = (o) => {
+    onSelect(o._id);
+    setTexto("");
+    setAbierto(false);
+  };
+
+  return (
+    <div style={{ position: "relative" }}>
+      <input
+        value={abierto ? texto : (elegida ? elegida.etiqueta : texto)}
+        onChange={e => { setTexto(e.target.value); setAbierto(true); }}
+        onFocus={() => { setTexto(""); setAbierto(true); }}
+        // El blur se demora para que el clic en una opción llegue primero.
+        onBlur={() => setTimeout(() => setAbierto(false), 150)}
+        placeholder={placeholder}
+        style={{
+          ...selectStyle,
+          borderColor: elegida ? "var(--accent)" : "var(--line)",
+        }}
+      />
+
+      {abierto && (
+        <div style={{
+          position: "absolute", top: "100%", left: 0, right: 0, zIndex: 20,
+          background: "var(--bg)", border: "1px solid var(--line-strong)",
+          maxHeight: 240, overflowY: "auto", boxShadow: "0 8px 24px rgba(0,0,0,.15)",
+        }}>
+          {coincidencias.length === 0 ? (
+            <div style={{ padding: "12px 14px", fontSize: 13, color: "var(--muted)" }}>
+              No se encontraron productos
+            </div>
+          ) : coincidencias.map(o => (
+            <div
+              key={o._id}
+              onMouseDown={() => elegir(o)}
+              style={{
+                padding: "10px 14px", cursor: "pointer", fontSize: 13,
+                borderBottom: "1px solid var(--line)",
+                background: o._id === valorId ? "var(--bg-alt)" : "transparent",
+              }}
+              onMouseEnter={e => (e.currentTarget.style.background = "var(--bg-alt)")}
+              onMouseLeave={e => (e.currentTarget.style.background = o._id === valorId ? "var(--bg-alt)" : "transparent")}
+            >
+              <div style={{ fontWeight: 600 }}>{o.nombre}</div>
+              {o.detalle && (
+                <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>{o.detalle}</div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Tab Pedidos ─────────────────────────────────────────────────────
-export function PedidosTab({ pedidos, productos, filamentos, insumos = [], onPedidosChange, onInventarioChange, setMsg }) {
+export function PedidosTab({ pedidos, productos, personalizados = [], filamentos, insumos = [], onPedidosChange, onInventarioChange, setMsg }) {
   const [showForm, setShowForm] = useState(false);
   const [cliente, setCliente] = useState("");
   const [lineas, setLineas] = useState([lineaVacia()]);
@@ -51,20 +138,48 @@ export function PedidosTab({ pedidos, productos, filamentos, insumos = [], onPed
   const [imprimiendo, setImprimiendo] = useState(null); // pedido en el modal
   const [guardando, setGuardando] = useState(false);
 
-  const productosOrdenados = useMemo(
-    () => [...productos].sort((a, b) => (a.name || "").localeCompare(b.name || "")),
-    [productos]
-  );
+  // Opciones normalizadas del buscador. Cada colección aporta su propio campo
+  // identificatorio: el código TKPx en catálogo, el nombre del cliente en
+  // personalizados. Los dos entran en la búsqueda junto con el nombre.
+  const opcionesCatalogo = useMemo(() => [...productos]
+    .sort((a, b) => (a.name || "").localeCompare(b.name || ""))
+    .map(p => ({
+      _id: p._id,
+      nombre: p.name || "(sin nombre)",
+      codigo: p.id || "",
+      etiqueta: p.id ? `${p.id} — ${p.name}` : (p.name || ""),
+      detalle: p.id || "",
+      price: p.price,
+      busqueda: `${p.name || ""} ${p.id || ""}`.toLowerCase(),
+    })), [productos]);
+
+  const opcionesPersonalizado = useMemo(() => [...personalizados]
+    .sort((a, b) => (a.clienteNombre || "").localeCompare(b.clienteNombre || ""))
+    .map(p => ({
+      _id: p._id,
+      nombre: p.name || "(sin nombre)",
+      codigo: p.clienteNombre || "",
+      etiqueta: p.clienteNombre ? `${p.clienteNombre} — ${p.name}` : (p.name || ""),
+      detalle: p.clienteNombre ? `Cliente: ${p.clienteNombre}` : "",
+      price: p.price,
+      busqueda: `${p.name || ""} ${p.clienteNombre || ""}`.toLowerCase(),
+    })), [personalizados]);
+
+  const opcionesDe = (tipo) => tipo === "personalizado" ? opcionesPersonalizado : opcionesCatalogo;
 
   const totales = lineas.map(l => (Number(l.cantidad) || 0) * (Number(l.precioUnitario) || 0));
   const precioTotal = totales.reduce((s, n) => s + n, 0);
 
   const upLinea = (i, patch) => setLineas(ls => ls.map((l, j) => j === i ? { ...l, ...patch } : l));
 
-  const elegirProducto = (i, productoId) => {
-    const p = productos.find(x => x._id === productoId);
-    upLinea(i, { productoId, precioUnitario: p?.price ?? 0 });
+  const elegirProducto = (i, tipo, productoId) => {
+    const o = opcionesDe(tipo).find(x => x._id === productoId);
+    upLinea(i, { productoId, precioUnitario: o?.price ?? 0 });
   };
+
+  // Cambiar de tipo limpia la selección: el producto elegido es de la otra
+  // colección y no tiene sentido conservarlo.
+  const cambiarTipo = (i, tipo) => upLinea(i, { tipo, productoId: "", precioUnitario: 0 });
 
   const resetForm = () => {
     setCliente("");
@@ -85,11 +200,12 @@ export function PedidosTab({ pedidos, productos, filamentos, insumos = [], onPed
         numeroOrden,
         clienteNombre: cliente,
         items: validas.map(l => {
-          const p = productos.find(x => x._id === l.productoId);
+          const o = opcionesDe(l.tipo).find(x => x._id === l.productoId);
           return {
             productoId: l.productoId,
-            productoCodigo: p?.id || "",
-            productoNombre: p?.name || "Producto",
+            tipo: l.tipo,
+            productoCodigo: o?.codigo || "",
+            productoNombre: o?.nombre || "Producto",
             cantidad: Number(l.cantidad) || 0,
             precioUnitario: Number(l.precioUnitario) || 0,
           };
@@ -140,17 +256,36 @@ export function PedidosTab({ pedidos, productos, filamentos, insumos = [], onPed
           <div style={{ ...labelStyle, marginBottom: 10 }}>Productos del pedido</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 12 }}>
             {lineas.map((l, i) => (
-              <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 90px 130px 110px 36px", gap: 10, alignItems: "end" }}>
+              <div key={i} style={{ display: "grid", gridTemplateColumns: "150px 1fr 90px 130px 110px 36px", gap: 10, alignItems: "end" }}>
+                <div>
+                  {i === 0 && <div style={labelStyle}>Tipo</div>}
+                  <div style={{ display: "flex", border: "1px solid var(--line)", borderRadius: 4, overflow: "hidden" }}>
+                    {[["catalogo", "Catálogo"], ["personalizado", "Personalizado"]].map(([valor, texto]) => (
+                      <button
+                        key={valor}
+                        onClick={() => cambiarTipo(i, valor)}
+                        style={{
+                          flex: 1, padding: "12px 6px", border: "none", cursor: "pointer",
+                          background: l.tipo === valor ? "var(--accent)" : "transparent",
+                          color: l.tipo === valor ? "#fff" : "var(--muted)",
+                          fontSize: 11, fontWeight: 700,
+                        }}
+                      >
+                        {texto}
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <div>
                   {i === 0 && <div style={labelStyle}>Producto</div>}
-                  <select value={l.productoId} onChange={e => elegirProducto(i, e.target.value)} style={selectStyle}>
-                    <option value="">Seleccionar producto...</option>
-                    {productosOrdenados.map(p => (
-                      <option key={p._id} value={p._id}>
-                        {p.id ? `${p.id} — ${p.name}` : p.name}
-                      </option>
-                    ))}
-                  </select>
+                  <BuscadorProducto
+                    opciones={opcionesDe(l.tipo)}
+                    valorId={l.productoId}
+                    onSelect={(id) => elegirProducto(i, l.tipo, id)}
+                    placeholder={l.tipo === "personalizado"
+                      ? "Buscar por pieza o cliente..."
+                      : "Buscar por nombre o ID..."}
+                  />
                 </div>
                 <div>
                   {i === 0 && <div style={labelStyle}>Cantidad</div>}
@@ -278,9 +413,12 @@ export function PedidosTab({ pedidos, productos, filamentos, insumos = [], onPed
                         gap: 10, padding: "8px 0", fontSize: 13, borderTop: "1px solid var(--line)",
                       }}>
                         <div>
-                          <div style={{ fontWeight: 600 }}>{it.productoNombre}</div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                            <span style={{ fontWeight: 600 }}>{it.productoNombre}</span>
+                            <BadgeTipo tipo={it.tipo}/>
+                          </div>
                           <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>
-                            {codigoDeLinea(it, productos)}
+                            {codigoDeLinea(it, productos, personalizados)}
                           </div>
                         </div>
                         <div>{it.cantidad}</div>
@@ -311,6 +449,7 @@ export function PedidosTab({ pedidos, productos, filamentos, insumos = [], onPed
         <ModalImpresion
           pedido={imprimiendo}
           productos={productos}
+          personalizados={personalizados}
           filamentos={filamentos}
           insumos={insumos}
           onClose={() => setImprimiendo(null)}
@@ -327,9 +466,9 @@ export function PedidosTab({ pedidos, productos, filamentos, insumos = [], onPed
 }
 
 // ─── Modal: marcar como impreso + gramos desperdiciados ──────────────
-function ModalImpresion({ pedido, productos, filamentos, insumos = [], onClose, onDone }) {
-  const plan = useMemo(() => planDeConsumo(pedido, productos), [pedido, productos]);
-  const planInsumos = useMemo(() => planDeInsumos(pedido, productos), [pedido, productos]);
+function ModalImpresion({ pedido, productos, personalizados = [], filamentos, insumos = [], onClose, onDone }) {
+  const plan = useMemo(() => planDeConsumo(pedido, productos, personalizados), [pedido, productos, personalizados]);
+  const planInsumos = useMemo(() => planDeInsumos(pedido, productos, personalizados), [pedido, productos, personalizados]);
   const [desperdicios, setDesperdicios] = useState({});
   const [guardando, setGuardando] = useState(false);
   const [errorStock, setErrorStock] = useState("");   // faltante detectado por la transacción
