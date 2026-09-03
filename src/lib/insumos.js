@@ -5,8 +5,7 @@
 
 import { db } from '../firebase.js';
 import {
-  collection, getDocs, addDoc, updateDoc, deleteDoc, doc,
-  increment, serverTimestamp,
+  collection, getDocs, addDoc, updateDoc, deleteDoc, doc, serverTimestamp,
 } from 'firebase/firestore';
 
 export const COL_INSUMOS = "insumos";
@@ -40,16 +39,5 @@ export async function eliminarInsumo(id) {
   await deleteDoc(doc(db, COL_INSUMOS, id));
 }
 
-/**
- * Descuenta unidades del catálogo. Se usa al marcar un pedido como impreso.
- * Puede dejar el stock en negativo a propósito: el pedido ya se imprimió en
- * la vida real, así que bloquearlo escondería el problema en vez de mostrarlo.
- */
-export async function descontarInsumo(id, unidades) {
-  const n = Number(unidades) || 0;
-  if (n <= 0) return;
-  await updateDoc(doc(db, COL_INSUMOS, id), {
-    cantidadDisponible: increment(-n),
-    updatedAt: serverTimestamp(),
-  });
-}
+// El descuento al imprimir un pedido va por registrarGastoEn() de
+// src/lib/historial.js, que además deja el gasto en el historial.

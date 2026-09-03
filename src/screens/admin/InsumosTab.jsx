@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { TKButton, TKInput, Icon, fmtARS } from '../../components/UI.jsx';
 import { UMBRAL_RESTOCK_INSUMO, necesitaRestockInsumo } from '../../lib/disponibilidad.js';
 import { crearInsumo, actualizarInsumo, eliminarInsumo } from '../../lib/insumos.js';
-import { RestockBadge } from './InventarioTab.jsx';
+import { DetalleHistorial, RestockBadge } from './DetalleHistorial.jsx';
 
 const actionBtn = {
   background: "none", border: "1px solid var(--line)", padding: "6px 8px",
@@ -20,6 +20,7 @@ const cardStyle = {
 // Mismo patrón visual que el tab Inventario, pero el stock se cuenta en
 // unidades y la alerta salta en <= UMBRAL_RESTOCK_INSUMO.
 export function InsumosTab({ insumos, onChanged, setMsg }) {
+  const [seleccionado, setSeleccionado] = useState(null); // _id del insumo abierto
   const [showForm, setShowForm] = useState(false);
   const [editando, setEditando] = useState(null);
   const [form, setForm] = useState({ nombre: "", precioUnidad: 0, cantidadDisponible: 0 });
@@ -55,6 +56,8 @@ export function InsumosTab({ insumos, onChanged, setMsg }) {
     } catch (err) { setMsg("Error: " + err.message); }
   };
 
+  const abierto = insumos.find(i => i._id === seleccionado) || null;
+
   const borrar = async (i) => {
     if (!confirm(
       `¿Eliminar el insumo "${i.nombre}"?\n\n` +
@@ -62,10 +65,28 @@ export function InsumosTab({ insumos, onChanged, setMsg }) {
     )) return;
     try {
       await eliminarInsumo(i._id);
+      if (seleccionado === i._id) setSeleccionado(null);
       setMsg("✓ Insumo eliminado.");
       await onChanged();
     } catch (err) { setMsg("Error: " + err.message); }
   };
+
+  if (abierto) {
+    return (
+      <DetalleHistorial
+        coleccion="insumos"
+        item={abierto}
+        titulo={abierto.nombre}
+        subtitulo="Insumos / Detalle"
+        cantidad={abierto.cantidadDisponible}
+        unidad="u."
+        alerta={necesitaRestockInsumo(abierto)}
+        onBack={() => setSeleccionado(null)}
+        onChanged={onChanged}
+        setMsg={setMsg}
+      />
+    );
+  }
 
   const enAlerta = insumos.filter(necesitaRestockInsumo).length;
   const COL = "2fr 120px 120px 140px 90px";
@@ -92,7 +113,8 @@ export function InsumosTab({ insumos, onChanged, setMsg }) {
               onChange={e => setForm(f => ({ ...f, cantidadDisponible: e.target.value }))} />
           </div>
           <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 12, lineHeight: 1.5 }}>
-            El precio por unidad se copia al producto cuando lo agregás a su receta de insumos.
+            Para sumar unidades usá "Registrar restock" en el detalle del insumo: queda asentado
+            en el historial. El precio por unidad se copia al producto cuando lo agregás a su receta.
             Cambiarlo acá <strong>no</strong> recalcula los productos ya guardados: cada producto
             conserva el precio que tenía al momento de guardarse.
           </div>
@@ -131,7 +153,13 @@ export function InsumosTab({ insumos, onChanged, setMsg }) {
                 fontSize: 13, alignItems: "center",
                 background: alerta ? "#c6413808" : "transparent",
               }}>
-                <div style={{ fontWeight: 600 }}>{i.nombre}</div>
+                <div
+                  onClick={() => setSeleccionado(i._id)}
+                  style={{ fontWeight: 600, cursor: "pointer", color: "var(--accent)" }}
+                  title="Ver historial"
+                >
+                  {i.nombre}
+                </div>
                 <div>{fmtARS(i.precioUnidad || 0)}</div>
                 <div style={{ fontWeight: 700, color: alerta ? "#c64138" : "var(--text)" }}>
                   {Number(i.cantidadDisponible || 0)} u.
@@ -141,6 +169,7 @@ export function InsumosTab({ insumos, onChanged, setMsg }) {
                 </div>
                 <div>{alerta ? <RestockBadge/> : <span style={{ color: "var(--muted)", fontSize: 12 }}>OK</span>}</div>
                 <div style={{ display: "flex", gap: 4 }}>
+                  <button onClick={() => setSeleccionado(i._id)} style={actionBtn} title="Ver detalle"><Icon.list size={14}/></button>
                   <button onClick={() => openEditar(i)} style={actionBtn} title="Editar"><Icon.spark size={14}/></button>
                   <button onClick={() => borrar(i)} style={{ ...actionBtn, color: "#c64138" }} title="Eliminar"><Icon.trash size={14}/></button>
                 </div>
