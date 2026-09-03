@@ -19,8 +19,9 @@ serviceAccountKey.json
 *serviceAccountKey*.json
 *-firebase-adminsdk-*.json
 
-# Script de migración de un solo uso (se corre local, no va a producción)
+# Scripts de un solo uso (se corren local, no van a producción)
 migrar-firestore.mjs
+bootstrap-admin.mjs
 
 # Sistema operativo / editores
 .DS_Store
