@@ -14,6 +14,14 @@ yarn-error.log*
 .env.local
 .env.*.local
 
+# Credenciales de Firebase Admin SDK — NUNCA subir al repo
+serviceAccountKey.json
+*serviceAccountKey*.json
+*-firebase-adminsdk-*.json
+
+# Script de migración de un solo uso (se corre local, no va a producción)
+migrar-firestore.mjs
+
 # Sistema operativo / editores
 .DS_Store
 Thumbs.db
