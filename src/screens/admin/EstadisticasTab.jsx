@@ -29,8 +29,16 @@ const selectStyle = {
   fontWeight: 600, borderRadius: 4, cursor: "pointer", minWidth: 190,
 };
 
-/** Paleta del donut. Se cicla si hay más categorías que colores. */
-const PALETA = ["#345C83", "#4a7a52", "#B56B3E", "#8A6BA8", "#C64138", "#3E8A8A", "#9A8F3E"];
+/** Azul de la marca: único color de acento de todo el tab. */
+const AZUL = "#345C83";
+
+/**
+ * Paleta del donut: la misma familia azul, de más oscuro a más claro. Los
+ * saltos de luminosidad son grandes a propósito, para que dos categorías
+ * contiguas se distingan de un vistazo aunque compartan el tono base.
+ * Se cicla si hay más categorías que colores.
+ */
+const PALETA = ["#1F3A5F", "#4C82B0", "#7FB2DC", "#2B6E9E", "#A9CDEA", "#5E96C4", "#CBE2F4"];
 const colorDe = (i) => PALETA[i % PALETA.length];
 
 const fmtGramos = (g) =>
@@ -141,28 +149,29 @@ export function EstadisticasTab({
         gap: 14, marginBottom: 24,
       }}>
         <Kpi
-          label="Ventas"
+          label="Pedidos completados"
           valor={kpis.cantidadVentas.toLocaleString("es-AR")}
           detalle={`${kpis.unidades.toLocaleString("es-AR")} unidad(es) · ${fmtARS(kpis.ingresos)} facturados`}
-          color="#345C83"
+        />
+        <Kpi
+          label="Total facturado"
+          valor={fmtARS(kpis.ingresos)}
+          detalle="Lo que se cobró: precio unitario × cantidad de cada línea"
         />
         <Kpi
           label="Ganancia total"
           valor={fmtARS(kpis.ganancia)}
           detalle={`${fmtARS(kpis.ingresos)} − ${fmtARS(kpis.costo)} de fabricación · margen ${kpis.margen.toFixed(1)}%`}
-          color={kpis.ganancia >= 0 ? "#4a7a52" : "#C64138"}
         />
         <Kpi
           label="Material desperdiciado"
           valor={cargandoGastos ? "…" : fmtGramos(kpis.desperdicio.gramos)}
           detalle="Gramos descartados en los pedidos del mes"
-          color="#B56B3E"
         />
         <Kpi
           label="Plata perdida en desperdicio"
           valor={cargandoGastos ? "…" : fmtARS(kpis.desperdicio.dinero)}
           detalle="Cada gramo al costo de su propio material"
-          color="#C64138"
         />
       </div>
 
@@ -174,7 +183,7 @@ export function EstadisticasTab({
         <div style={cardStyle}>
           <div style={tituloBloque}>Ventas por mes</div>
           <p style={{ fontSize: 12, color: "var(--muted)", margin: "6px 0 16px" }}>
-            Monto facturado en los últimos 12 meses. No depende del mes seleccionado.
+            Unidades vendidas en los últimos 12 meses. No depende del mes seleccionado.
           </p>
           <GraficoVentas serie={serie} mesActivo={mes} />
         </div>
@@ -182,9 +191,9 @@ export function EstadisticasTab({
         <div style={cardStyle}>
           <div style={tituloBloque}>Ventas por categoría</div>
           <p style={{ fontSize: 12, color: "var(--muted)", margin: "6px 0 16px" }}>
-            {etiquetaMes(mes)} · repartido por <strong>monto facturado</strong>.
+            {etiquetaMes(mes)} · repartido por <strong>unidades vendidas</strong>.
           </p>
-          <GraficoCategorias datos={categorias} total={kpis.ingresos} />
+          <GraficoCategorias datos={categorias} total={kpis.unidades} />
         </div>
       </div>
     </div>
@@ -205,11 +214,13 @@ function Aviso({ children, tono = "warn" }) {
   );
 }
 
-function Kpi({ label, valor, detalle, color }) {
+// Las cinco tarjetas comparten el azul: son cinco lecturas del mismo mes, no
+// cinco estados distintos, así que un color por tarjeta solo agregaba ruido.
+function Kpi({ label, valor, detalle }) {
   return (
-    <div style={{ ...cardStyle, borderTop: `3px solid ${color}` }}>
+    <div style={{ ...cardStyle, borderTop: `3px solid ${AZUL}` }}>
       <div style={{ ...tituloBloque, fontSize: 11 }}>{label}</div>
-      <div style={{ fontSize: 26, fontWeight: 700, margin: "10px 0 6px", color }}>
+      <div style={{ fontSize: 26, fontWeight: 700, margin: "10px 0 6px", color: AZUL }}>
         {valor}
       </div>
       <div style={{ fontSize: 11.5, color: "var(--muted)", lineHeight: 1.45 }}>
@@ -219,51 +230,64 @@ function Kpi({ label, valor, detalle, color }) {
   );
 }
 
-/** Techo "redondo" del eje Y: 1, 2 o 5 × 10^n por encima del máximo. */
-function techoEje(max) {
-  if (max <= 0) return 1;
-  const exp = Math.floor(Math.log10(max));
-  const base = Math.pow(10, exp);
-  for (const paso of [1, 2, 5, 10]) {
-    if (max <= paso * base) return paso * base;
+const PASOS = [1, 2, 3, 4, 5, 10, 15, 20, 25, 30, 40, 50];
+
+/**
+ * Escala del eje Y para una magnitud que se cuenta en enteros (unidades):
+ * elige el paso más chico de PASOS × 10^n que cubra el máximo en "divisiones"
+ * tramos. Así las marcas del eje caen siempre en números enteros — con un
+ * techo fijo de 4 tramos, un máximo de 9 unidades daría marcas de 2,25.
+ */
+function escalaEntera(max, divisiones = 4) {
+  if (!(max > 0)) return { techo: divisiones, paso: 1 };
+  for (let exp = 0; exp < 9; exp++) {
+    for (const p of PASOS) {
+      const paso = p * Math.pow(10, exp);
+      if (paso * divisiones >= max) return { techo: paso * divisiones, paso };
+    }
   }
-  return 10 * base;
+  return { techo: max, paso: max / divisiones };
 }
 
-/** Área + línea, 12 puntos. El mes seleccionado se marca con un punto lleno. */
+/**
+ * Área + línea de UNIDADES vendidas por mes, 12 puntos. El mes seleccionado
+ * se marca con un punto lleno y una guía punteada.
+ */
 function GraficoVentas({ serie, mesActivo }) {
-  const W = 560, H = 220, PAD_L = 58, PAD_R = 10, PAD_T = 12, PAD_B = 30;
+  const W = 560, H = 220, PAD_L = 44, PAD_R = 10, PAD_T = 12, PAD_B = 30;
   const ancho = W - PAD_L - PAD_R;
   const alto = H - PAD_T - PAD_B;
 
-  const max = techoEje(Math.max(...serie.map(p => p.monto), 0));
+  const DIVISIONES = 4;
+  const { techo, paso } = escalaEntera(Math.max(...serie.map(p => p.unidades), 0), DIVISIONES);
+  const marcas = Array.from({ length: DIVISIONES + 1 }, (_, i) => i * paso);
   const x = (i) => PAD_L + (serie.length <= 1 ? ancho / 2 : (ancho * i) / (serie.length - 1));
-  const y = (v) => PAD_T + alto - (alto * v) / max;
+  const y = (v) => PAD_T + alto - (alto * v) / techo;
 
-  const puntos = serie.map((p, i) => `${x(i)},${y(p.monto)}`).join(" ");
+  const puntos = serie.map((p, i) => `${x(i)},${y(p.unidades)}`).join(" ");
   const area = `${PAD_L},${PAD_T + alto} ${puntos} ${x(serie.length - 1)},${PAD_T + alto}`;
-  const hayDatos = serie.some(p => p.monto > 0);
+  const hayDatos = serie.some(p => p.unidades > 0);
 
   return (
     <div>
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img"
-        aria-label="Monto facturado por mes en los últimos 12 meses">
-        {/* grilla + eje Y */}
-        {[0, 0.25, 0.5, 0.75, 1].map(f => (
-          <g key={f}>
-            <line x1={PAD_L} x2={W - PAD_R} y1={y(max * f)} y2={y(max * f)}
+        aria-label="Unidades vendidas por mes en los últimos 12 meses">
+        {/* grilla + eje Y, siempre en enteros */}
+        {marcas.map(v => (
+          <g key={v}>
+            <line x1={PAD_L} x2={W - PAD_R} y1={y(v)} y2={y(v)}
               stroke="var(--line)" strokeWidth="1" />
-            <text x={PAD_L - 8} y={y(max * f) + 3.5} textAnchor="end"
+            <text x={PAD_L - 8} y={y(v) + 3.5} textAnchor="end"
               fontSize="9.5" fill="var(--muted)">
-              {max * f >= 1000 ? `${Math.round((max * f) / 1000)}k` : Math.round(max * f)}
+              {v.toLocaleString("es-AR")}
             </text>
           </g>
         ))}
 
         {hayDatos && (
           <>
-            <polygon points={area} fill="#345C83" opacity="0.14" />
-            <polyline points={puntos} fill="none" stroke="#345C83"
+            <polygon points={area} fill={AZUL} opacity="0.14" />
+            <polyline points={puntos} fill="none" stroke={AZUL}
               strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
           </>
         )}
@@ -274,10 +298,10 @@ function GraficoVentas({ serie, mesActivo }) {
               <line x1={x(i)} x2={x(i)} y1={PAD_T} y2={PAD_T + alto}
                 stroke="var(--line-strong)" strokeWidth="1" strokeDasharray="3 3" />
             )}
-            <circle cx={x(i)} cy={y(p.monto)} r={p.mes === mesActivo ? 4.5 : 2.5}
-              fill={p.mes === mesActivo ? "#345C83" : "var(--bg-alt)"}
-              stroke="#345C83" strokeWidth="1.6" />
-            <title>{`${p.etiqueta}: ${p.cantidad} venta(s) · $ ${Math.round(p.monto).toLocaleString("es-AR")}`}</title>
+            <circle cx={x(i)} cy={y(p.unidades)} r={p.mes === mesActivo ? 4.5 : 2.5}
+              fill={p.mes === mesActivo ? AZUL : "var(--bg-alt)"}
+              stroke={AZUL} strokeWidth="1.6" />
+            <title>{`${p.etiqueta}: ${p.unidades} unidad(es) · ${p.cantidad} pedido(s) · ${fmtARS(p.monto)}`}</title>
             {/* Una etiqueta de por medio: 12 no entran de frente. */}
             {i % 2 === 0 && (
               <text x={x(i)} y={H - 10} textAnchor="middle" fontSize="9.5"
@@ -334,16 +358,16 @@ function GraficoCategorias({ datos, total }) {
           ))}
         </g>
         <text x="70" y="66" textAnchor="middle" fontSize="9" fill="var(--muted)">Total</text>
-        <text x="70" y="80" textAnchor="middle" fontSize="12.5" fontWeight="700" fill="var(--text)">
-          {fmtARS(total)}
+        <text x="70" y="81" textAnchor="middle" fontSize="14" fontWeight="700" fill="var(--text)">
+          {`${total.toLocaleString("es-AR")} u.`}
         </text>
       </svg>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: 16 }}>
         {segmentos.map(s => (
-          <div key={s.categoria} style={{
-            display: "flex", alignItems: "center", gap: 8, fontSize: 12,
-          }}>
+          <div key={s.categoria}
+            title={`${s.categoria}: ${s.unidades} unidad(es) · ${fmtARS(s.monto)} facturados`}
+            style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
             <span style={{
               width: 10, height: 10, borderRadius: 2, background: s.color, flexShrink: 0,
             }} />

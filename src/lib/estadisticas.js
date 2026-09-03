@@ -267,9 +267,10 @@ export function serieVentasPorMes(pedidos = [], indice, costs, hoy = new Date(),
 // ─── Reparto por categoría ───────────────────────────────────────────
 
 /**
- * Ventas del mes repartidas por categoría, POR MONTO FACTURADO (no por
- * unidades): una pieza de $30.000 pesa diez veces más que una de $3.000, que
- * es lo que interesa al lado de los KPIs de plata.
+ * Ventas del mes repartidas por categoría, POR UNIDADES VENDIDAS: el
+ * porcentaje responde "de cada 10 piezas que salieron, cuántas fueron de
+ * esta categoría". El monto facturado se calcula igual y viaja en el
+ * resultado, pero no es el que manda el reparto ni el orden.
  *
  * Los personalizados van todos a una categoría fija, no tienen "cat".
  * Las líneas de catálogo cuyo producto se borró caen en "Sin categoría".
@@ -296,8 +297,8 @@ export function ventasPorCategoria(lista = [], indice, categorias = []) {
     }
   }
 
-  const total = [...mapa.values()].reduce((s, c) => s + c.monto, 0);
+  const total = [...mapa.values()].reduce((s, c) => s + c.unidades, 0);
   return [...mapa.values()]
-    .map(c => ({ ...c, porcentaje: total > 0 ? (c.monto / total) * 100 : 0 }))
-    .sort((a, b) => b.monto - a.monto);
+    .map(c => ({ ...c, porcentaje: total > 0 ? (c.unidades / total) * 100 : 0 }))
+    .sort((a, b) => b.unidades - a.unidades || b.monto - a.monto);
 }
