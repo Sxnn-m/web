@@ -5,12 +5,16 @@
 import { db } from '../firebase.js';
 import {
   collection, getDocs, addDoc, updateDoc, deleteDoc, doc,
-  serverTimestamp, deleteField,
+  runTransaction, serverTimestamp, deleteField,
 } from 'firebase/firestore';
 import {
   calcularDisponibilidad, buscarFilamento, specsDesdeReceta, lineasDeInsumo,
+  claveFilamento,
 } from './disponibilidad.js';
-import { registrarGastoEn } from './historial.js';
+import { COL_INSUMOS } from './insumos.js';
+import {
+  agruparConsumo, validarStock, StockInsuficienteError,
+} from './consumoPedido.js';
 import { tiempoDeProducto, specsDeTiempo } from './tiempoImpresion.js';
 
 export const COL_FILAMENTOS = "filamentos";
@@ -230,70 +234,124 @@ export function planDeInsumos(pedido, productos = []) {
 }
 
 /**
- * Marca un pedido como impreso: por cada línea del plan de consumo descuenta
- * del filamento (consumo de receta × cantidad + desperdicio informado) y
- * escribe el gasto en el historial del filamento. Además descuenta del
- * catálogo las unidades de insumo que consumió el pedido.
+ * Marca un pedido como impreso, en UNA transacción:
+ *   1. lee el stock de cada filamento e insumo involucrado DENTRO de la
+ *      transacción (no con una lectura previa, que podría estar vieja);
+ *   2. valida que alcance para el consumo TOTAL del pedido;
+ *   3. si falta algo, aborta sin escribir nada y tira StockInsuficienteError
+ *      con la lista completa de faltantes;
+ *   4. si alcanza, descuenta, escribe los gastos y marca el pedido.
  *
- * @param {object} pedido
- * @param {Array}  plan        salida de planDeConsumo()
- * @param {object} desperdicios mapa clave-del-plan → gramos desperdiciados
- * @param {Array}  filamentos  inventario actual
- * @param {Array}  planInsumos salida de planDeInsumos()
- * @param {Array}  insumos     catálogo actual
- * @returns {{advertencias: string[]}} filamentos/insumos que no se pudieron descontar
+ * Al ir todo en una transacción, un doble clic o dos pedidos confirmados a la
+ * vez no pueden descontar de más: la segunda corrida vuelve a leer el stock ya
+ * descontado y, si no alcanza, falla en vez de dejarlo en negativo.
+ *
+ * Los arrays filamentos/insumos se usan SOLO para resolver los IDs de
+ * documento (una transacción no puede hacer queries); las cantidades siempre
+ * salen de la lectura transaccional.
+ *
+ * @throws {StockInsuficienteError} cuando algún recurso no alcanza
+ * @returns {{advertencias: string[]}}
  */
 export async function marcarPedidoImpreso(
   pedido, plan, desperdicios = {}, filamentos = [], planInsumos = [], insumos = []
 ) {
-  const advertencias = [];
+  const consumo = agruparConsumo(plan, desperdicios, planInsumos);
 
-  for (const linea of plan) {
-    const filamento = buscarFilamento(filamentos, linea.material, linea.color);
-    const desperdiciada = Number(desperdicios[linea.clave]) || 0;
-    const total = linea.cantidadConsumida + desperdiciada;
+  // IDs de documento a partir de los catálogos ya cargados.
+  const idFilamento = (item) => {
+    const f = buscarFilamento(filamentos, item.material, item.color);
+    return f ? { id: f._id } : null;
+  };
+  const idInsumo = (item) => {
+    const i = insumos.find(x => x._id === item.insumoId);
+    return i ? { id: i._id } : null;
+  };
 
-    if (!filamento) {
-      advertencias.push(
-        `${linea.material} ${linea.color} (${linea.productoNombre}): no está en inventario, ` +
-        `no se descontaron ${total} g.`
-      );
-      continue;
+  return runTransaction(db, async (tx) => {
+    // ── 1. Lecturas (todas antes de cualquier escritura) ──
+    const refsFilamento = new Map();
+    const refsInsumo = new Map();
+    const stockLeido = new Map();
+
+    for (const f of consumo.filamentos) {
+      const encontrado = idFilamento(f);
+      if (!encontrado) continue;
+      const ref = doc(db, COL_FILAMENTOS, encontrado.id);
+      refsFilamento.set(f.clave, ref);
+      const snap = await tx.get(ref);
+      stockLeido.set(`f:${f.clave}`, snap.exists() ? Number(snap.data().cantidadGramos) || 0 : null);
     }
 
-    await registrarGastoEn(COL_FILAMENTOS, filamento._id, {
-      producto: linea.productoNombre,
-      cantidadConsumida: linea.cantidadConsumida,
-      cantidadDesperdiciada: desperdiciada,
-      numeroOrden: pedido.numeroOrden,
-    }, total);
-  }
-
-  // Insumos: descuento directo de unidades, sin desperdicio ni historial.
-  for (const linea of planInsumos) {
-    const insumo = insumos.find(i => i._id === linea.insumoId);
-    if (!insumo) {
-      advertencias.push(
-        `${linea.nombre} (${linea.productoNombre}): ya no está en el catálogo de insumos, ` +
-        `no se descontaron ${linea.unidadesConsumidas} u.`
-      );
-      continue;
+    for (const i of consumo.insumos) {
+      const encontrado = idInsumo(i);
+      if (!encontrado) continue;
+      const ref = doc(db, COL_INSUMOS, encontrado.id);
+      refsInsumo.set(i.insumoId, ref);
+      const snap = await tx.get(ref);
+      stockLeido.set(`i:${i.insumoId}`, snap.exists() ? Number(snap.data().cantidadDisponible) || 0 : null);
     }
-    try {
-      await registrarGastoEn("insumos", linea.insumoId, {
+
+    // ── 2. Validación contra lo recién leído ──
+    const resultado = validarStock(
+      consumo,
+      (f) => {
+        const v = stockLeido.get(`f:${f.clave}`);
+        return v === undefined || v === null ? null : { id: f.clave, disponible: v };
+      },
+      (i) => {
+        const v = stockLeido.get(`i:${i.insumoId}`);
+        return v === undefined || v === null ? null : { id: i.insumoId, disponible: v };
+      }
+    );
+
+    if (!resultado.ok) throw new StockInsuficienteError(resultado.faltantes);
+
+    // ── 3. Escrituras ──
+    // Un update por documento con el valor final: escribir dos veces el mismo
+    // doc en una transacción haría que la última escritura pise a la anterior.
+    for (const f of resultado.filamentos) {
+      tx.update(refsFilamento.get(f.clave), {
+        cantidadGramos: f.disponible - f.total,
+        updatedAt: serverTimestamp(),
+      });
+    }
+    for (const i of resultado.insumos) {
+      tx.update(refsInsumo.get(i.insumoId), {
+        cantidadDisponible: i.disponible - i.total,
+        updatedAt: serverTimestamp(),
+      });
+    }
+
+    // Los gastos van por línea de pedido, para no perder qué producto consumió qué.
+    for (const linea of plan) {
+      const ref = refsFilamento.get(claveFilamento(linea.material, linea.color));
+      if (!ref) continue;
+      tx.set(doc(collection(ref, "gastos")), {
+        producto: linea.productoNombre,
+        cantidadConsumida: linea.cantidadConsumida,
+        cantidadDesperdiciada: Number(desperdicios[linea.clave]) || 0,
+        numeroOrden: pedido.numeroOrden,
+        fecha: serverTimestamp(),
+      });
+    }
+    for (const linea of planInsumos) {
+      const ref = refsInsumo.get(linea.insumoId);
+      if (!ref) continue;
+      tx.set(doc(collection(ref, "gastos")), {
         producto: linea.productoNombre,
         cantidadConsumida: linea.unidadesConsumidas,
         numeroOrden: pedido.numeroOrden,
-      }, linea.unidadesConsumidas);
-    } catch (err) {
-      advertencias.push(`${linea.nombre}: no se pudo descontar (${err.message}).`);
+        fecha: serverTimestamp(),
+      });
     }
-  }
 
-  await updateDoc(doc(db, COL_PEDIDOS, pedido._id), {
-    estadoImpresion: "impreso",
-    impresoAt: serverTimestamp(),
+    tx.update(doc(db, COL_PEDIDOS, pedido._id), {
+      estadoImpresion: "impreso",
+      impresoAt: serverTimestamp(),
+    });
+
+    return { advertencias: [] };
   });
-
-  return { advertencias };
 }
+

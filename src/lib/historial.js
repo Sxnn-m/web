@@ -53,22 +53,6 @@ export async function registrarRestockEn(coleccion, docId, cantidadAgregada, not
   });
 }
 
-/**
- * Descuento automático al marcar un pedido como impreso: deja el gasto en el
- * historial y resta del documento padre, en una sola operación lógica.
- *
- * @param {object} gasto  campos del registro (producto, cantidadConsumida,
- *                        numeroOrden, y cantidadDesperdiciada en filamentos)
- * @param {number} totalADescontar  lo que se resta del padre
- */
-export async function registrarGastoEn(coleccion, docId, gasto, totalADescontar) {
-  const { campoCantidad } = configDe(coleccion);
-  await addDoc(collection(db, coleccion, docId, "gastos"), {
-    ...gasto,
-    fecha: serverTimestamp(),
-  });
-  await updateDoc(doc(db, coleccion, docId), {
-    [campoCantidad]: increment(-(Number(totalADescontar) || 0)),
-    updatedAt: serverTimestamp(),
-  });
-}
+// El descuento al imprimir un pedido NO pasa por acá: va dentro de la
+// transacción de marcarPedidoImpreso() en src/lib/inventario.js, que valida
+// el stock y escribe los gastos de forma atómica.

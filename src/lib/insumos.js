@@ -39,5 +39,5 @@ export async function eliminarInsumo(id) {
   await deleteDoc(doc(db, COL_INSUMOS, id));
 }
 
-// El descuento al imprimir un pedido va por registrarGastoEn() de
-// src/lib/historial.js, que además deja el gasto en el historial.
+// El descuento al imprimir un pedido va dentro de la transacción de
+// marcarPedidoImpreso() en src/lib/inventario.js.
