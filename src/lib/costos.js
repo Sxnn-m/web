@@ -205,7 +205,7 @@ export function filasDeRentabilidad(productos = [], personalizados = [], costs =
     ...personalizados.map(p => ({
       ...p,
       tipo: "personalizado",
-      categoria: "Personalizados",
+      categoria: "Personalizado",
       referencia: p.clienteNombre ? `Cliente · ${p.clienteNombre}` : "Cliente sin nombre",
     })),
   ].map(p => ({
