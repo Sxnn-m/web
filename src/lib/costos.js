@@ -4,6 +4,7 @@
 
 import { normalizar } from './disponibilidad.js';
 import { horasDeImpresion } from './tiempoImpresion.js';
+import { TODAS, coincideCategoria } from './filtros.js';
 
 /**
  * Margen fijo sobre el material: el precio de venta usa el costo del gramo
@@ -241,20 +242,27 @@ export function filasDeRentabilidad(productos = [], personalizados = [], costs =
 }
 
 /**
- * Filtra las filas de Rentabilidad por el texto del buscador.
+ * Filtra las filas de Rentabilidad con los tres controles a la vez, en AND:
+ * texto, categoría y subcategoría. Es el mismo criterio que usa el tab
+ * Productos, con la lógica de categoría compartida en lib/filtros.js.
  *
- * Mismo criterio que el buscador de Pedidos: comparación en minúsculas por
- * substring contra el campo "busqueda", que cada colección arma con lo que la
+ * El texto se compara igual que en el buscador de Pedidos: en minúsculas, por
+ * substring, contra el campo "busqueda" que cada colección arma con lo que la
  * identifica — nombre + código TKPx en catálogo, nombre + cliente en
  * personalizados. Catálogo y personalizados se filtran juntos, en una sola
  * lista: no hay un selector de tipo aparte.
  *
- * Un texto vacío devuelve todo.
+ * Sin filtros devuelve todo.
+ *
+ * @param {{busqueda?: string, filtroCat?: string, filtroSub?: string}} filtros
  */
-export function filtrarFilas(filas = [], texto = "") {
-  const q = String(texto || "").trim().toLowerCase();
-  if (!q) return filas;
-  return filas.filter(f => (f.busqueda || "").includes(q));
+export function filtrarFilas(filas = [], filtros = {}) {
+  const { busqueda = "", filtroCat = TODAS, filtroSub = TODAS } = filtros;
+  const q = String(busqueda || "").trim().toLowerCase();
+  return filas.filter(f =>
+    (!q || (f.busqueda || "").includes(q)) &&
+    coincideCategoria(f, filtroCat, filtroSub)
+  );
 }
 
 /** "PLA, PETG" — materiales distintos de la receta, para la columna Material/es. */
