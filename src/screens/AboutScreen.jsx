@@ -1,5 +1,8 @@
+import { useState } from 'react';
 import { TKButton, Icon } from '../components/UI.jsx';
 import aboutUsImg from '../assets/about-us.jpg';
+import { enviarMensaje } from '../lib/mensajes.js';
+import { validarConsulta, LIMITES } from '../lib/consultas.js';
 
 export function AboutScreen({ go, categories = [] }) {
   return (
@@ -61,12 +64,7 @@ export function AboutScreen({ go, categories = [] }) {
               </div>
             </div>
           </div>
-          <form style={{ display: "grid", gap: 14 }} onSubmit={e => e.preventDefault()}>
-            <input placeholder="Nombre" style={contactInput}/>
-            <input placeholder="Email" style={contactInput}/>
-            <textarea placeholder="Contanos sobre tu proyecto..." rows={5} style={{...contactInput, resize: "vertical"}}/>
-            <TKButton variant="beige" size="lg">Enviar mensaje <Icon.arrow/></TKButton>
-          </form>
+          <FormularioContacto />
         </div>
       </section>
     </div>
@@ -77,3 +75,112 @@ const contactInput = {
   padding: 14, background: "rgba(255,255,255,.08)", border: "1px solid rgba(255,255,255,.2)",
   color: "#fff", fontSize: 14, outline: "none",
 };
+
+const errorTexto = { fontSize: 12, color: "#FFB4AE", marginTop: -8 };
+
+// ─── Formulario de contacto ──────────────────────────────────────────
+// Antes los inputs no estaban controlados y el submit solo hacía
+// preventDefault: lo que se escribía se descartaba en silencio. Ahora cada
+// envío crea un documento en "mensajes", que el backoffice lee desde el tab
+// Mensajería.
+function FormularioContacto() {
+  const [form, setForm] = useState({ nombre: "", email: "", mensaje: "" });
+  const [errores, setErrores] = useState({});
+  const [estado, setEstado] = useState("editando");   // editando | enviando | enviado | error
+  const [errorEnvio, setErrorEnvio] = useState("");
+
+  const up = (campo) => (e) => {
+    setForm(f => ({ ...f, [campo]: e.target.value }));
+    // El error se limpia al corregir, no recién al reintentar el envío.
+    if (errores[campo]) setErrores(er => ({ ...er, [campo]: undefined }));
+  };
+
+  const enviar = async (e) => {
+    e.preventDefault();
+    const { valido, errores: errs } = validarConsulta(form);
+    setErrores(errs);
+    if (!valido) return;
+
+    setEstado("enviando");
+    try {
+      await enviarMensaje(form);
+      setForm({ nombre: "", email: "", mensaje: "" });
+      setEstado("enviado");
+    } catch (err) {
+      setErrorEnvio(err.message);
+      setEstado("error");
+    }
+  };
+
+  if (estado === "enviado") {
+    return (
+      <div style={{
+        display: "flex", flexDirection: "column", justifyContent: "center",
+        gap: 14, padding: 28, border: "1px solid rgba(255,255,255,.25)",
+      }}>
+        <div style={{ fontSize: 22, letterSpacing: -0.5 }}>¡Gracias! Recibimos tu mensaje.</div>
+        <p style={{ color: "rgba(255,255,255,.85)", fontSize: 15, lineHeight: 1.6, margin: 0 }}>
+          Te vamos a contestar al email que dejaste. Si es urgente, escribinos
+          directo a tk.prints.ok@hotmail.com.
+        </p>
+        <div>
+          <TKButton variant="beige" onClick={() => setEstado("editando")}>
+            Enviar otro mensaje
+          </TKButton>
+        </div>
+      </div>
+    );
+  }
+
+  const enviando = estado === "enviando";
+
+  return (
+    <form style={{ display: "grid", gap: 14 }} onSubmit={enviar} noValidate>
+      <input
+        placeholder="Nombre"
+        value={form.nombre}
+        onChange={up("nombre")}
+        maxLength={LIMITES.nombre}
+        disabled={enviando}
+        style={{ ...contactInput, borderColor: errores.nombre ? "#FFB4AE" : "rgba(255,255,255,.2)" }}
+      />
+      {errores.nombre && <div style={errorTexto}>{errores.nombre}</div>}
+
+      <input
+        placeholder="Email"
+        type="email"
+        value={form.email}
+        onChange={up("email")}
+        maxLength={LIMITES.email}
+        disabled={enviando}
+        style={{ ...contactInput, borderColor: errores.email ? "#FFB4AE" : "rgba(255,255,255,.2)" }}
+      />
+      {errores.email && <div style={errorTexto}>{errores.email}</div>}
+
+      <textarea
+        placeholder="Contanos sobre tu proyecto..."
+        rows={5}
+        value={form.mensaje}
+        onChange={up("mensaje")}
+        maxLength={LIMITES.mensaje}
+        disabled={enviando}
+        style={{
+          ...contactInput, resize: "vertical",
+          borderColor: errores.mensaje ? "#FFB4AE" : "rgba(255,255,255,.2)",
+        }}
+      />
+      {errores.mensaje && <div style={errorTexto}>{errores.mensaje}</div>}
+
+      <TKButton variant="beige" size="lg" disabled={enviando}>
+        {enviando ? "Enviando..." : <>Enviar mensaje <Icon.arrow/></>}
+      </TKButton>
+
+      {estado === "error" && (
+        <div style={{ fontSize: 13, color: "#FFB4AE", lineHeight: 1.5 }}>
+          No se pudo enviar el mensaje ({errorEnvio}). Probá de nuevo, o
+          escribinos a tk.prints.ok@hotmail.com.
+        </div>
+      )}
+    </form>
+  );
+}

@@ -18,6 +18,9 @@ import {
 } from '../lib/personalizados.js';
 import { InsumosTab } from './admin/InsumosTab.jsx';
 import { EstadisticasTab } from './admin/EstadisticasTab.jsx';
+import { MensajeriaTab } from './admin/MensajeriaTab.jsx';
+import { cargarMensajes, asignarNumerosFaltantes } from '../lib/mensajes.js';
+import { contarNoLeidos } from '../lib/consultas.js';
 import { useFiltrosCategoria, FiltrosCategoria } from '../components/FiltrosCategoria.jsx';
 import { CAT_PERSONALIZADOS } from '../lib/filtros.js';
 import {
@@ -54,6 +57,7 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
   const [pedidos, setPedidos] = useState([]);
   const [insumos, setInsumos] = useState([]);
   const [personalizados, setPersonalizados] = useState([]);
+  const [mensajes, setMensajes] = useState([]);
   const [editPersonalizado, setEditPersonalizado] = useState(null);
   const [showFormPers, setShowFormPers] = useState(false);
   const [privados, setPrivados] = useState({});
@@ -132,6 +136,22 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
       setMsg("✓ Personalizado eliminado.");
       await loadPersonalizados();
     } catch (err) { setMsg("Error: " + err.message); }
+  };
+
+  /**
+   * Carga la bandeja y, de paso, le pone número a las consultas que llegaron
+   * sin él. El formulario público no puede numerar (necesitaría leer la
+   * colección, que las reglas le prohíben), así que el correlativo se asigna
+   * acá, con la sesión admin. Si ya están todas numeradas no escribe nada.
+   */
+  const loadMensajes = async () => {
+    try {
+      const list = await cargarMensajes();
+      const numerados = await asignarNumerosFaltantes(list);
+      const final = numerados > 0 ? await cargarMensajes() : list;
+      setMensajes(final);
+      return final;
+    } catch (err) { console.error(err); return []; }
   };
 
   const loadPedidos = async () => {
@@ -256,7 +276,7 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
         if (snap.exists()) setCostSettings(snap.data());
       } catch (e) { /* silently ignore, use defaults */ }
     };
-    Promise.all([loadProducts(), loadUsers(), loadCosts(), loadFilamentos(), loadPedidos(), loadInsumos(), loadPersonalizados()])
+    Promise.all([loadProducts(), loadUsers(), loadCosts(), loadFilamentos(), loadPedidos(), loadInsumos(), loadPersonalizados(), loadMensajes()])
       .then(([prods]) => loadPrivados(prods))
       .then(() => setLoading(false));
   }, []);
@@ -377,6 +397,7 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
     { id: "insumos", label: "Insumos", icon: <Icon.grid size={16}/> },
     { id: "pedidos", label: "Pedidos", icon: <Icon.truck size={16}/> },
     { id: "estadisticas", label: "Estadísticas", icon: <Icon.list size={16}/> },
+    { id: "mensajeria", label: "Mensajería", icon: <Icon.mail size={16}/>, badge: contarNoLeidos(mensajes) },
     { id: "usuarios", label: "Usuarios", icon: <Icon.user size={16}/> },
     { id: "costos", label: "Costos", icon: <Icon.spark size={16}/> },
   ];
@@ -435,6 +456,17 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
                 cursor: "pointer", display: "flex", alignItems: "center", gap: 10,
               }}>
                 {n.icon} {n.label}
+                {/* Contador de no leídos: la razón de entrar al tab es que
+                    haya algo nuevo, y si no se ve desde la nav no se entra. */}
+                {n.badge > 0 && (
+                  <span style={{
+                    marginLeft: "auto", background: "var(--accent)", color: "#fff",
+                    fontSize: 10, fontWeight: 700, borderRadius: 10,
+                    padding: "2px 7px", minWidth: 18, textAlign: "center",
+                  }}>
+                    {n.badge}
+                  </span>
+                )}
               </button>
             ))}
           </nav>
@@ -516,6 +548,9 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
               categories={propCategories}
               costs={costSettings}
             />
+          )}
+          {tab === "mensajeria" && (
+            <MensajeriaTab mensajes={mensajes} onChanged={loadMensajes} setMsg={setMsg} />
           )}
           {tab === "usuarios" && <UsersTab users={users} onToggleRole={toggleRole} />}
           {tab === "costos" && (

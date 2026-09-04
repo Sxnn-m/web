@@ -132,6 +132,42 @@ service cloud.firestore {
       allow read, write: if esAdmin();
     }
 
+    // ── Mensajes del formulario de contacto ────────────────────────────
+    // ÚNICA colección con escritura pública del proyecto. Merece leerse con
+    // atención, porque una regla de create abierta sin validar deja que
+    // cualquiera escriba documentos arbitrarios en la base.
+    //
+    // Lo que habilita al público es SOLO crear. "read" cubre get y list, así
+    // que con read admin-only un visitante no puede leer un mensaje ajeno ni
+    // aunque adivine su ID, ni listar la colección, ni saber cuántos hay.
+    // Tampoco puede modificar ni borrar lo que ya mandó.
+    //
+    // El create además valida el documento entero:
+    //   - hasOnly + hasAll: exactamente estos cinco campos, ni uno más.
+    //     Por eso "numeroConsulta" NO se puede mandar desde el formulario:
+    //     lo asigna el backoffice, y así nadie puede falsearlo ni pisar el
+    //     correlativo de otra consulta.
+    //   - largos máximos: sin esto, un solo POST puede escribir un documento
+    //     de 1 MB. Los valores están replicados en src/lib/consultas.js.
+    //   - leido == false: nadie entra a la bandeja ya marcado como leído.
+    //   - createdAt == request.time: la fecha la pone el servidor, no el
+    //     cliente, así que no se puede antedatar ni postdatar un mensaje.
+    function mensajeValido() {
+      let d = request.resource.data;
+      return d.keys().hasOnly(['nombre', 'email', 'mensaje', 'leido', 'createdAt'])
+        && d.keys().hasAll(['nombre', 'email', 'mensaje', 'leido', 'createdAt'])
+        && d.nombre is string && d.nombre.size() > 0 && d.nombre.size() <= 100
+        && d.email is string && d.email.size() > 0 && d.email.size() <= 200
+        && d.mensaje is string && d.mensaje.size() > 0 && d.mensaje.size() <= 5000
+        && d.leido == false
+        && d.createdAt == request.time;
+    }
+
+    match /mensajes/{mensajeId} {
+      allow create: if mensajeValido();
+      allow read, update, delete: if esAdmin();
+    }
+
     // Todo lo no declarado arriba queda denegado por defecto.
   }
 }
