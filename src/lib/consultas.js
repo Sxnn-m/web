@@ -107,6 +107,26 @@ export function planDeNumeracion(mensajes = []) {
   });
 }
 
+/**
+ * Texto contra el que busca la bandeja: nombre, email y número de consulta.
+ * El cuerpo del mensaje NO entra a propósito — buscar dentro de textos largos
+ * devuelve coincidencias por palabras sueltas ("gracias", "hola") que no
+ * sirven para encontrar a nadie.
+ */
+export const textoBuscableMensaje = (m) =>
+  `${m?.nombre || ""} ${m?.email || ""} ${m?.numeroConsulta || ""}`.toLowerCase();
+
+/**
+ * Filtra la bandeja por texto, con el mismo criterio que los buscadores de
+ * Pedidos y Rentabilidad: minúsculas, por substring. Se aplica sobre toda la
+ * lista, leídos y no leídos por igual. Sin texto devuelve todo.
+ */
+export function filtrarMensajes(mensajes = [], texto = "") {
+  const q = String(texto || "").trim().toLowerCase();
+  if (!q) return mensajes;
+  return mensajes.filter(m => textoBuscableMensaje(m).includes(q));
+}
+
 /** Cuántos mensajes están sin leer, para el contador de la nav. */
 export const contarNoLeidos = (mensajes = []) =>
   mensajes.filter(m => m?.leido !== true).length;

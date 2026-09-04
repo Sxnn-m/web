@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { TKButton, Icon } from '../../components/UI.jsx';
+import { TKButton, TKInput, Icon } from '../../components/UI.jsx';
 import { fmtFecha } from './InventarioTab.jsx';
 import { marcarLeido, eliminarMensaje } from '../../lib/mensajes.js';
-import { contarNoLeidos } from '../../lib/consultas.js';
+import { contarNoLeidos, filtrarMensajes } from '../../lib/consultas.js';
 
 // ─── Tab Mensajería ──────────────────────────────────────────────────
 // Bandeja de las consultas que entran por el formulario público. No se
@@ -18,7 +18,12 @@ const COL = "110px 1.2fr 1.6fr 150px 44px";
 
 export function MensajeriaTab({ mensajes = [], onChanged, setMsg }) {
   const [abierto, setAbierto] = useState(null);   // _id del mensaje abierto
+  const [busqueda, setBusqueda] = useState("");
   const noLeidos = contarNoLeidos(mensajes);
+
+  // El buscador filtra la bandeja completa, leídos y no leídos por igual.
+  const visibles = filtrarMensajes(mensajes, busqueda);
+  const filtrando = Boolean(busqueda.trim());
 
   /**
    * Abrir un mensaje lo marca como leído. La lista se recarga después de
@@ -82,6 +87,40 @@ export function MensajeriaTab({ mensajes = [], onChanged, setMsg }) {
         a la más vieja. Abrir una la marca como leída.
       </p>
 
+      {/* Buscador: mismo estilo y criterio que los de Pedidos y Rentabilidad. */}
+      {mensajes.length > 0 && (
+        <div style={{
+          display: "grid", gridTemplateColumns: "minmax(200px, 320px) auto",
+          gap: 12, alignItems: "end", marginBottom: 12,
+        }} className="form-layout">
+          <div>
+            <div style={{
+              fontSize: 11, fontWeight: 600, letterSpacing: 0.8,
+              textTransform: "uppercase", color: "var(--muted)", marginBottom: 6,
+            }}>
+              Buscar
+            </div>
+            <TKInput
+              placeholder="Por nombre, email o N° de consulta..."
+              icon={<Icon.search size={16}/>}
+              value={busqueda}
+              onChange={e => setBusqueda(e.target.value)}
+            />
+          </div>
+          {filtrando && (
+            <TKButton variant="ghost" onClick={() => setBusqueda("")} icon={<Icon.close size={14}/>}>
+              Limpiar
+            </TKButton>
+          )}
+        </div>
+      )}
+
+      {filtrando && (
+        <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 12 }}>
+          {visibles.length} mensaje{visibles.length !== 1 ? "s" : ""} de {mensajes.length}
+        </div>
+      )}
+
       {mensajes.length === 0 ? (
         <div style={{
           padding: 48, textAlign: "center", color: "var(--muted)",
@@ -101,7 +140,14 @@ export function MensajeriaTab({ mensajes = [], onChanged, setMsg }) {
               <div>Consulta</div><div>Nombre</div><div>Email</div><div>Fecha</div><div></div>
             </div>
 
-            {mensajes.map(m => {
+            {/* La búsqueda no encontró nada: es distinto de la bandeja vacía. */}
+            {visibles.length === 0 && (
+              <div style={{ padding: 40, textAlign: "center", color: "var(--muted)" }}>
+                No se encontraron mensajes para "{busqueda.trim()}".
+              </div>
+            )}
+
+            {visibles.map(m => {
               const sinLeer = m.leido !== true;
               return (
                 <div
