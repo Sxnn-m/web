@@ -288,7 +288,6 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
       for (const p of SEED_PRODUCTS) {
         await addDoc(collection(db, "products"), {
           ...p,
-          stock: Math.floor(Math.random() * 20) + 5,
           createdAt: serverTimestamp(),
         });
       }
@@ -625,7 +624,8 @@ function ProductsTab({
   const sinReceta = products.filter(p => (p.receta || []).length === 0).length;
   const duplicados = useMemo(() => idsDuplicados(products), [products]);
 
-  const COL = "70px 2fr 1fr 90px 90px 70px 110px 70px 70px 90px";
+  // ID | Nombre | Categoría | Precio | Costo fab. | Disponible | Origen | Visible | Acciones
+  const COL = "70px 2fr 1fr 90px 90px 110px 70px 70px 90px";
 
   return (
     <>
@@ -727,7 +727,7 @@ function ProductsTab({
             fontSize: 10, textTransform: "uppercase",
             letterSpacing: 1.5, color: "var(--muted)", fontWeight: 700,
           }}>
-            <div>ID</div><div>Nombre</div><div>Categoría</div><div>Precio</div><div>Costo fab.</div><div>Stock</div><div>Disponible</div><div>Origen</div><div>Visible</div><div>Acciones</div>
+            <div>ID</div><div>Nombre</div><div>Categoría</div><div>Precio</div><div>Costo fab.</div><div>Disponible</div><div>Origen</div><div>Visible</div><div>Acciones</div>
           </div>
 
           {filtered.map(p => {
@@ -766,13 +766,6 @@ function ProductsTab({
                       ? <span style={{ color: "var(--text)", fontWeight: 600 }}>{fmtARS(rent.costoFabricacion)}</span>
                       : <span style={{ color: "var(--muted)" }} title={rent.motivo}>—</span>
                     }
-                  </div>
-                  <div style={{
-                    fontSize: 12,
-                    color: (p.stock || 0) < 5 ? "#c64138" : "var(--text)",
-                    fontWeight: (p.stock || 0) < 5 ? 700 : 400,
-                  }}>
-                    {p.stock ?? "—"}
                   </div>
                   {/* Disponibilidad calculada desde receta + inventario.
                       "Sin receta" y "No" comparten el color de alerta pero se
@@ -1507,7 +1500,9 @@ function ProductForm({
     // price no vive en el form: sale de la fórmula o del modo manual.
     desc: product?.desc || "",
     tag: product?.tag || "",
-    stock: product?.stock || 0,
+    // "stock" no vive más en el form: la disponibilidad sale de la receta +
+    // el inventario. El campo puede seguir existiendo en documentos viejos de
+    // Firestore, pero ni se lee ni se reescribe.
     visible: product?.visible !== false,
     specs: product?.specs || { material: "", tiempo: "", peso: "" },
     origenUrl: product?.origenUrl || "",
@@ -1621,7 +1616,6 @@ function ProductForm({
       price: Number(precioFinal) || 0,
       precioManual,
       insumos: insumosLimpios,
-      stock: Number(form.stock),
       visible: form.visible,
       images: cleanImages,
       img: cleanImages[0] || "",
@@ -1722,8 +1716,6 @@ function ProductForm({
               sugerido={sugerido}
               precioFinal={precioFinal}
             />
-            <TKInput label="Stock manual (heredado)" type="number" value={form.stock} onChange={e => up("stock", e.target.value)} hint="La disponibilidad real sale de la receta + inventario" />
-
             <div style={{ gridColumn: "1 / -1" }}>
               <TKInput label="Descripción" value={form.desc} onChange={e => up("desc", e.target.value)} placeholder="Descripción del producto..." />
             </div>
