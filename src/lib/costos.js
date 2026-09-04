@@ -177,6 +177,54 @@ export function calcularPrecioSugerido(producto, costs = DEFAULT_COSTS) {
   };
 }
 
+/**
+ * Filas de la tabla de Rentabilidad: el catálogo y los personalizados
+ * mezclados en una sola lista, ordenada de menor a mayor margen.
+ *
+ * Los dos tipos se calculan con la MISMA fórmula: calcularRentabilidad no
+ * mira de qué colección salió el producto, solo su receta, sus insumos y su
+ * precio (manual o de fórmula). Por eso un personalizado con insumos suma
+ * esos insumos al costo de fabricación igual que uno de catálogo.
+ *
+ * Cada fila lleva "tipo" y "referencia": lo que va debajo del nombre en la
+ * tabla. Un producto de catálogo se ubica por categoría/subcategoría; un
+ * personalizado no las tiene, se ubica por el nombre del cliente.
+ *
+ * @returns {Array<producto & {tipo, categoria, referencia, clave, rent}>}
+ */
+export function filasDeRentabilidad(productos = [], personalizados = [], costs = DEFAULT_COSTS) {
+  const filas = [
+    ...productos
+      .filter(p => p.visible !== false)
+      .map(p => ({
+        ...p,
+        tipo: "catalogo",
+        categoria: [p.cat, p.sub].filter(Boolean).join(" · ") || "Sin categoría",
+        referencia: "",   // el catálogo ya se ubica por su categoría
+      })),
+    ...personalizados.map(p => ({
+      ...p,
+      tipo: "personalizado",
+      categoria: "Personalizados",
+      referencia: p.clienteNombre ? `Cliente · ${p.clienteNombre}` : "Cliente sin nombre",
+    })),
+  ].map(p => ({
+    ...p,
+    // Los _id salen de dos colecciones distintas: se prefijan para que React
+    // no pueda ver dos filas con la misma key.
+    clave: `${p.tipo}:${p._id || p.id}`,
+    rent: calcularRentabilidad(p, costs),
+  }));
+
+  // Peor margen primero; los no calculables van al final para que no ensucien
+  // el ranking pero queden visibles.
+  return filas.sort((a, b) => {
+    if (a.rent.calculable !== b.rent.calculable) return a.rent.calculable ? -1 : 1;
+    if (!a.rent.calculable) return (a.name || "").localeCompare(b.name || "");
+    return a.rent.margen - b.rent.margen;
+  });
+}
+
 /** "PLA, PETG" — materiales distintos de la receta, para la columna Material/es. */
 export const listaMateriales = (producto) =>
   gramosPorMaterial(producto?.receta || []).map(d => d.material).join(", ");

@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { TKButton, TKInput, Icon } from '../../components/UI.jsx';
 import { UMBRAL_RESTOCK, necesitaRestock } from '../../lib/disponibilidad.js';
 import { crearFilamento, actualizarFilamento, eliminarFilamento } from '../../lib/inventario.js';
+import { marcasDeFilamentos, resolverMarca } from '../../lib/marcas.js';
+import { SelectorConAgregar } from '../../components/SelectorConAgregar.jsx';
 import { DetalleHistorial, RestockBadge, fmtFecha } from './DetalleHistorial.jsx';
 
 // Se reexportan para no romper a quien ya los importaba desde acá.
@@ -23,19 +25,26 @@ export function InventarioTab({ filamentos, onChanged, setMsg }) {
   const [seleccionado, setSeleccionado] = useState(null); // _id del filamento abierto
   const [showForm, setShowForm] = useState(false);
   const [editando, setEditando] = useState(null);
-  const [form, setForm] = useState({ material: "", color: "", cantidadGramos: 0 });
+  const [form, setForm] = useState({ material: "", color: "", marca: "", cantidadGramos: 0 });
 
   const abierto = filamentos.find(f => f._id === seleccionado) || null;
 
+  // La lista de marcas es un distinct sobre los filamentos: no hay colección
+  // aparte, una marca vive mientras la use al menos un rollo.
+  const marcas = marcasDeFilamentos(filamentos);
+
   const openNuevo = () => {
     setEditando(null);
-    setForm({ material: "", color: "", cantidadGramos: 0 });
+    setForm({ material: "", color: "", marca: "", cantidadGramos: 0 });
     setShowForm(true);
   };
 
   const openEditar = (f) => {
     setEditando(f);
-    setForm({ material: f.material || "", color: f.color || "", cantidadGramos: f.cantidadGramos || 0 });
+    setForm({
+      material: f.material || "", color: f.color || "",
+      marca: f.marca || "", cantidadGramos: f.cantidadGramos || 0,
+    });
     setShowForm(true);
   };
 
@@ -72,7 +81,7 @@ export function InventarioTab({ filamentos, onChanged, setMsg }) {
         coleccion="filamentos"
         item={abierto}
         titulo={`${abierto.material} · ${abierto.color}`}
-        subtitulo="Inventario / Filamento"
+        subtitulo={abierto.marca ? `Inventario / Filamento · ${abierto.marca}` : "Inventario / Filamento"}
         cantidad={abierto.cantidadGramos}
         unidad="g"
         alerta={necesitaRestock(abierto)}
@@ -85,7 +94,7 @@ export function InventarioTab({ filamentos, onChanged, setMsg }) {
   }
 
   const enAlerta = filamentos.filter(necesitaRestock).length;
-  const COL = "1.2fr 1fr 120px 140px 90px";
+  const COL = "1.2fr 1fr 1fr 120px 140px 90px";
 
   return (
     <>
@@ -99,9 +108,18 @@ export function InventarioTab({ filamentos, onChanged, setMsg }) {
           <div style={{ fontSize: 18, marginBottom: 16 }}>
             {editando ? "Editar filamento" : "Nuevo filamento"}
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 160px", gap: 16, marginBottom: 16 }} className="form-layout">
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 160px", gap: 16, marginBottom: 16 }} className="form-layout">
             <TKInput label="Material" value={form.material} onChange={e => setForm(f => ({ ...f, material: e.target.value }))} placeholder="PLA" />
             <TKInput label="Color" value={form.color} onChange={e => setForm(f => ({ ...f, color: e.target.value }))} placeholder="Negro" />
+            <SelectorConAgregar
+              label="Marca"
+              value={form.marca}
+              opciones={marcas}
+              onChange={marca => setForm(f => ({ ...f, marca }))}
+              resolver={resolverMarca}
+              placeholder="Nueva marca..."
+              hint="Elegí una de la lista o agregá una nueva."
+            />
             <TKInput label="Cantidad (g)" type="number" value={form.cantidadGramos} onChange={e => setForm(f => ({ ...f, cantidadGramos: e.target.value }))} />
           </div>
           {editando && (
@@ -129,7 +147,7 @@ export function InventarioTab({ filamentos, onChanged, setMsg }) {
             fontSize: 10, textTransform: "uppercase", letterSpacing: 1.5,
             color: "var(--muted)", fontWeight: 700,
           }}>
-            <div>Material</div><div>Color</div><div>Cantidad</div><div>Alerta</div><div>Acciones</div>
+            <div>Material</div><div>Color</div><div>Marca</div><div>Cantidad</div><div>Alerta</div><div>Acciones</div>
           </div>
 
           {filamentos.map(f => {
@@ -149,6 +167,7 @@ export function InventarioTab({ filamentos, onChanged, setMsg }) {
                   {f.material}
                 </div>
                 <div onClick={() => setSeleccionado(f._id)} style={{ cursor: "pointer" }}>{f.color}</div>
+                <div style={{ color: f.marca ? "var(--text)" : "var(--muted)" }}>{f.marca || "—"}</div>
                 <div style={{ fontWeight: 700, color: alerta ? "#c64138" : "var(--text)" }}>
                   {Number(f.cantidadGramos || 0).toLocaleString("es-AR")} g
                 </div>
