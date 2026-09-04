@@ -92,7 +92,7 @@ function Footer({ go }) {
         <div>
           <TKLogo size={24}/>
           <p style={{ color: "var(--muted)", fontSize: 13, lineHeight: 1.6, marginTop: 16, maxWidth: 280 }}>
-            Impresión 3D diseñada y producida en Buenos Aires. Precisión cálida, objetos que se usan.
+            Impresión 3D diseñada y producida en Buenos Aires. Precisión, calidad y productos que se usan.
           </p>
         </div>
         <div>
