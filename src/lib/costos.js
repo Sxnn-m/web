@@ -190,7 +190,11 @@ export function calcularPrecioSugerido(producto, costs = DEFAULT_COSTS) {
  * tabla. Un producto de catálogo se ubica por categoría/subcategoría; un
  * personalizado no las tiene, se ubica por el nombre del cliente.
  *
- * @returns {Array<producto & {tipo, categoria, referencia, clave, rent}>}
+ * También lleva "badges" (las pastillas de la columna Categoría) y "busqueda"
+ * (el texto contra el que filtra el buscador), para que la vista no tenga que
+ * volver a distinguir entre colecciones.
+ *
+ * @returns {Array<producto & {tipo, categoria, badges, referencia, busqueda, clave, rent}>}
  */
 export function filasDeRentabilidad(productos = [], personalizados = [], costs = DEFAULT_COSTS) {
   const filas = [
@@ -200,13 +204,24 @@ export function filasDeRentabilidad(productos = [], personalizados = [], costs =
         ...p,
         tipo: "catalogo",
         categoria: [p.cat, p.sub].filter(Boolean).join(" · ") || "Sin categoría",
+        // Mismas pastillas que el listado de Productos: categoría rellena,
+        // subcategoría en contorno.
+        badges: p.cat
+          ? [{ texto: p.cat, variante: "default" },
+             ...(p.sub ? [{ texto: p.sub, variante: "outline" }] : [])]
+          : [{ texto: "Sin categoría", variante: "outline" }],
         referencia: "",   // el catálogo ya se ubica por su categoría
+        // Se busca por nombre o por código TKPx, igual que en Pedidos.
+        busqueda: `${p.name || ""} ${p.id || ""}`.toLowerCase(),
       })),
     ...personalizados.map(p => ({
       ...p,
       tipo: "personalizado",
       categoria: "Personalizado",
+      badges: [{ texto: "Personalizado", variante: "default" }],
       referencia: p.clienteNombre ? `Cliente · ${p.clienteNombre}` : "Cliente sin nombre",
+      // Un personalizado no tiene código: lo identifica su cliente.
+      busqueda: `${p.name || ""} ${p.clienteNombre || ""}`.toLowerCase(),
     })),
   ].map(p => ({
     ...p,
@@ -223,6 +238,23 @@ export function filasDeRentabilidad(productos = [], personalizados = [], costs =
     if (!a.rent.calculable) return (a.name || "").localeCompare(b.name || "");
     return a.rent.margen - b.rent.margen;
   });
+}
+
+/**
+ * Filtra las filas de Rentabilidad por el texto del buscador.
+ *
+ * Mismo criterio que el buscador de Pedidos: comparación en minúsculas por
+ * substring contra el campo "busqueda", que cada colección arma con lo que la
+ * identifica — nombre + código TKPx en catálogo, nombre + cliente en
+ * personalizados. Catálogo y personalizados se filtran juntos, en una sola
+ * lista: no hay un selector de tipo aparte.
+ *
+ * Un texto vacío devuelve todo.
+ */
+export function filtrarFilas(filas = [], texto = "") {
+  const q = String(texto || "").trim().toLowerCase();
+  if (!q) return filas;
+  return filas.filter(f => (f.busqueda || "").includes(q));
 }
 
 /** "PLA, PETG" — materiales distintos de la receta, para la columna Material/es. */
