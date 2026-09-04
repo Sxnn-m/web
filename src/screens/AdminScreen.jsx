@@ -2253,6 +2253,12 @@ function CategoriesTab({ categories, products, onCategoriesChange, setMsg }) {
 }
 
 // ─── Costos Tab ──────────────────────────────────────────────────
+
+// Columnas de la tabla de Rentabilidad. Header y filas son grids separados:
+// se alinean solo mientras compartan este valor.
+//   Producto | Categoría | Material/es | Peso | Tiempo | Costo | Precio | Ganancia
+const COL_RENTABILIDAD = "2fr 130px 110px 130px 80px 100px 100px 90px";
+
 function CostosTab({ products, personalizados = [], setMsg }) {
   const [costs, setCosts] = useState(DEFAULT_COSTS);
   const [loading, setLoading] = useState(true);
@@ -2411,17 +2417,23 @@ function CostosTab({ products, personalizados = [], setMsg }) {
         </div>
       </div>
 
+      {/* El header y cada fila son grids independientes: se alinean solo
+          porque comparten este template, así que va en una constante y no
+          repetido en dos literales. minWidth = 848 de columnas fijas, gaps y
+          padding + ~190 para el nombre. El contenedor scrollea solo, el body
+          nunca queda con scroll horizontal en mobile. */}
       <div style={{ overflowX: "auto", margin: "0 -16px", padding: "0 16px" }}>
-        <div style={{ minWidth: 900 }}>
+        <div style={{ minWidth: 1040 }}>
           {/* Table header */}
           <div style={{
             display: "grid",
-            gridTemplateColumns: "2fr 110px 130px 80px 100px 100px 90px",
+            gridTemplateColumns: COL_RENTABILIDAD,
             gap: 12, padding: "10px 12px", background: "var(--bg-alt)",
             fontSize: 10, textTransform: "uppercase", letterSpacing: 1.5,
             color: "var(--muted)", fontWeight: 700,
           }}>
             <div>Producto</div>
+            <div>Categoría</div>
             <div>Material/es</div>
             <div>Peso</div>
             <div>Tiempo</div>
@@ -2438,10 +2450,12 @@ function CostosTab({ products, personalizados = [], setMsg }) {
             return (
               <div key={p.clave} style={{
                 display: "grid",
-                gridTemplateColumns: "2fr 110px 130px 80px 100px 100px 90px",
+                gridTemplateColumns: COL_RENTABILIDAD,
                 gap: 12, padding: "14px 12px", borderBottom: "1px solid var(--line)",
                 fontSize: 13, alignItems: "center",
               }}>
+                {/* Producto: solo el nombre. Para un personalizado, debajo el
+                    cliente, que es lo que lo identifica al no tener ID TKPx. */}
                 <div>
                   <div style={{ fontWeight: 600, color: "var(--text)", display: "flex", alignItems: "center", gap: 6 }}>
                     {p.name}
@@ -2451,17 +2465,23 @@ function CostosTab({ products, personalizados = [], setMsg }) {
                       </span>
                     )}
                   </div>
-                  {/* Dónde se ubica la pieza: el catálogo por categoría, un
-                      personalizado por su cliente, que es lo que lo identifica. */}
-                  <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>
-                    {!rent.calculable ? rent.motivo : p.categoria}
-                  </div>
                   {p.referencia && (
-                    <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 1 }}>
+                    <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>
                       {p.referencia}
                     </div>
                   )}
+                  {/* El motivo no es categoría: es por qué la fila no calcula.
+                      Se queda acá, junto al ícono de alerta que lo anuncia. */}
+                  {!rent.calculable && (
+                    <div style={{ fontSize: 10, color: "#B56B3E", marginTop: 2 }}>
+                      {rent.motivo}
+                    </div>
+                  )}
                 </div>
+
+                {/* Categoría: el catálogo por categoría · subcategoría; un
+                    personalizado no las tiene y se rotula como tal. */}
+                <div style={{ fontSize: 12, color: "var(--muted)" }}>{p.categoria}</div>
 
                 {/* Material/es: todos los materiales distintos de la receta */}
                 <div style={{ fontSize: 12, color: "var(--muted)" }}>
