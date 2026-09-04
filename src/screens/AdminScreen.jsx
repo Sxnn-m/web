@@ -18,6 +18,8 @@ import {
 } from '../lib/personalizados.js';
 import { InsumosTab } from './admin/InsumosTab.jsx';
 import { EstadisticasTab } from './admin/EstadisticasTab.jsx';
+import { useFiltrosCategoria, FiltrosCategoria } from '../components/FiltrosCategoria.jsx';
+import { CAT_PERSONALIZADOS } from '../lib/filtros.js';
 import {
   cargarFilamentos, cargarPedidos, recalcularDisponibilidad,
 } from '../lib/inventario.js';
@@ -517,7 +519,12 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
           )}
           {tab === "usuarios" && <UsersTab users={users} onToggleRole={toggleRole} />}
           {tab === "costos" && (
-            <CostosTab products={productosFull} personalizados={personalizados} setMsg={setMsg} />
+            <CostosTab
+              products={productosFull}
+              personalizados={personalizados}
+              categories={propCategories}
+              setMsg={setMsg}
+            />
           )}
         </main>
       </div>
@@ -562,23 +569,10 @@ function ProductsTab({
 }) {
   const [search, setSearch] = useState("");
   const [planRenumeracion, setPlanRenumeracion] = useState(null);
-  const [filtroCat, setFiltroCat] = useState("all");
-  const [filtroSub, setFiltroSub] = useState("all");
   const [expandido, setExpandido] = useState(null);
 
-  // Subcategorías del selector: las de la categoría elegida, o todas las
-  // existentes (sin repetir) cuando la categoría está en "Todas".
-  const subsDisponibles = useMemo(() => {
-    if (filtroCat !== "all") {
-      return categories.find(c => c.id === filtroCat)?.subs || [];
-    }
-    return [...new Set(categories.flatMap(c => c.subs || []))].sort((a, b) => a.localeCompare(b));
-  }, [categories, filtroCat]);
-
-  const elegirCat = (catId) => {
-    setFiltroCat(catId);
-    setFiltroSub("all"); // la subcategoría anterior puede no existir en la nueva
-  };
+  // Cascada categoría → subcategoría, compartida con la tabla de Rentabilidad.
+  const filtros = useFiltrosCategoria(categories);
 
   // Texto AND categoría AND subcategoría
   const filtered = products.filter(p => {
@@ -587,13 +581,11 @@ function ProductsTab({
       p.name?.toLowerCase().includes(texto) ||
       p.cat?.toLowerCase().includes(texto) ||
       p.id?.toLowerCase().includes(texto);
-    const coincideCat = filtroCat === "all" || p.cat === filtroCat;
-    const coincideSub = filtroSub === "all" || p.sub === filtroSub;
-    return coincideTexto && coincideCat && coincideSub;
+    return coincideTexto && filtros.coincide(p);
   });
 
-  const hayFiltros = Boolean(search.trim()) || filtroCat !== "all" || filtroSub !== "all";
-  const limpiarFiltros = () => { setSearch(""); setFiltroCat("all"); setFiltroSub("all"); };
+  const hayFiltros = Boolean(search.trim()) || filtros.hayFiltro;
+  const limpiarFiltros = () => { setSearch(""); filtros.limpiar(); };
 
   const sinReceta = products.filter(p => (p.receta || []).length === 0).length;
   const duplicados = useMemo(() => idsDuplicados(products), [products]);
@@ -627,25 +619,7 @@ function ProductsTab({
       {/* Buscador + filtros en cascada (se combinan con AND) */}
       <div style={{ display: "grid", gridTemplateColumns: "minmax(200px, 320px) 1fr 1fr auto", gap: 12, alignItems: "end", marginBottom: 16 }} className="form-layout">
         <TKInput placeholder="Buscar producto..." icon={<Icon.search size={16}/>} value={search} onChange={e => setSearch(e.target.value)} />
-        <div>
-          <div style={{ ...labelStyle, marginBottom: 6 }}>Categoría</div>
-          <select value={filtroCat} onChange={e => elegirCat(e.target.value)} style={selectStyle}>
-            <option value="all">Todas</option>
-            {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-        </div>
-        <div>
-          <div style={{ ...labelStyle, marginBottom: 6 }}>Subcategoría</div>
-          <select
-            value={filtroSub}
-            onChange={e => setFiltroSub(e.target.value)}
-            disabled={subsDisponibles.length === 0}
-            style={{ ...selectStyle, opacity: subsDisponibles.length === 0 ? 0.5 : 1 }}
-          >
-            <option value="all">Todas</option>
-            {subsDisponibles.map(s => <option key={s} value={s}>{s}</option>)}
-          </select>
-        </div>
+        <FiltrosCategoria filtros={filtros} categories={categories} />
         {hayFiltros && (
           <TKButton variant="ghost" onClick={limpiarFiltros} icon={<Icon.close size={14}/>}>Limpiar</TKButton>
         )}
@@ -2259,12 +2233,15 @@ function CategoriesTab({ categories, products, onCategoriesChange, setMsg }) {
 //   Producto | Categoría | Material/es | Peso | Tiempo | Costo | Precio | Ganancia
 const COL_RENTABILIDAD = "2fr 130px 110px 130px 80px 100px 100px 90px";
 
-function CostosTab({ products, personalizados = [], setMsg }) {
+function CostosTab({ products, personalizados = [], categories = [], setMsg }) {
   const [costs, setCosts] = useState(DEFAULT_COSTS);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [newMat, setNewMat] = useState("");
   const [busqueda, setBusqueda] = useState("");
+  // Mismos filtros en cascada que el tab Productos, más "Personalizados",
+  // que no es una categoría real pero se quiere poder aislar.
+  const filtros = useFiltrosCategoria(categories);
 
   // Load from Firestore
   useEffect(() => {
@@ -2311,9 +2288,15 @@ function CostosTab({ products, personalizados = [], setMsg }) {
   // Fórmula y armado de filas en src/lib/costos.js: catálogo y personalizados
   // mezclados, con la misma fórmula para los dos.
   const todasLasFilas = filasDeRentabilidad(products, personalizados, costs);
-  // El buscador filtra la tabla completa: catálogo y personalizados juntos,
-  // no un selector por tipo.
-  const rows = filtrarFilas(todasLasFilas, busqueda);
+  // Los tres filtros se combinan con AND sobre la tabla completa: catálogo y
+  // personalizados juntos, sin un selector de tipo aparte.
+  const rows = filtrarFilas(todasLasFilas, {
+    busqueda,
+    filtroCat: filtros.filtroCat,
+    filtroSub: filtros.filtroSub,
+  });
+  const hayFiltros = Boolean(busqueda.trim()) || filtros.hayFiltro;
+  const limpiarFiltros = () => { setBusqueda(""); filtros.limpiar(); };
 
   // Los contadores del encabezado describen el catálogo entero, no el filtro.
   const noCalculables = todasLasFilas.filter(r => !r.rent.calculable).length;
@@ -2425,36 +2408,32 @@ function CostosTab({ products, personalizados = [], setMsg }) {
       {/* Buscador: mismo estilo y mismo criterio de matcheo que el de
           Pedidos (nombre o ID en catálogo, nombre o cliente en
           personalizados), pero acá filtra la tabla en vez de seleccionar. */}
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
-        <div style={{ position: "relative", flex: "1 1 320px", maxWidth: 420 }}>
-          <span style={{
-            position: "absolute", left: 12, top: "50%",
-            transform: "translateY(-50%)", color: "var(--muted)",
-          }}>
-            <Icon.search size={16}/>
-          </span>
-          <input
+      <div style={{
+        display: "grid", gridTemplateColumns: "minmax(200px, 320px) 1fr 1fr auto",
+        gap: 12, alignItems: "end", marginBottom: 12,
+      }} className="form-layout">
+        <div>
+          <div style={{ ...labelStyle, marginBottom: 6 }}>Buscar</div>
+          <TKInput
+            placeholder="Por nombre, ID o cliente..."
+            icon={<Icon.search size={16}/>}
             value={busqueda}
             onChange={e => setBusqueda(e.target.value)}
-            placeholder="Buscar por nombre, ID o cliente..."
-            style={{
-              width: "100%", padding: "12px 14px 12px 38px", background: "var(--bg)",
-              border: "1px solid var(--line)", fontSize: 14, color: "var(--text)",
-              borderRadius: 4, outline: "none", boxSizing: "border-box",
-            }}
           />
         </div>
-        {busqueda.trim() && (
-          <button
-            onClick={() => setBusqueda("")}
-            style={{
-              background: "none", border: "none", cursor: "pointer",
-              color: "var(--muted)", fontSize: 12, padding: 4,
-            }}
-          >
-            {rows.length} de {todasLasFilas.length} · limpiar
-          </button>
+        <FiltrosCategoria
+          filtros={filtros}
+          categories={categories}
+          opcionesExtra={[{ value: CAT_PERSONALIZADOS, label: "Personalizados" }]}
+        />
+        {hayFiltros && (
+          <TKButton variant="ghost" onClick={limpiarFiltros} icon={<Icon.close size={14}/>}>Limpiar</TKButton>
         )}
+      </div>
+
+      <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 12 }}>
+        {rows.length} producto{rows.length !== 1 ? "s" : ""}
+        {hayFiltros && <> de {todasLasFilas.length}</>}
       </div>
 
       {/* El header y cada fila son grids independientes: se alinean solo
@@ -2600,13 +2579,16 @@ function CostosTab({ products, personalizados = [], setMsg }) {
             );
           })}
 
-          {/* Dos vacíos distintos: no hay nada cargado, o el filtro no
-              encontró nada. El segundo usa el mismo texto que el buscador de
-              Pedidos. */}
+          {/* Dos vacíos distintos: no hay nada cargado, o ningún producto pasa
+              los filtros. El segundo usa el mismo texto que el buscador de
+              Pedidos, y nombra el texto buscado solo si hay texto: el vacío
+              puede venir de la categoría sin que se haya escrito nada. */}
           {rows.length === 0 && (
             <div style={{ padding: 40, textAlign: "center", color: "var(--muted)" }}>
-              {busqueda.trim()
-                ? <>No se encontraron productos para "{busqueda.trim()}".</>
+              {hayFiltros
+                ? (busqueda.trim()
+                    ? <>No se encontraron productos para "{busqueda.trim()}" con esos filtros.</>
+                    : "No se encontraron productos con esos filtros.")
                 : "No hay productos visibles para analizar."}
             </div>
           )}
