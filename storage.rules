@@ -1,0 +1,64 @@
+rules_version = '2';
+
+// TKPrints — reglas de Firebase Storage
+//
+// ╔══════════════════════════════════════════════════════════════════════╗
+// ║  ESTE ARCHIVO NO SE DESPLIEGA SOLO, Y ES DISTINTO DEL DE FIRESTORE.  ║
+// ║                                                                      ║
+// ║  Mergear a main NO lo aplica. Mientras no corras el deploy, el       ║
+// ║  bucket sigue con las reglas que le puso la consola de Firebase al   ║
+// ║  crearlo — que por defecto suelen permitir escribir a CUALQUIER      ║
+// ║  usuario logueado, incluido un cliente de la tienda.                 ║
+// ║                                                                      ║
+// ║      npm run deploy:storage                                          ║
+// ║                                                                      ║
+// ║  (equivale a: npx firebase-tools deploy --only storage:rules)        ║
+// ║  Las reglas de Firestore son un deploy aparte: npm run deploy:rules  ║
+// ║  Los dos juntos: npm run deploy:reglas                               ║
+// ╚══════════════════════════════════════════════════════════════════════╝
+//
+// Único uso de Storage en el proyecto: los archivos de diseño (.stl/.3mf)
+// de respaldo de cada producto. Son material interno — el archivo fuente de
+// una pieza es lo que la hace reproducible por cualquiera — así que no hay
+// lectura pública, ni siquiera anónima de solo lectura.
+//
+// Las imágenes del catálogo NO pasan por acá: son URLs externas de imgbb.
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Mismo modelo de roles que firestore.rules: /users/{uid}.role == "admin".
+    // Storage puede leer Firestore con firestore.get().
+    function esAdmin() {
+      return request.auth != null
+        && firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
+        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    // Se valida también en la escritura, y no solo en el cliente: el límite
+    // de tamaño y las extensiones del formulario son comodidad de UX, esto es
+    // la barrera real. Los valores están replicados en
+    // src/lib/archivosDiseno.js. El nombre se pasa por parámetro porque la
+    // función vive fuera del match y no ve sus comodines.
+    function archivoDisenoValido(nombre) {
+      return request.resource.size <= 100 * 1024 * 1024
+        && (nombre.matches('.*\\.stl') || nombre.matches('.*\\.3mf'));
+    }
+
+    // create/update y delete van separados a propósito: en un delete
+    // request.resource es null, así que exigir el tamaño ahí haría que
+    // borrar un archivo fallara siempre.
+    match /productos/{productId}/archivos/{fileName} {
+      allow read: if esAdmin();
+      allow create, update: if esAdmin() && archivoDisenoValido(fileName);
+      allow delete: if esAdmin();
+    }
+
+    // Todo lo demás del bucket queda denegado. Si algún día se suben
+    // imágenes propias en vez de usar imgbb, van a necesitar su propio match
+    // con lectura pública explícita.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

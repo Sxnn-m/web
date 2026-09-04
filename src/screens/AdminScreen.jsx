@@ -22,6 +22,8 @@ import { MensajeriaTab } from './admin/MensajeriaTab.jsx';
 import { cargarMensajes, asignarNumerosFaltantes } from '../lib/mensajes.js';
 import { contarNoLeidos } from '../lib/consultas.js';
 import { useFiltrosCategoria, FiltrosCategoria } from '../components/FiltrosCategoria.jsx';
+import { ArchivosDiseno } from './admin/ArchivosDiseno.jsx';
+import { normalizarArchivos } from '../lib/archivosDiseno.js';
 import { CAT_PERSONALIZADOS } from '../lib/filtros.js';
 import {
   cargarFilamentos, cargarPedidos, recalcularDisponibilidad,
@@ -324,12 +326,13 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
       // subcolección privada, que solo pueden leer los admins.
       // Se renombra al destructurar para no tapar el estado `insumos` (el
       // catálogo), que se usa arriba en el mismo bloque.
-      const { _id, receta, origenUrl, notas, insumos: insumosProducto, ...publico } = data;
+      const { _id, receta, origenUrl, notas, insumos: insumosProducto, archivos, ...publico } = data;
       const privado = {
         receta: receta || [],
         origenUrl: origenUrl || "",
         notas: notas || "",
         insumos: insumosProducto || [],
+        archivos: archivos || [],
       };
 
       // Al crear, el ID visible se recalcula contra la lista fresca para que
@@ -1518,6 +1521,10 @@ function ProductForm({
   );
   // Líneas de insumo del producto. Se conserva el snapshot (nombre/precioUnidad)
   // por si el insumo desapareció del catálogo.
+  // Los archivos ya viven en Storage y en el doc privado antes de que el
+  // formulario se guarde; el estado local solo evita que el "Guardar", que
+  // reescribe el doc privado entero, los borre.
+  const [archivos, setArchivos] = useState(() => normalizarArchivos(product?.archivos));
   const [lineasInsumo, setLineasInsumo] = useState(() =>
     (product?.insumos || [])
       .filter(i => i && i.insumoId)
@@ -1631,6 +1638,10 @@ function ProductForm({
       },
       origenUrl: form.origenUrl.trim(),
       notas: form.notas,
+      // Viaja tal cual vino: el guardado del doc privado lo reemplaza entero,
+      // así que omitirlo borraría el índice y dejaría los binarios huérfanos
+      // en Storage.
+      archivos,
     };
     if (esPersonalizado) {
       // Se sacan los campos que no aplican para que no queden en el documento.
@@ -1803,6 +1814,15 @@ function ProductForm({
 
           {/* Insumos opcionales (imanes, tornillos, cable...) */}
           <InsumosEditor lineas={lineasInsumo} setLineas={setLineasInsumo} catalogo={catalogoInsumos}/>
+
+          {/* Respaldo de los .stl/.3mf. Se sube y se borra en el acto contra
+              Storage, sin esperar al "Guardar" del formulario. */}
+          <ArchivosDiseno
+            productId={product?._id || null}
+            archivos={archivos}
+            onChange={setArchivos}
+            coleccion={modo === "personalizado" ? "personalizados" : "products"}
+          />
 
           {/* Vista previa de disponibilidad con el inventario actual */}
           <DisponibilidadPreview receta={receta} filamentos={filamentos}
