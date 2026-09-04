@@ -105,7 +105,6 @@ function Footer({ go }) {
           <div style={{ fontSize: 10, letterSpacing: 1.5, textTransform: "uppercase", color: "var(--muted)", marginBottom: 14 }}>Info</div>
           <FL onClick={() => go("about")}>Sobre nosotros</FL>
           <FL onClick={() => go("about")}>Contacto</FL>
-          <FL>Envíos y devoluciones</FL>
         </div>
         <div>
           <div style={{ fontSize: 10, letterSpacing: 1.5, textTransform: "uppercase", color: "var(--muted)", marginBottom: 14 }}>Contacto</div>
