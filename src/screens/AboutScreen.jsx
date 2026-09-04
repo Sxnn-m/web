@@ -22,7 +22,7 @@ export function AboutScreen({ go, categories = [] }) {
             TKPrints nació con la idea de acercar la impresión 3D al uso cotidiano. Hacemos objetos que se usan todos los días, funcionales, decorativos.
           </p>
           <p style={{ fontSize: 15, color: "var(--muted)", lineHeight: 1.7 }}>
-            Trabajamos con distintos materiales (PLA, PETG, TPU, resina) según la función de cada pieza. Diseñamos en casa, prototipamos, iteramos, y recién entonces pasa al catálogo. Cada producto es impreso bajo pedido: no hay stock muerto, cada pieza tiene un destino.
+            Trabajamos con distintos materiales (PLA, PETG, TPU) según la función de cada pieza. Diseñamos en casa, prototipamos, iteramos, y recién entonces pasa al catálogo. Cada producto es impreso bajo pedido: no hay stock muerto, cada pieza tiene un destino.
           </p>
         </div>
         <div style={{ background: "var(--beige)", aspectRatio: "4/3", position: "relative", overflow: "hidden" }}>
@@ -31,12 +31,13 @@ export function AboutScreen({ go, categories = [] }) {
       </section>
 
       <section style={{ borderTop: "2px solid var(--anchor)", paddingTop: 40, marginBottom: 80 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 32 }} className="about-stats">
+        {/* Tres columnas: la grilla es fija, no auto-fit, así que el número
+            acompaña a la cantidad de datos o queda un hueco a la derecha. */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 32 }} className="about-stats">
           {[
             { n: "500+", l: "Piezas impresas" },
             { n: Math.max(categories.length, 3).toString(), l: "Categorías" },
-            { n: "4", l: "Materiales" },
-            { n: "48h", l: "Despacho" },
+            { n: "3", l: "Materiales" },
           ].map(s => (
             <div key={s.l}>
               <div style={{ fontSize: 56, color: "var(--accent)", letterSpacing: -1, lineHeight: 1 }}>{s.n}</div>
