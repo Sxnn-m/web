@@ -34,9 +34,9 @@ export function HomeScreen({ go, addToCart, homeVariant = "A", products = [], ca
           color: "var(--text)",
           textWrap: "balance",
         }}>
-          Diseño que se<br/>
-          <span style={{ color: "var(--accent)" }}>imprime.</span><br/>
-          Soluciones que<br/>funcionan.
+          Soluciones que se<br/>
+          <span style={{ color: "var(--accent)" }}>imprimen.</span><br/>
+          Diseños que<br/>funcionan.
         </h1>
         <div style={{ marginTop: 40, display: "flex", gap: 14, flexWrap: "wrap" }}>
           <TKButton size="lg" onClick={() => go("catalogo")}>
