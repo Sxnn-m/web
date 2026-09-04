@@ -13,23 +13,6 @@ import { auth, db } from './firebase.js';
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
 
-const TWEAK_DEFAULTS = {
-  viewport: "desktop",
-  theme: "light",
-  accent: "#345C83",
-  homeVariant: "A",
-  catalogoLayout: "grid",
-  detalleVariant: "A",
-};
-
-const ACCENTS = [
-  { id: "#345C83", name: "Azul Pizarra" },
-  { id: "#2C353E", name: "Grafito" },
-  { id: "#7A8A4A", name: "Verde oliva" },
-  { id: "#B56B3E", name: "Terracota" },
-  { id: "#C64138", name: "Rojo" },
-];
-
 function Nav({ route, go, user, isAdmin }) {
   const [open, setOpen] = useState(false);
   return (
@@ -124,74 +107,11 @@ function FL({ children, onClick }) {
   return <a onClick={onClick} style={{ display: "block", padding: "6px 0", fontSize: 13, color: "var(--text)", cursor: "pointer", textDecoration: "none" }}>{children}</a>;
 }
 
-function TweaksPanel({ state, setState, onClose }) {
-  const up = (k, v) => setState(s => ({ ...s, [k]: v }));
-  return (
-    <div className="tk-tweaks">
-      <h4>Tweaks
-        <button onClick={onClose} style={{background:"none",border:"none",cursor:"pointer",color:"var(--muted)"}}><Icon.close size={16}/></button>
-      </h4>
-
-      <label>
-        <div className="lab">Viewport</div>
-        <div className="seg">
-          <button className={state.viewport === "desktop" ? "on" : ""} onClick={() => up("viewport", "desktop")}>Desktop</button>
-          <button className={state.viewport === "mobile" ? "on" : ""} onClick={() => up("viewport", "mobile")}>Mobile</button>
-        </div>
-      </label>
-
-      <label>
-        <div className="lab">Tema</div>
-        <div className="seg">
-          <button className={state.theme === "light" ? "on" : ""} onClick={() => up("theme", "light")}>Claro</button>
-          <button className={state.theme === "dark" ? "on" : ""} onClick={() => up("theme", "dark")}>Grafito</button>
-        </div>
-      </label>
-
-      <label>
-        <div className="lab">Acento</div>
-        <div className="swatch-row">
-          {ACCENTS.map(a => (
-            <button key={a.id} className={"swatch " + (state.accent === a.id ? "on" : "")} style={{background: a.id}} onClick={() => up("accent", a.id)} title={a.name}/>
-          ))}
-        </div>
-      </label>
-
-      <label>
-        <div className="lab">Home</div>
-        <div className="seg">
-          {["A","B","C"].map(v => (
-            <button key={v} className={state.homeVariant === v ? "on" : ""} onClick={() => up("homeVariant", v)}>{v}</button>
-          ))}
-        </div>
-      </label>
-
-      <label>
-        <div className="lab">Catálogo</div>
-        <div className="seg">
-          <button className={state.catalogoLayout === "grid" ? "on" : ""} onClick={() => up("catalogoLayout", "grid")}>Grid</button>
-          <button className={state.catalogoLayout === "list" ? "on" : ""} onClick={() => up("catalogoLayout", "list")}>Lista</button>
-        </div>
-      </label>
-
-      <label style={{marginBottom:0}}>
-        <div className="lab">Detalle</div>
-        <div className="seg">
-          <button className={state.detalleVariant === "A" ? "on" : ""} onClick={() => up("detalleVariant", "A")}>Clásico</button>
-          <button className={state.detalleVariant === "B" ? "on" : ""} onClick={() => up("detalleVariant", "B")}>Editorial</button>
-        </div>
-      </label>
-    </div>
-  );
-}
-
 export default function App() {
   const [route, setRoute] = useState("home");
   const [routeData, setRouteData] = useState({});
   const [user, setUser] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [tweaks, setTweaks] = useState({...TWEAK_DEFAULTS});
-  const [tweaksOpen, setTweaksOpen] = useState(false);
   const [products, setProducts] = useState(FALLBACK_PRODUCTS);
   const [categories, setCategories] = useState(FALLBACK_CATEGORIES);
 
@@ -224,10 +144,10 @@ export default function App() {
 
   useEffect(() => { loadProducts(); loadCategories(); }, []);
 
-  useEffect(() => {
-    document.documentElement.setAttribute("data-theme", tweaks.theme);
-    document.documentElement.style.setProperty("--accent", tweaks.accent);
-  }, [tweaks.theme, tweaks.accent]);
+  // El panel de Tweaks escribía acá data-theme y --accent en <html>. Ya no
+  // hace falta: index.css define el tema claro en :root y --accent: var(--azul),
+  // que es exactamente el valor que el panel seteaba. El tema oscuro sigue
+  // definido en [data-theme="dark"] por si algún día se ofrece de verdad.
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -269,7 +189,12 @@ export default function App() {
     window.open(CONTACT.instagramDmUrl, "_blank", "noopener,noreferrer");
   };
 
-  const isMobile = tweaks.viewport === "mobile";
+  // El sitio siempre renderiza el árbol desktop, que se adapta por media
+  // queries en index.css. El árbol de MobileScreens era un simulador de
+  // teléfono que solo se alcanzaba desde el panel de Tweaks: sin el panel,
+  // nunca se activaba en producción. Se deja el código por si más adelante se
+  // conecta a una detección real de dispositivo.
+  const isMobile = false;
 
   const publicCategories = useMemo(() => {
     return categories.filter(c => c.visible !== false).map(c => ({
@@ -295,7 +220,7 @@ export default function App() {
         case "catalogo": return <MobileCatalogoHub go={go} products={publicProducts} categories={publicCategories}/>;
         case "categoria": return <MobileCategoria go={go} addToCart={addToCart} cat={routeData.cat} products={publicProducts} categories={publicCategories}/>;
         case "buscador": return <MobileBuscador go={go} addToCart={addToCart} products={publicProducts}/>;
-        case "detalle": return <DetalleScreen go={go} addToCart={addToCart} productId={routeData.id} detalleVariant={tweaks.detalleVariant} products={publicProducts}/>;
+        case "detalle": return <DetalleScreen go={go} addToCart={addToCart} productId={routeData.id} products={publicProducts}/>;
         case "auth": return <AuthScreen go={go} onLogin={setUser}/>;
         case "about": return <AboutScreen go={go} categories={publicCategories}/>;
         case "admin": return isAdmin ? <AdminScreen go={go} onProductsChange={loadProducts} onCategoriesChange={loadCategories} categories={categories} products={products}/> : <AuthScreen go={go} onLogin={setUser}/>;
@@ -303,15 +228,15 @@ export default function App() {
       }
     }
     switch(route) {
-      case "home": return <HomeScreen go={go} addToCart={addToCart} homeVariant={tweaks.homeVariant} products={publicProducts} categories={publicCategories}/>;
+      case "home": return <HomeScreen go={go} addToCart={addToCart} products={publicProducts} categories={publicCategories}/>;
       case "catalogo":
-      case "categoria": return <CatalogoScreen go={go} addToCart={addToCart} initialCat={routeData.cat} catalogoLayout={tweaks.catalogoLayout} products={publicProducts} categories={publicCategories}/>;
-      case "buscador": return <CatalogoScreen go={go} addToCart={addToCart} catalogoLayout={tweaks.catalogoLayout} products={publicProducts} categories={publicCategories}/>;
-      case "detalle": return <DetalleScreen go={go} addToCart={addToCart} productId={routeData.id} detalleVariant={tweaks.detalleVariant} products={publicProducts}/>;
+      case "categoria": return <CatalogoScreen go={go} addToCart={addToCart} initialCat={routeData.cat} products={publicProducts} categories={publicCategories}/>;
+      case "buscador": return <CatalogoScreen go={go} addToCart={addToCart} products={publicProducts} categories={publicCategories}/>;
+      case "detalle": return <DetalleScreen go={go} addToCart={addToCart} productId={routeData.id} products={publicProducts}/>;
       case "auth": return <AuthScreen go={go} onLogin={setUser}/>;
       case "about": return <AboutScreen go={go} categories={publicCategories}/>;
       case "admin": return isAdmin ? <AdminScreen go={go} onProductsChange={loadProducts} onCategoriesChange={loadCategories} categories={categories} products={products}/> : <AuthScreen go={go} onLogin={setUser}/>;
-      default: return <HomeScreen go={go} addToCart={addToCart} homeVariant={tweaks.homeVariant} products={publicProducts}/>;
+      default: return <HomeScreen go={go} addToCart={addToCart} products={publicProducts}/>;
     }
   };
 
@@ -354,21 +279,6 @@ export default function App() {
         <Icon.ig size={24}/>
       </a>
 
-      {/* Tweaks toggle button */}
-      <button
-        onClick={() => setTweaksOpen(!tweaksOpen)}
-        style={{
-          position: "fixed", bottom: tweaksOpen ? 380 : 20, right: 20, zIndex: 101,
-          background: "var(--anchor)", color: "#fff", border: "none", padding: "10px 16px",
-          fontSize: 11, letterSpacing: 1,
-          textTransform: "uppercase", cursor: "pointer", transition: "bottom .2s",
-          display: "flex", alignItems: "center", gap: 8,
-        }}
-      >
-        <Icon.spark size={14}/> Tweaks
-      </button>
-
-      {tweaksOpen && <TweaksPanel state={tweaks} setState={setTweaks} onClose={() => setTweaksOpen(false)}/>}
     </>
   );
 }
