@@ -194,8 +194,12 @@ export const sinStock = (product) => product?.disponible === false;
 
 // ---------- Product card ----------
 export function ProductCard({ product, onClick, onAdd, layout = "grid" }) {
+  // El único dato de stock que ve el público es "disponible", calculado desde
+  // la receta + el inventario de filamentos e insumos. El campo "stock" del
+  // producto era un contador manual que nadie mantenía: alimentaba un badge
+  // "¡Últimas N unidades!" que prometía cantidades inventadas y podía
+  // contradecir al inventario real. Ya no se lee.
   const agotado = sinStock(product);
-  const lowStock = !agotado && product.stock != null && product.stock < 5;
 
   if (layout === "list") {
     return (
@@ -217,17 +221,6 @@ export function ProductCard({ product, onClick, onAdd, layout = "grid" }) {
               {product.id.toUpperCase()} · {product.sub}
             </span>
             {product.tag && <TKPill variant={product.tag === "Premium" ? "dark" : "default"}>{product.tag}</TKPill>}
-            {lowStock && (
-              <span style={{
-                display: "inline-block", padding: "3px 8px",
-                background: "#FFF3CD", color: "#9A6200",
-                border: "1px solid #F0C040",
-                fontSize: 10, fontWeight: 700, letterSpacing: 0.5,
-                textTransform: "uppercase", borderRadius: 2,
-              }}>
-                ¡Últimas {product.stock} unidad{product.stock === 1 ? "" : "es"}!
-              </span>
-            )}
           </div>
           <div style={{ fontSize: 22, color: "var(--text)", letterSpacing: -0.3 }}>
             {product.name}
@@ -268,19 +261,6 @@ export function ProductCard({ product, onClick, onAdd, layout = "grid" }) {
         {product.tag && (
           <div style={{ position: "absolute", top: 12, left: 12 }}>
             <TKPill variant={product.tag === "Premium" ? "dark" : "default"}>{product.tag}</TKPill>
-          </div>
-        )}
-        {lowStock && (
-          <div style={{
-            position: "absolute", bottom: 12, left: 12,
-            background: "#FFF3CD", color: "#9A6200",
-            border: "1px solid #F0C040",
-            padding: "4px 8px",
-            fontSize: 10, fontWeight: 700, letterSpacing: 0.5,
-            textTransform: "uppercase", borderRadius: 2,
-            lineHeight: 1.4,
-          }}>
-            ¡Últimas {product.stock} unidad{product.stock === 1 ? "" : "es"}!
           </div>
         )}
         {agotado ? (
