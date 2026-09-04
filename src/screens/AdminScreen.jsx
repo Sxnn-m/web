@@ -27,6 +27,7 @@ import {
 } from '../lib/productosPrivados.js';
 import {
   DEFAULT_COSTS, MARGEN_MATERIAL, calcularRentabilidad, calcularPrecioSugerido,
+  filasDeRentabilidad,
 } from '../lib/costos.js';
 import {
   tiempoDeProducto, specsDeTiempo, formatTiempo, formatTiempoProducto,
@@ -515,7 +516,9 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
             />
           )}
           {tab === "usuarios" && <UsersTab users={users} onToggleRole={toggleRole} />}
-          {tab === "costos" && <CostosTab products={productosFull} setMsg={setMsg} />}
+          {tab === "costos" && (
+            <CostosTab products={productosFull} personalizados={personalizados} setMsg={setMsg} />
+          )}
         </main>
       </div>
     </div>
@@ -2250,7 +2253,7 @@ function CategoriesTab({ categories, products, onCategoriesChange, setMsg }) {
 }
 
 // ─── Costos Tab ──────────────────────────────────────────────────
-function CostosTab({ products, setMsg }) {
+function CostosTab({ products, personalizados = [], setMsg }) {
   const [costs, setCosts] = useState(DEFAULT_COSTS);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -2298,19 +2301,12 @@ function CostosTab({ products, setMsg }) {
     setCosts(c => ({ ...c, materiales: updated }));
   };
 
-  // Fórmula única en src/lib/costos.js
-  const rows = products
-    .filter(p => p.visible !== false)
-    .map(p => ({ ...p, rent: calcularRentabilidad(p, costs) }))
-    // Peor margen primero; los no calculables van al final para que no
-    // ensucien el ranking pero queden visibles.
-    .sort((a, b) => {
-      if (a.rent.calculable !== b.rent.calculable) return a.rent.calculable ? -1 : 1;
-      if (!a.rent.calculable) return (a.name || "").localeCompare(b.name || "");
-      return a.rent.margen - b.rent.margen;
-    });
+  // Fórmula y armado de filas en src/lib/costos.js: catálogo y personalizados
+  // mezclados, con la misma fórmula para los dos.
+  const rows = filasDeRentabilidad(products, personalizados, costs);
 
   const noCalculables = rows.filter(r => !r.rent.calculable).length;
+  const cantidadPersonalizados = rows.filter(r => r.tipo === "personalizado").length;
 
   if (loading) return <div style={{ padding: 40, color: "var(--muted)" }}>Cargando configuración...</div>;
 
@@ -2404,6 +2400,9 @@ function CostosTab({ products, setMsg }) {
           Ordenado de menor a mayor margen. Costo fab. = gramos × costo/g por material + insumos
           (plata real que se paga para producir). Precio venta = el precio real del producto: el
           cargado a mano si tiene precio manual, si no hora de máquina + gramos × costo/g × {MARGEN_MATERIAL} + insumos.
+          {cantidadPersonalizados > 0 && (
+            <> · Incluye {cantidadPersonalizados} personalizado(s), con la misma fórmula.</>
+          )}
           {noCalculables > 0 && (
             <> · <span style={{ color: "#B56B3E", fontWeight: 700 }}>
               {noCalculables} sin calcular (falta receta o costo de material)
@@ -2437,7 +2436,7 @@ function CostosTab({ products, setMsg }) {
               : rent.margen < 0 ? "#c64138" : rent.margen < 30 ? "#B56B3E" : "#4a7a52";
             const noCalc = <span style={{ color: "var(--muted)", fontSize: 12 }} title={rent.motivo}>—</span>;
             return (
-              <div key={p._id || p.id} style={{
+              <div key={p.clave} style={{
                 display: "grid",
                 gridTemplateColumns: "2fr 110px 130px 80px 100px 100px 90px",
                 gap: 12, padding: "14px 12px", borderBottom: "1px solid var(--line)",
@@ -2452,9 +2451,16 @@ function CostosTab({ products, setMsg }) {
                       </span>
                     )}
                   </div>
+                  {/* Dónde se ubica la pieza: el catálogo por categoría, un
+                      personalizado por su cliente, que es lo que lo identifica. */}
                   <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>
-                    {!rent.calculable ? rent.motivo : `${p.cat} · ${p.sub}`}
+                    {!rent.calculable ? rent.motivo : p.categoria}
                   </div>
+                  {p.referencia && (
+                    <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 1 }}>
+                      {p.referencia}
+                    </div>
+                  )}
                 </div>
 
                 {/* Material/es: todos los materiales distintos de la receta */}

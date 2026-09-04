@@ -33,20 +33,24 @@ export async function cargarFilamentos() {
     );
 }
 
-export async function crearFilamento({ material, color, cantidadGramos = 0 }) {
+// "marca" es descriptiva: identifica el rollo, pero NO entra en el matcheo
+// de recetas, que empareja por material + color (ver src/lib/marcas.js).
+export async function crearFilamento({ material, color, marca = "", cantidadGramos = 0 }) {
   const ref = await addDoc(collection(db, COL_FILAMENTOS), {
     material: String(material).trim(),
     color: String(color).trim(),
+    marca: String(marca).trim(),
     cantidadGramos: Number(cantidadGramos) || 0,
     updatedAt: serverTimestamp(),
   });
   return ref.id;
 }
 
-export async function actualizarFilamento(id, { material, color, cantidadGramos }) {
+export async function actualizarFilamento(id, { material, color, marca, cantidadGramos }) {
   const data = { updatedAt: serverTimestamp() };
   if (material !== undefined) data.material = String(material).trim();
   if (color !== undefined) data.color = String(color).trim();
+  if (marca !== undefined) data.marca = String(marca).trim();
   if (cantidadGramos !== undefined) data.cantidadGramos = Number(cantidadGramos) || 0;
   await updateDoc(doc(db, COL_FILAMENTOS, id), data);
 }
