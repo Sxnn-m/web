@@ -6,7 +6,9 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "deploy:rules": "npx --yes firebase-tools deploy --only firestore:rules"
+    "deploy:rules": "npx --yes firebase-tools deploy --only firestore:rules",
+    "deploy:storage": "npx --yes firebase-tools deploy --only storage:rules",
+    "deploy:reglas": "npx --yes firebase-tools deploy --only firestore:rules,storage:rules"
   },
   "dependencies": {
     "firebase": "^12.12.1",

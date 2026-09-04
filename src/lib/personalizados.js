@@ -40,12 +40,15 @@ export async function cargarPersonalizadosCompletos() {
  * subcolección privada, no al documento principal.
  */
 export async function guardarPersonalizado(data) {
-  const { _id, receta, origenUrl, notas, insumos, ...publico } = data;
+  const { _id, receta, origenUrl, notas, insumos, archivos, ...publico } = data;
   const privado = {
     receta: receta || [],
     origenUrl: origenUrl || "",
     notas: notas || "",
     insumos: insumos || [],
+    // Igual que en products: guardarPrivado reemplaza el doc entero, así que
+    // los archivos tienen que volver a escribirse o se pierde el índice.
+    archivos: archivos || [],
   };
 
   let id = _id;

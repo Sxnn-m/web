@@ -14,6 +14,7 @@ import {
   collectionGroup, doc, getDoc, getDocs, setDoc, updateDoc,
   deleteField, serverTimestamp,
 } from 'firebase/firestore';
+import { normalizarArchivos } from './archivosDiseno.js';
 
 /** Id fijo del único documento de la subcolección privada. */
 export const DOC_PRIVADO = "data";
@@ -21,7 +22,10 @@ export const DOC_PRIVADO = "data";
 /** Campos que se mudaron fuera del doc público de products. */
 export const CAMPOS_PRIVADOS = ["receta", "origenUrl", "notas", "insumos"];
 
-export const privadoVacio = () => ({ receta: [], origenUrl: "", notas: "", insumos: [] });
+// "archivos" (los .stl/.3mf de respaldo) también vive acá y nunca estuvo en
+// el doc público, así que no entra en CAMPOS_PRIVADOS: no hay nada que migrar.
+
+export const privadoVacio = () => ({ receta: [], origenUrl: "", notas: "", insumos: [], archivos: [] });
 
 /** Normaliza lo que venga de Firestore a la forma esperada por la UI. */
 const normalizar = (data = {}) => ({
@@ -29,6 +33,7 @@ const normalizar = (data = {}) => ({
   origenUrl: data.origenUrl || "",
   notas: data.notas || "",
   insumos: Array.isArray(data.insumos) ? data.insumos : [],
+  archivos: normalizarArchivos(data.archivos),
 });
 
 export const COL_PRODUCTS = "products";
@@ -75,13 +80,15 @@ export async function cargarPrivados(productos = [], coleccion = COL_PRODUCTS) {
 
 /** Escribe (reemplazando) los datos privados de un producto. */
 export async function guardarPrivado(
-  productId, { receta = [], origenUrl = "", notas = "", insumos = [] }, coleccion = COL_PRODUCTS
+  productId, { receta = [], origenUrl = "", notas = "", insumos = [], archivos = [] },
+  coleccion = COL_PRODUCTS
 ) {
   await setDoc(doc(db, coleccion, productId, "privado", DOC_PRIVADO), {
     receta,
     origenUrl,
     notas,
     insumos,
+    archivos: normalizarArchivos(archivos),
     updatedAt: serverTimestamp(),
   });
 }
@@ -115,7 +122,7 @@ export async function migrarDatosPrivados(productos = []) {
     const yaPrivado = await cargarPrivado(p._id);
     const tienePrivado =
       yaPrivado.receta.length > 0 || yaPrivado.origenUrl || yaPrivado.notas ||
-      yaPrivado.insumos.length > 0;
+      yaPrivado.insumos.length > 0 || yaPrivado.archivos.length > 0;
 
     if (!tienePrivado) {
       await guardarPrivado(p._id, {
@@ -123,6 +130,10 @@ export async function migrarDatosPrivados(productos = []) {
         origenUrl: p.origenUrl || "",
         notas: p.notas || "",
         insumos: Array.isArray(p.insumos) ? p.insumos : [],
+        // guardarPrivado reemplaza el documento entero: sin esto, migrar un
+        // producto que ya tenía archivos subidos los borraría del índice y
+        // dejaría los binarios huérfanos en Storage.
+        archivos: yaPrivado.archivos,
       });
     }
 
