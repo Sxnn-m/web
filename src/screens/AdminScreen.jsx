@@ -27,7 +27,7 @@ import {
 } from '../lib/productosPrivados.js';
 import {
   DEFAULT_COSTS, MARGEN_MATERIAL, calcularRentabilidad, calcularPrecioSugerido,
-  filasDeRentabilidad,
+  filasDeRentabilidad, filtrarFilas,
 } from '../lib/costos.js';
 import {
   tiempoDeProducto, specsDeTiempo, formatTiempo, formatTiempoProducto,
@@ -2264,6 +2264,7 @@ function CostosTab({ products, personalizados = [], setMsg }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [newMat, setNewMat] = useState("");
+  const [busqueda, setBusqueda] = useState("");
 
   // Load from Firestore
   useEffect(() => {
@@ -2309,10 +2310,14 @@ function CostosTab({ products, personalizados = [], setMsg }) {
 
   // Fórmula y armado de filas en src/lib/costos.js: catálogo y personalizados
   // mezclados, con la misma fórmula para los dos.
-  const rows = filasDeRentabilidad(products, personalizados, costs);
+  const todasLasFilas = filasDeRentabilidad(products, personalizados, costs);
+  // El buscador filtra la tabla completa: catálogo y personalizados juntos,
+  // no un selector por tipo.
+  const rows = filtrarFilas(todasLasFilas, busqueda);
 
-  const noCalculables = rows.filter(r => !r.rent.calculable).length;
-  const cantidadPersonalizados = rows.filter(r => r.tipo === "personalizado").length;
+  // Los contadores del encabezado describen el catálogo entero, no el filtro.
+  const noCalculables = todasLasFilas.filter(r => !r.rent.calculable).length;
+  const cantidadPersonalizados = todasLasFilas.filter(r => r.tipo === "personalizado").length;
 
   if (loading) return <div style={{ padding: 40, color: "var(--muted)" }}>Cargando configuración...</div>;
 
@@ -2417,6 +2422,41 @@ function CostosTab({ products, personalizados = [], setMsg }) {
         </div>
       </div>
 
+      {/* Buscador: mismo estilo y mismo criterio de matcheo que el de
+          Pedidos (nombre o ID en catálogo, nombre o cliente en
+          personalizados), pero acá filtra la tabla en vez de seleccionar. */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+        <div style={{ position: "relative", flex: "1 1 320px", maxWidth: 420 }}>
+          <span style={{
+            position: "absolute", left: 12, top: "50%",
+            transform: "translateY(-50%)", color: "var(--muted)",
+          }}>
+            <Icon.search size={16}/>
+          </span>
+          <input
+            value={busqueda}
+            onChange={e => setBusqueda(e.target.value)}
+            placeholder="Buscar por nombre, ID o cliente..."
+            style={{
+              width: "100%", padding: "12px 14px 12px 38px", background: "var(--bg)",
+              border: "1px solid var(--line)", fontSize: 14, color: "var(--text)",
+              borderRadius: 4, outline: "none", boxSizing: "border-box",
+            }}
+          />
+        </div>
+        {busqueda.trim() && (
+          <button
+            onClick={() => setBusqueda("")}
+            style={{
+              background: "none", border: "none", cursor: "pointer",
+              color: "var(--muted)", fontSize: 12, padding: 4,
+            }}
+          >
+            {rows.length} de {todasLasFilas.length} · limpiar
+          </button>
+        )}
+      </div>
+
       {/* El header y cada fila son grids independientes: se alinean solo
           porque comparten este template, así que va en una constante y no
           repetido en dos literales. minWidth = 848 de columnas fijas, gaps y
@@ -2479,9 +2519,14 @@ function CostosTab({ products, personalizados = [], setMsg }) {
                   )}
                 </div>
 
-                {/* Categoría: el catálogo por categoría · subcategoría; un
-                    personalizado no las tiene y se rotula como tal. */}
-                <div style={{ fontSize: 12, color: "var(--muted)" }}>{p.categoria}</div>
+                {/* Categoría: mismas pastillas apiladas que el listado de
+                    Productos. Un personalizado no tiene categoría ni
+                    subcategoría, lleva una sola con el mismo estilo. */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-start" }}>
+                  {p.badges.map(b => (
+                    <TKPill key={b.texto} variant={b.variante}>{b.texto}</TKPill>
+                  ))}
+                </div>
 
                 {/* Material/es: todos los materiales distintos de la receta */}
                 <div style={{ fontSize: 12, color: "var(--muted)" }}>
@@ -2555,9 +2600,14 @@ function CostosTab({ products, personalizados = [], setMsg }) {
             );
           })}
 
+          {/* Dos vacíos distintos: no hay nada cargado, o el filtro no
+              encontró nada. El segundo usa el mismo texto que el buscador de
+              Pedidos. */}
           {rows.length === 0 && (
             <div style={{ padding: 40, textAlign: "center", color: "var(--muted)" }}>
-              No hay productos visibles para analizar.
+              {busqueda.trim()
+                ? <>No se encontraron productos para "{busqueda.trim()}".</>
+                : "No hay productos visibles para analizar."}
             </div>
           )}
         </div>
