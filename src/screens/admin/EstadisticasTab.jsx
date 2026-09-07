@@ -144,10 +144,7 @@ export function EstadisticasTab({
       )}
 
       {/* ── KPIs ── */}
-      <div style={{
-        display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-        gap: 14, marginBottom: 24,
-      }}>
+      <div style={{ display: "grid", gap: 14, marginBottom: 24 }} className="kpi-grid">
         <Kpi
           label="Pedidos completados"
           valor={kpis.cantidadVentas.toLocaleString("es-AR")}
@@ -162,6 +159,13 @@ export function EstadisticasTab({
           label="Ganancia total"
           valor={fmtARS(kpis.ganancia)}
           detalle={`${fmtARS(kpis.ingresos)} − ${fmtARS(kpis.costo)} de fabricación · margen ${kpis.margen.toFixed(1)}%`}
+        />
+        {/* El mismo kpis.costo que resta en la tarjeta anterior, acá como dato
+            principal: es la plata que se puso para producir lo del mes. */}
+        <Kpi
+          label="Inversión total"
+          valor={fmtARS(kpis.costo)}
+          detalle="Lo que costó producir lo entregado y pagado este mes: material + insumos"
         />
         <Kpi
           label="Material desperdiciado"
@@ -214,8 +218,8 @@ function Aviso({ children, tono = "warn" }) {
   );
 }
 
-// Las cinco tarjetas comparten el azul: son cinco lecturas del mismo mes, no
-// cinco estados distintos, así que un color por tarjeta solo agregaba ruido.
+// Las seis tarjetas comparten el azul: son seis lecturas del mismo mes, no
+// seis estados distintos, así que un color por tarjeta solo agregaba ruido.
 function Kpi({ label, valor, detalle }) {
   return (
     <div style={{ ...cardStyle, borderTop: `3px solid ${AZUL}` }}>
