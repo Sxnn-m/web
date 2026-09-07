@@ -34,7 +34,7 @@ export async function cargarFilamentos() {
 }
 
 // "marca" es descriptiva: identifica el rollo, pero NO entra en el matcheo
-// de recetas, que empareja por material + color (ver src/lib/marcas.js).
+// de recetas, que empareja por material + color (ver src/lib/opcionesFilamento.js).
 export async function crearFilamento({ material, color, marca = "", cantidadGramos = 0 }) {
   const ref = await addDoc(collection(db, COL_FILAMENTOS), {
     material: String(material).trim(),
