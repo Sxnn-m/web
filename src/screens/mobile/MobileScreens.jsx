@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { PRODUCTS as FALLBACK_PRODUCTS, CATEGORIES as FALLBACK_CATEGORIES, CONTACT } from '../../data.js';
 import { TKButton, TKLogo, TKPill, Icon, fmtARS, SinStockBadge, sinStock } from '../../components/UI.jsx';
+import { nombreVisible, mostrarEmail } from '../../lib/usuario.js';
 
 // ========== Mobile Home ==========
 export function MobileHome({ go, addToCart, products = FALLBACK_PRODUCTS, categories = FALLBACK_CATEGORIES }) {
@@ -460,7 +461,63 @@ export function MobileTabBar({ route, go, user }) {
 }
 
 // ========== Mobile Header ==========
-export function MobileHeader({ route, go, user }) {
+/** Mismo menú que el desktop, adaptado al header chico. */
+function MenuPerfilMobile({ user, isAdmin, go, onLogout, estilo }) {
+  const [abierto, setAbierto] = useState(false);
+
+  if (!user) {
+    return <button onClick={() => go("auth")} style={estilo}><Icon.user size={20}/></button>;
+  }
+
+  const item = {
+    display: "flex", alignItems: "center", gap: 10, width: "100%",
+    padding: "11px 14px", background: "none", border: "none",
+    fontFamily: "'DM Sans', system-ui, sans-serif", fontSize: 13,
+    color: "var(--text)", cursor: "pointer", textAlign: "left",
+  };
+
+  return (
+    <div style={{ position: "relative" }}>
+      <button onClick={() => setAbierto(v => !v)} style={estilo} aria-label="Menú de cuenta">
+        <Icon.user size={20}/>
+      </button>
+      {abierto && (
+        <>
+          <div onClick={() => setAbierto(false)} style={{ position: "fixed", inset: 0, zIndex: 98 }}/>
+          <div style={{
+            position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 99,
+            minWidth: 200, background: "var(--bg)", border: "1px solid var(--line-strong)",
+            boxShadow: "0 12px 32px rgba(0,0,0,.16)", borderRadius: 4, overflow: "hidden",
+          }}>
+            <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--line)" }}>
+              <div style={{ fontSize: 12.5, fontWeight: 600, wordBreak: "break-word" }}>
+                {nombreVisible(user)}
+              </div>
+              {mostrarEmail(user) && (
+                <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2, wordBreak: "break-all" }}>
+                  {user.email}
+                </div>
+              )}
+            </div>
+            {isAdmin && (
+              <button onClick={() => { setAbierto(false); go("admin"); }} style={item}>
+                <Icon.layers size={14}/> Backoffice
+              </button>
+            )}
+            <button
+              onClick={() => { setAbierto(false); onLogout?.(); }}
+              style={{ ...item, color: "#c64138", borderTop: "1px solid var(--line)" }}
+            >
+              <Icon.back size={14}/> Cerrar sesión
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+export function MobileHeader({ route, go, user, isAdmin, onLogout }) {
   const title = {
     home: null, catalogo: null, buscador: null,
     categoria: null, detalle: null, auth: null, admin: "Backoffice", about: "Sobre nosotros",
@@ -474,10 +531,20 @@ export function MobileHeader({ route, go, user }) {
   if (route === "home") {
     return (
       <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 0" }}>
-        <TKLogo size={20}/>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+          <TKLogo size={20}/>
+          {user && (
+            <span style={{
+              fontSize: 11, color: "var(--muted)", whiteSpace: "nowrap",
+              overflow: "hidden", textOverflow: "ellipsis", maxWidth: 110,
+            }} title={user.email}>
+              {nombreVisible(user)}
+            </span>
+          )}
+        </div>
         <div style={{ display: "flex", gap: 2 }}>
           <button onClick={() => go("buscador")} style={iconBtnM}><Icon.search size={20}/></button>
-          <button onClick={() => go(user ? "admin" : "auth")} style={iconBtnM}><Icon.user size={20}/></button>
+          <MenuPerfilMobile user={user} isAdmin={isAdmin} go={go} onLogout={onLogout} estilo={iconBtnM}/>
         </div>
       </header>
     );
@@ -485,7 +552,17 @@ export function MobileHeader({ route, go, user }) {
 
   return (
     <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 0", borderBottom: "1px solid var(--line)", marginBottom: 4 }}>
-      <TKLogo size={18}/>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+        <TKLogo size={18}/>
+        {user && (
+          <span style={{
+            fontSize: 11, color: "var(--muted)", whiteSpace: "nowrap",
+            overflow: "hidden", textOverflow: "ellipsis", maxWidth: 90,
+          }} title={user.email}>
+            {nombreVisible(user)}
+          </span>
+        )}
+      </div>
       {title && <div style={{ fontWeight: 700, fontSize: 14, letterSpacing: 0.3 }}>{title}</div>}
       <div style={{ width: 24 }}/>
     </header>
