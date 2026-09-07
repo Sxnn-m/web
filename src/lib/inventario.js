@@ -59,6 +59,43 @@ export async function eliminarFilamento(id) {
   await deleteDoc(doc(db, COL_FILAMENTOS, id));
 }
 
+/**
+ * Crea en el inventario los material+color de una receta que todavía no
+ * existan, con cantidadGramos: 0.
+ *
+ * Así, cargar una receta con un filamento que no tenés no obliga a ir antes
+ * al tab Inventario: el rollo aparece solo, y como 0 < UMBRAL_RESTOCK queda
+ * marcado con "Hacer restock" sin necesidad de un estado "pendiente" aparte.
+ *
+ * Consecuencia buscada: hasta que le cargues gramos, el producto queda NO
+ * disponible en el catálogo público, porque la disponibilidad exige
+ * FACTOR_DISPONIBILIDAD× los gramos de cada línea.
+ *
+ * Deduplica dentro de la misma receta y contra lo que va creando, así dos
+ * líneas del mismo material+color no generan dos documentos.
+ *
+ * @returns {Promise<{creados: Array<{material, color}>}>}
+ */
+export async function asegurarFilamentosDeReceta(receta = [], filamentos = []) {
+  const existentes = new Set(filamentos.map(f => claveFilamento(f.material, f.color)));
+  const creados = [];
+
+  for (const linea of receta) {
+    const material = String(linea?.material || "").trim();
+    const color = String(linea?.color || "").trim();
+    if (!material || !color) continue;
+
+    const clave = claveFilamento(material, color);
+    if (existentes.has(clave)) continue;
+
+    await crearFilamento({ material, color, cantidadGramos: 0 });
+    existentes.add(clave);
+    creados.push({ material, color });
+  }
+
+  return { creados };
+}
+
 // Los historiales (gastos y restocks) viven en src/lib/historial.js,
 // parametrizados por colección: los comparten filamentos e insumos.
 
