@@ -44,6 +44,20 @@ input, select, textarea { font-family: inherit; color: var(--text); }
   to { transform: translateX(-50%); }
 }
 
+/* KPIs de Estadísticas: son 6, y 6 se divide justo por 3, 2 y 1, así que
+   ninguna fila queda a medias. Con repeat(auto-fit, minmax(...)) el ancho
+   disponible decidía las columnas y en la mayoría de las pantallas sobraba
+   una tarjeta sola en la última fila. */
+.kpi-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+@media (max-width: 1080px) {
+  .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+}
+
+@media (max-width: 620px) {
+  .kpi-grid { grid-template-columns: 1fr !important; }
+}
+
 /* Responsive breakpoints */
 @media (max-width: 860px) {
   .cat-layout { grid-template-columns: 1fr !important; }
@@ -100,7 +114,8 @@ input, select, textarea { font-family: inherit; color: var(--text); }
 .frame-mobile-sim .home-c-grid,
 .frame-mobile-sim .home-c-feat,
 .frame-mobile-sim .about-grid,
-.frame-mobile-sim .carousel-slide-grid { grid-template-columns: 1fr !important; }
+.frame-mobile-sim .carousel-slide-grid,
+.frame-mobile-sim .kpi-grid { grid-template-columns: 1fr !important; }
 .frame-mobile-sim .cat-sidebar { order: 2; border-top: 1px solid var(--line); padding-top: 20px; }
 .frame-mobile-sim .about-stats { grid-template-columns: repeat(2, 1fr) !important; }
 .frame-mobile-sim .cart-row { grid-template-columns: 70px 1fr auto !important; }
