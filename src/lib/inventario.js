@@ -16,6 +16,7 @@ import {
   agruparConsumo, validarStock, StockInsuficienteError,
 } from './consumoPedido.js';
 import { tiempoDeProducto, specsDeTiempo } from './tiempoImpresion.js';
+import { calcularPrecioSugerido } from './costos.js';
 
 export const COL_FILAMENTOS = "filamentos";
 export const COL_PEDIDOS = "pedidos";
@@ -105,16 +106,31 @@ export async function asegurarFilamentosDeReceta(receta = [], filamentos = []) {
  * Recalcula, para cada producto, todo lo que se deriva de su receta:
  *   - "disponible": el único dato de stock que ve el catálogo público.
  *   - specs.material y specs.peso: derivados de la receta, no editables a mano.
+ *   - "price", cuando se pasa `costs`: el precio de fórmula con la
+ *     configuración vigente (multiplicador de margen incluido).
+ *
+ * El precio va acá y no en un barrido aparte porque necesita exactamente los
+ * mismos datos que ya se cargaron para lo demás: el producto con su receta
+ * privada. Un segundo botón repetiría toda esa lectura y dejaría abierta la
+ * posibilidad de recalcular una cosa y olvidarse de la otra.
+ *
+ * Los productos con "Editar precio manualmente" NO se tocan: su precio es una
+ * decisión tomada a mano, no un derivado de la receta.
  *
  * Escribe una sola vez por producto y solo si algo cambió. Recibe productos
  * ya enriquecidos con su receta privada.
  *
- * @returns {{actualizados, disponibilidadActualizada, specsActualizadas, total}}
+ * @param {object} [costs] configuración de costos. Sin ella no se toca ningún
+ *   precio: así el recálculo automático por cambio de inventario sigue siendo
+ *   solo de disponibilidad.
+ * @returns {{actualizados, disponibilidadActualizada, specsActualizadas,
+ *            preciosActualizados, total}}
  */
-export async function recalcularDisponibilidad(productos = [], filamentos = [], insumos = []) {
+export async function recalcularDisponibilidad(productos = [], filamentos = [], insumos = [], costs = null) {
   let actualizados = 0;
   let disponibilidadActualizada = 0;
   let specsActualizadas = 0;
+  let preciosActualizados = 0;
   let tiemposMigrados = 0;
   const tiemposIlegibles = [];   // productos cuyo texto viejo no se pudo parsear
 
@@ -146,17 +162,30 @@ export async function recalcularDisponibilidad(productos = [], filamentos = [], 
     // El string libre deja de ser fuente de verdad.
     if (p.specs?.tiempo !== undefined) patch["specs.tiempo"] = deleteField();
 
+    // Precio: solo con costs, solo en automático, y solo si la fórmula da un
+    // número. Si la receta quedó sin costo calculable se deja el precio que
+    // tenía: bajarlo a 0 lo publicaría gratis en el catálogo.
+    if (costs && p.precioManual !== true) {
+      const { calculable, precio } = calcularPrecioSugerido(p, costs);
+      const actual = Number(p.price) || 0;
+      // Los precios son pesos: diferencias por debajo del centavo son ruido
+      // de punto flotante, no un cambio que valga una escritura.
+      if (calculable && Math.abs(precio - actual) >= 0.01) patch.price = precio;
+    }
+
     if (Object.keys(patch).length === 0) continue;
 
     await updateDoc(doc(db, COL_PRODUCTS, p._id), patch);
     actualizados++;
     if ("disponible" in patch) disponibilidadActualizada++;
     if ("specs.material" in patch || "specs.peso" in patch) specsActualizadas++;
+    if ("price" in patch) preciosActualizados++;
   }
 
   return {
     actualizados, disponibilidadActualizada, specsActualizadas,
-    tiemposMigrados, tiemposIlegibles, total: productos.length,
+    preciosActualizados, tiemposMigrados, tiemposIlegibles,
+    total: productos.length,
   };
 }
 

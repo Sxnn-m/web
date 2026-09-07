@@ -37,7 +37,7 @@ import {
   CAMPOS_PRIVADOS,
 } from '../lib/productosPrivados.js';
 import {
-  DEFAULT_COSTS, MARGEN_MATERIAL, calcularRentabilidad, calcularPrecioSugerido,
+  DEFAULT_COSTS, MARGEN_MATERIAL, margenDeCostos, calcularRentabilidad, calcularPrecioSugerido,
   filasDeRentabilidad, filtrarFilas, materialesDeCostos,
 } from '../lib/costos.js';
 import {
@@ -181,9 +181,9 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
    * recalcula el booleano "disponible" de cada producto y lo persiste.
    * Recibe siempre productos ya enriquecidos con su receta privada.
    */
-  const sincronizarDisponibilidad = async (prodsFull, films, insus) => {
+  const sincronizarDisponibilidad = async (prodsFull, films, insus, costs = null) => {
     try {
-      const resultado = await recalcularDisponibilidad(prodsFull, films, insus);
+      const resultado = await recalcularDisponibilidad(prodsFull, films, insus, costs);
       if (resultado.actualizados > 0) {
         await loadProducts();
         onProductsChange?.();
@@ -194,7 +194,7 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
       setMsg("Error al recalcular: " + err.message);
       return {
         actualizados: 0, disponibilidadActualizada: 0, specsActualizadas: 0,
-        tiemposMigrados: 0, tiemposIlegibles: [],
+        preciosActualizados: 0, tiemposMigrados: 0, tiemposIlegibles: [],
       };
     }
   };
@@ -214,19 +214,32 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
     await sincronizarDisponibilidad(prodsFull, films, insus);
   };
 
-  // Botón manual: recalcula desde la receta todo lo derivado — disponibilidad
-  // y specs.material / specs.peso — sobre el catálogo completo.
+  // Botón manual: recalcula desde la receta todo lo derivado — disponibilidad,
+  // specs.material / specs.peso y el precio de los que están en automático —
+  // sobre el catálogo completo. Es el que hay que apretar después de cambiar
+  // el multiplicador de margen o un costo por gramo.
   const handleRecalcular = async () => {
     setMsg("Recalculando desde las recetas...");
+    // La configuración se relee: puede haberse guardado recién en el tab Costos.
+    await loadCosts();
+    const snap = await getDoc(doc(db, "settings", "costos"))
+      .catch(() => null);
+    const costsFrescos = snap?.exists() ? snap.data() : costSettings;
     const { prodsFull, films, insus } = await recargarTodo();
-    const { disponibilidadActualizada, specsActualizadas, tiemposMigrados, tiemposIlegibles } =
-      await sincronizarDisponibilidad(prodsFull, films, insus);
+    const {
+      disponibilidadActualizada, specsActualizadas, preciosActualizados,
+      tiemposMigrados, tiemposIlegibles,
+    } = await sincronizarDisponibilidad(prodsFull, films, insus, costsFrescos);
     const sinReceta = prodsFull.filter(p => (p.receta || []).length === 0).length;
+    const manuales = prodsFull.filter(p => p.precioManual === true).length;
     setMsg(
       `✓ Recalculado sobre ${prodsFull.length} productos: ` +
       `${disponibilidadActualizada} con disponibilidad actualizada, ` +
       `${specsActualizadas} con material/peso actualizados, ` +
+      `${preciosActualizados} con precio actualizado ` +
+      `(margen ×${margenDeCostos(costsFrescos)}), ` +
       `${tiemposMigrados} con tiempo de impresión migrado.` +
+      (manuales > 0 ? ` ${manuales} con precio manual quedaron intactos.` : "") +
       (sinReceta > 0 ? ` ${sinReceta} sin receta quedaron NO disponibles.` : "")
     );
     setTiemposIlegibles(tiemposIlegibles || []);
@@ -283,13 +296,18 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
     } catch (err) { console.error(err); }
   };
 
+  // El tab Costos tiene su propia copia editable de settings/costos; esta es
+  // la que usan el ProductForm y las tablas. Al guardar allá hay que refrescar
+  // esta, o el precio sugerido del formulario sigue con el multiplicador viejo
+  // hasta recargar la página.
+  const loadCosts = async () => {
+    try {
+      const snap = await getDoc(doc(db, "settings", "costos"));
+      if (snap.exists()) setCostSettings(snap.data());
+    } catch (e) { /* silently ignore, use defaults */ }
+  };
+
   useEffect(() => {
-    const loadCosts = async () => {
-      try {
-        const snap = await getDoc(doc(db, "settings", "costos"));
-        if (snap.exists()) setCostSettings(snap.data());
-      } catch (e) { /* silently ignore, use defaults */ }
-    };
     const loadTags = async () => { setTags(await cargarTags()); };
     Promise.all([loadProducts(), loadUsers(), loadCosts(), loadFilamentos(), loadPedidos(), loadInsumos(), loadPersonalizados(), loadMensajes(), loadTags()])
       .then(([prods]) => loadPrivados(prods))
@@ -634,6 +652,7 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
               categories={propCategories}
               filamentos={filamentos}
               setMsg={setMsg}
+              onCostsChange={loadCosts}
             />
           )}
         </main>
@@ -1588,7 +1607,8 @@ const recetaInput = {
 };
 
 // ─── Product Form (Create / Edit) ─────────────────────────────
-function ProductForm({
+// Exportado para poder montarlo aislado en las pruebas de navegador.
+export function ProductForm({
   product, onSave, onCancel, categories = [], filamentos = [], costs = DEFAULT_COSTS,
   nextId = "", catalogoInsumos = [], modo = "producto",
   tags = [], onAgregarTag, onEliminarTag,
@@ -1822,7 +1842,9 @@ function ProductForm({
                   <div style={labelStyle}>Subcategoría</div>
                   <select value={form.sub} onChange={e => up("sub", e.target.value)} style={selectStyle}>
                     <option value="">Seleccionar...</option>
-                    {currentCat?.subs.map(s => <option key={s} value={s}>{s}</option>)}
+                    {/* subs?, no solo currentCat?: una categoría guardada sin
+                        el campo rompía el formulario entero. */}
+                    {currentCat?.subs?.map(s => <option key={s} value={s}>{s}</option>)}
                   </select>
                 </div>
               </>
@@ -2397,7 +2419,10 @@ function CategoriesTab({ categories, products, onCategoriesChange, setMsg }) {
 const COL_RENTABILIDAD = "2fr 130px 110px 130px 80px 100px 100px 90px";
 
 // Exportado para poder montarlo aislado en las pruebas de navegador.
-export function CostosTab({ products, personalizados = [], categories = [], filamentos = [], setMsg }) {
+export function CostosTab({
+  products, personalizados = [], categories = [], filamentos = [], setMsg,
+  onCostsChange,
+}) {
   const [costs, setCosts] = useState(DEFAULT_COSTS);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -2423,7 +2448,14 @@ export function CostosTab({ products, personalizados = [], categories = [], fila
     setSaving(true);
     try {
       await setDoc(doc(db, "settings", "costos"), costs);
-      setMsg("✓ Costos guardados correctamente.");
+      // El resto del backoffice tiene su propia copia de esta config: sin
+      // avisarle, el ProductForm seguiría sugiriendo con el margen viejo.
+      await onCostsChange?.();
+      setMsg(
+        "✓ Costos guardados. Los precios YA guardados de cada producto no " +
+        "cambian solos: usá \"Recalcular desde recetas\" en el tab Productos " +
+        "para aplicarlos a los que tienen precio automático."
+      );
     } catch (e) {
       setMsg("Error al guardar: " + e.message);
     }
@@ -2454,6 +2486,12 @@ export function CostosTab({ products, personalizados = [], categories = [], fila
   // escriba en settings/costos al crearlo.
   const filasMateriales = materialesDeCostos(costs, filamentos);
   const pendientes = filasMateriales.filter(m => m.pendiente);
+
+  // El margen que realmente se está aplicando, que no es lo tipeado si lo
+  // tipeado no sirve.
+  const margen = margenDeCostos(costs);
+  const margenInvalido =
+    costs.multiplicadorMargen !== undefined && !(Number(costs.multiplicadorMargen) > 0);
 
   // Fórmula y armado de filas en src/lib/costos.js: catálogo y personalizados
   // mezclados, con la misma fórmula para los dos.
@@ -2499,6 +2537,32 @@ export function CostosTab({ products, personalizados = [], categories = [], fila
           />
           <div style={{ marginTop: 8, fontSize: 11, color: "var(--muted)", lineHeight: 1.5 }}>
             Incluye consumo eléctrico, amortización de equipo y mantenimiento por hora de impresión.
+          </div>
+
+          <div style={{ marginTop: 20, paddingTop: 18, borderTop: "1px solid var(--line)" }}>
+            <TKInput
+              label="Multiplicador de margen sobre material"
+              type="number"
+              value={costs.multiplicadorMargen ?? MARGEN_MATERIAL}
+              onChange={e => setCosts(c => ({
+                ...c, multiplicadorMargen: parseFloat(e.target.value) || 0,
+              }))}
+              error={margenInvalido}
+            />
+            <div style={{ marginTop: 8, fontSize: 11, color: "var(--muted)", lineHeight: 1.5 }}>
+              {margenInvalido ? (
+                <span style={{ color: "#c64138" }}>
+                  Tiene que ser mayor que 0: con 0 o menos el precio no cubriría
+                  ni el material. Mientras tanto se calcula con ×{MARGEN_MATERIAL}.
+                </span>
+              ) : (
+                <>
+                  Cuántas veces se cobra el costo del material. Con ×{margen} un
+                  gramo que cuesta $100 se vende a ${(100 * margen).toLocaleString("es-AR")}.
+                  La hora de máquina y los insumos se suman aparte, sin margen.
+                </>
+              )}
+            </div>
           </div>
         </div>
 
@@ -2576,8 +2640,9 @@ export function CostosTab({ products, personalizados = [], categories = [], fila
                 no calculan precio ni rentabilidad hasta que les pongas un valor.
               </div>
             )}
-            El precio de venta se deriva de este costo con un margen fijo de{" "}
-            <strong style={{ color: "var(--text)" }}>×{MARGEN_MATERIAL}</strong> sobre el material,
+            El precio de venta se deriva de este costo con el multiplicador de
+            margen configurado arriba,{" "}
+            <strong style={{ color: "var(--text)" }}>×{margen}</strong> sobre el material,
             más la hora de máquina sumada aparte (sin margen). El nombre del material tiene que
             coincidir con el que usás en las recetas.
           </div>
@@ -2592,7 +2657,7 @@ export function CostosTab({ products, personalizados = [], categories = [], fila
         <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.6 }}>
           Ordenado de menor a mayor margen. Costo fab. = gramos × costo/g por material + insumos
           (plata real que se paga para producir). Precio venta = el precio real del producto: el
-          cargado a mano si tiene precio manual, si no hora de máquina + gramos × costo/g × {MARGEN_MATERIAL} + insumos.
+          cargado a mano si tiene precio manual, si no hora de máquina + gramos × costo/g × {margen} + insumos.
           {cantidadPersonalizados > 0 && (
             <> · Incluye {cantidadPersonalizados} personalizado(s), con la misma fórmula.</>
           )}

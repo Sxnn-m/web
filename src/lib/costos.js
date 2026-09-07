@@ -7,18 +7,34 @@ import { horasDeImpresion } from './tiempoImpresion.js';
 import { TODAS, coincideCategoria } from './filtros.js';
 
 /**
- * Margen fijo sobre el material: el precio de venta usa el costo del gramo
- * multiplicado por este factor. La hora de máquina se suma aparte, sin margen.
+ * Margen sobre el material por defecto: el precio de venta usa el costo del
+ * gramo multiplicado por este factor. La hora de máquina se suma aparte, sin
+ * margen. Es solo el valor inicial — el real se configura en el tab Costos y
+ * se guarda en settings/costos.multiplicadorMargen.
  */
 export const MARGEN_MATERIAL = 3;
 
 export const DEFAULT_COSTS = {
   horaMaquina: 150,
+  multiplicadorMargen: MARGEN_MATERIAL,
   materiales: {
     "PLA": 80, "PLA+": 95, "PLA tranúlcido": 110,
     "PETG": 100, "TPU": 130, "Resina": 200,
   },
 };
+
+/**
+ * El multiplicador configurado, o el default si no hay uno usable.
+ *
+ * Un documento guardado antes de que el campo existiera no lo trae, y ahí el
+ * default es lo correcto: es el valor con el que se calcularon esos precios.
+ * Un 0 o un negativo sí serían un error de carga — regalarían la pieza o le
+ * pondrían precio negativo — así que también caen al default.
+ */
+export function margenDeCostos(costs = DEFAULT_COSTS) {
+  const valor = Number(costs?.multiplicadorMargen);
+  return Number.isFinite(valor) && valor > 0 ? valor : MARGEN_MATERIAL;
+}
 
 /**
  * Agrupa la receta por MATERIAL, ignorando el color: todas las líneas que
@@ -109,7 +125,7 @@ export function materialesDeCostos(costs = DEFAULT_COSTS, filamentos = []) {
  *   costoFabricacion = Σ (gramos × costoPorGramo)                    [material]
  *                    + Σ (cantidad × precioUnidad)                   [insumos]
  *   precioFormulaBase = horas × horaMaquina
- *                     + Σ (gramos × costoPorGramo × MARGEN_MATERIAL)
+ *                     + Σ (gramos × costoPorGramo × multiplicadorMargen)
  *   precioFormula    = precioFormulaBase + Σ (insumos)               [sin margen]
  *   precioVenta      = el precio REAL: el cargado a mano si el producto tiene
  *                      "Editar precio manualmente" activo, si no precioFormula
@@ -165,9 +181,10 @@ export function calcularRentabilidad(producto, costs = DEFAULT_COSTS) {
   const costoMaterial = materiales.reduce((s, m) => s + m.gramos * m.costoPorGramo, 0);
   // Los insumos son costo de fabricación: se pagan para producir la pieza.
   const costoFabricacion = costoMaterial + insumos;
+  const margen = margenDeCostos(costs);
   const precioFormulaBase =
     horas * (Number(costs.horaMaquina) || 0) +
-    materiales.reduce((s, m) => s + m.gramos * m.costoPorGramo * MARGEN_MATERIAL, 0);
+    materiales.reduce((s, m) => s + m.gramos * m.costoPorGramo * margen, 0);
   const precioFormula = precioFormulaBase + insumos;
 
   // El precio real es el que se le cobra al cliente: con precio manual activo
@@ -206,7 +223,7 @@ export function totalInsumos(insumos = []) {
 /**
  * Precio sugerido de venta de un producto:
  *
- *   precio = (horas × horaMaquina) + Σ (gramos × costoPorGramo × MARGEN_MATERIAL)
+ *   precio = (horas × horaMaquina) + Σ (gramos × costoPorGramo × multiplicadorMargen)
  *          + Σ (precios de insumos)
  *
  * Los insumos se suman tal cual, sin margen. Si la receta no permite calcular
