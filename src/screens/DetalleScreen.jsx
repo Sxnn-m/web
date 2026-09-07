@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { COLORS_FILAMENT } from '../data.js';
 import { TKButton, TKInput, TKPill, Icon, ProductCard, fmtARS, SinStockBadge, sinStock } from '../components/UI.jsx';
 import { formatTiempoProducto } from '../lib/tiempoImpresion.js';
+import { descripcionPublica } from '../lib/descripcion.js';
 
 /**
  * Specs que ve el público, con etiquetas legibles. Lista explícita a propósito:
@@ -26,7 +27,14 @@ export function DetalleScreen({ go, addToCart, productId, detalleVariant = "A", 
   const gallery = product.images?.filter(u => u?.trim()) ||
     (product.img ? [product.img] : []);
 
-  const [activeImg, setActiveImg] = useState(gallery[0] || "");
+  // La miniatura elegida es un OVERRIDE, no la fuente de verdad: si no
+  // pertenece a la galería del producto que se está viendo, se descarta sola y
+  // manda la primera imagen. Así la principal no queda pegada a la del producto
+  // anterior al navegar (App.jsx además remonta la pantalla con key), ni vacía
+  // cuando los productos terminan de cargar después del primer render.
+  const [imgElegida, setImgElegida] = useState(null);
+  const activeImg = gallery.includes(imgElegida) ? imgElegida : (gallery[0] || "");
+  const setActiveImg = setImgElegida;
   const [color, setColor] = useState(COLORS_FILAMENT[2]);
   const [qty, setQty] = useState(1);
   const [custom, setCustom] = useState("");
@@ -143,7 +151,7 @@ export function DetalleScreen({ go, addToCart, productId, detalleVariant = "A", 
 
           {/* Texto personalizado */}
           <div style={{ marginBottom: 24 }}>
-            <TKInput label="Texto personalizado (opcional)" placeholder='Ej: "Casa López"' value={custom} onChange={(e) => setCustom(e.target.value)} hint="Máx. 20 caracteres · Sin cargo adicional"/>
+            <TKInput label="Texto personalizado (opcional)" placeholder='Ej: "Casa López"' value={custom} onChange={(e) => setCustom(e.target.value)} hint="Sin cargo adicional"/>
           </div>
 
           {/* Qty + Add */}
@@ -171,7 +179,7 @@ export function DetalleScreen({ go, addToCart, productId, detalleVariant = "A", 
       {/* Tabs */}
       <div style={{ marginTop: 60 }}>
         <div style={{ display: "flex", gap: 32, borderBottom: "1px solid var(--line)", marginBottom: 24 }}>
-          {[{id:"desc",l:"Descripción"},{id:"specs",l:"Especificaciones"},{id:"env",l:"Envío"}].map(t => (
+          {[{id:"desc",l:"Descripción"},{id:"specs",l:"Especificaciones"}].map(t => (
             <button key={t.id} onClick={() => setTab(t.id)} style={{
               padding: "14px 0", background: "none", border: "none",
               borderBottom: tab === t.id ? "2px solid var(--accent)" : "2px solid transparent",
@@ -181,7 +189,7 @@ export function DetalleScreen({ go, addToCart, productId, detalleVariant = "A", 
           ))}
         </div>
         <div style={{ maxWidth: 720, fontSize: 14, color: "var(--muted)", lineHeight: 1.7 }}>
-          {tab === "desc" && <p>{product.desc} Cada pieza es impresa bajo pedido en nuestro taller en CABA. Los tiempos de producción varían según la demanda y el nivel de detalle.</p>}
+          {tab === "desc" && <p>{descripcionPublica(product.desc)}</p>}
           {tab === "specs" && (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 20 }}>
               {specsVisibles(product).map(([k, v]) => (
@@ -192,7 +200,6 @@ export function DetalleScreen({ go, addToCart, productId, detalleVariant = "A", 
               ))}
             </div>
           )}
-          {tab === "env" && <p>Enviamos a todo Argentina por Correo Argentino y Andreani. Despacho en 48–72h hábiles luego de la producción (3–5 días hábiles). Envío gratuito en compras superiores a $25.000.</p>}
         </div>
       </div>
 

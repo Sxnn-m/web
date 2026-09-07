@@ -392,7 +392,10 @@ function AppInterna() {
         case "catalogo": return <MobileCatalogoHub go={go} products={publicProducts} categories={publicCategories}/>;
         case "categoria": return <MobileCategoria go={go} addToCart={addToCart} cat={routeData.cat} products={publicProducts} categories={publicCategories}/>;
         case "buscador": return <MobileBuscador go={go} addToCart={addToCart} products={publicProducts}/>;
-        case "detalle": return <DetalleScreen go={go} addToCart={addToCart} productId={routeData.id} products={publicProducts}/>;
+        // La key remonta la pantalla al cambiar de producto (por ejemplo desde
+      // "Podría gustarte"): sin ella React reutiliza la instancia y el color,
+      // la cantidad y el texto grabado quedan los del producto anterior.
+      case "detalle": return <DetalleScreen key={routeData.id} go={go} addToCart={addToCart} productId={routeData.id} products={publicProducts}/>;
         case "auth": return <AuthScreen go={go} onLogin={setUser}/>;
         case "about": return <AboutScreen go={go} categories={publicCategories}/>;
         case "admin": return isAdmin ? <AdminScreen go={go} onProductsChange={loadProducts} onCategoriesChange={loadCategories} categories={categories} products={products}/> : <AuthScreen go={go} onLogin={setUser}/>;
@@ -404,7 +407,10 @@ function AppInterna() {
       case "catalogo":
       case "categoria": return <CatalogoScreen go={go} addToCart={addToCart} initialCat={routeData.cat} products={publicProducts} categories={publicCategories}/>;
       case "buscador": return <CatalogoScreen go={go} addToCart={addToCart} products={publicProducts} categories={publicCategories}/>;
-      case "detalle": return <DetalleScreen go={go} addToCart={addToCart} productId={routeData.id} products={publicProducts}/>;
+      // La key remonta la pantalla al cambiar de producto (por ejemplo desde
+      // "Podría gustarte"): sin ella React reutiliza la instancia y el color,
+      // la cantidad y el texto grabado quedan los del producto anterior.
+      case "detalle": return <DetalleScreen key={routeData.id} go={go} addToCart={addToCart} productId={routeData.id} products={publicProducts}/>;
       case "auth": return <AuthScreen go={go} onLogin={setUser}/>;
       case "about": return <AboutScreen go={go} categories={publicCategories}/>;
       case "admin": return isAdmin ? <AdminScreen go={go} onProductsChange={loadProducts} onCategoriesChange={loadCategories} categories={categories} products={products}/> : <AuthScreen go={go} onLogin={setUser}/>;
