@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { TKButton, TKInput, Icon } from '../../components/UI.jsx';
 import { UMBRAL_RESTOCK, necesitaRestock } from '../../lib/disponibilidad.js';
 import { crearFilamento, actualizarFilamento, eliminarFilamento } from '../../lib/inventario.js';
@@ -6,6 +6,7 @@ import {
   materialesUsados, coloresUsados, marcasUsadas, resolverValor,
 } from '../../lib/opcionesFilamento.js';
 import { SelectorConAgregar } from '../../components/SelectorConAgregar.jsx';
+import { cargarOcultas, ocultarOpcion, filtrarVisibles } from '../../lib/opcionesOcultas.js';
 import { DetalleHistorial, RestockBadge, fmtFecha } from './DetalleHistorial.jsx';
 
 // Se reexportan para no romper a quien ya los importaba desde acá.
@@ -32,10 +33,39 @@ export function InventarioTab({ filamentos, onChanged, setMsg }) {
   const abierto = filamentos.find(f => f._id === seleccionado) || null;
 
   // Las tres listas son un distinct sobre los filamentos: no hay colecciones
-  // aparte, un valor vive mientras lo use al menos un rollo.
-  const materiales = materialesUsados(filamentos);
-  const colores = coloresUsados(filamentos);
-  const marcas = marcasUsadas(filamentos);
+  // aparte, un valor vive mientras lo use al menos un rollo. Por eso "eliminar
+  // una opción" no puede borrar nada: se guarda en settings/opcionesOcultas
+  // qué valores dejan de sugerirse. Los filamentos que ya los usan quedan
+  // intactos y se siguen viendo en el listado de abajo.
+  const [ocultas, setOcultas] = useState({ material: [], color: [], marca: [] });
+  useEffect(() => { cargarOcultas().then(setOcultas); }, []);
+
+  const materiales = filtrarVisibles(materialesUsados(filamentos), ocultas.material);
+  const colores = filtrarVisibles(coloresUsados(filamentos), ocultas.color);
+  const marcas = filtrarVisibles(marcasUsadas(filamentos), ocultas.marca);
+
+  /**
+   * Saca un valor de las sugerencias. Se avisa cuántos filamentos lo usan y
+   * que NO se van a tocar: es lo que distingue esto de un borrado real.
+   */
+  const eliminarOpcion = async (campo, valor, { seleccionada }) => {
+    const enUso = filamentos.filter(
+      f => String(f?.[campo] || "").trim().toLowerCase() === valor.trim().toLowerCase()
+    ).length;
+    const detalle = enUso > 0
+      ? `\n\n${enUso} filamento(s) lo usan: van a conservarlo y se siguen viendo en el listado, ` +
+        `solo deja de sugerirse para los nuevos.`
+      : "";
+    const usando = seleccionada ? `\n\nLo estás usando en este formulario.` : "";
+    if (!confirm(`¿Eliminar "${valor}" de las opciones de ${campo}?${detalle}${usando}`)) return;
+
+    try {
+      setOcultas(await ocultarOpcion(campo, valor, ocultas));
+      setMsg(`✓ "${valor}" ya no se sugiere como ${campo}.`);
+    } catch (err) {
+      setMsg("No se pudo eliminar la opción: " + err.message);
+    }
+  };
 
   const openNuevo = () => {
     setEditando(null);
@@ -124,6 +154,7 @@ export function InventarioTab({ filamentos, onChanged, setMsg }) {
               opciones={materiales}
               onChange={material => setForm(f => ({ ...f, material }))}
               resolver={resolverValor}
+              onEliminarOpcion={(v, info) => eliminarOpcion("material", v, info)}
               placeholder="Nuevo material..."
               hint="Elegí una de la lista o agregá una nueva."
             />
@@ -133,6 +164,7 @@ export function InventarioTab({ filamentos, onChanged, setMsg }) {
               opciones={colores}
               onChange={color => setForm(f => ({ ...f, color }))}
               resolver={resolverValor}
+              onEliminarOpcion={(v, info) => eliminarOpcion("color", v, info)}
               placeholder="Nuevo color..."
               hint="Elegí una de la lista o agregá una nueva."
             />
@@ -142,6 +174,7 @@ export function InventarioTab({ filamentos, onChanged, setMsg }) {
               opciones={marcas}
               onChange={marca => setForm(f => ({ ...f, marca }))}
               resolver={resolverValor}
+              onEliminarOpcion={(v, info) => eliminarOpcion("marca", v, info)}
               placeholder="Nueva marca..."
               hint="Elegí una de la lista o agregá una nueva."
             />

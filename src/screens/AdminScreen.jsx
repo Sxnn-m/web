@@ -38,7 +38,7 @@ import {
 } from '../lib/productosPrivados.js';
 import {
   DEFAULT_COSTS, MARGEN_MATERIAL, calcularRentabilidad, calcularPrecioSugerido,
-  filasDeRentabilidad, filtrarFilas,
+  filasDeRentabilidad, filtrarFilas, materialesDeCostos,
 } from '../lib/costos.js';
 import {
   tiempoDeProducto, specsDeTiempo, formatTiempo, formatTiempoProducto,
@@ -341,8 +341,11 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
    * y no dejarlo como texto suelto: un tag borrado que sigue pintando su badge
    * en el catálogo público, sobre productos que ya no se pueden gestionar, es
    * un borrado a medias. El conteo se muestra ANTES de confirmar.
+   *
+   * @returns {boolean} si se borró, para que el formulario abierto pueda
+   *   limpiar el campo cuando el tag borrado era el que tenía cargado.
    */
-  const handleEliminarTag = async (tag) => {
+  const handleEliminarTag = async (tag, { seleccionada } = {}) => {
     const enUso = productosConTag(products, tag);
     const aviso = enUso.length > 0
       ? `¿Eliminar el tag "${tag}"?\n\nLo usan ${enUso.length} producto(s): ` +
@@ -350,7 +353,10 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
         `${enUso.length > 5 ? ` y ${enUso.length - 5} más` : ""}.\n\n` +
         `Se les va a quitar el tag y dejan de mostrar el badge en el catálogo.`
       : `¿Eliminar el tag "${tag}"? No lo usa ningún producto.`;
-    if (!confirm(aviso)) return;
+    const usando = seleccionada
+      ? `\n\nEs el tag cargado en este formulario: se va a quedar sin tag.`
+      : "";
+    if (!confirm(aviso + usando)) return false;
 
     try {
       const { limpiados } = await eliminarTag(tag, tags, products);
@@ -360,8 +366,10 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
         onProductsChange?.();
       }
       setMsg(`✓ Tag "${tag}" eliminado${limpiados > 0 ? `, y quitado de ${limpiados} producto(s)` : ""}.`);
+      return true;
     } catch (err) {
       setMsg("Error al eliminar el tag: " + err.message);
+      return false;
     }
   };
 
@@ -624,6 +632,7 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
               products={productosFull}
               personalizados={personalizados}
               categories={propCategories}
+              filamentos={filamentos}
               setMsg={setMsg}
             />
           )}
@@ -1835,16 +1844,19 @@ function ProductForm({
                 nunca sale al catálogo público. */}
             {!esPersonalizado && (
               <>
-                {/* La lista vive en settings/tags, no hardcodeada. La × de
-                    cada chip la borra del catálogo y de los productos que la
-                    usaban, avisando cuántos son. */}
+                {/* La lista vive en settings/tags, no hardcodeada. La papelera
+                    de cada opción del desplegable la borra del catálogo y de los
+                    productos que la usaban, avisando cuántos son. Si era la que
+                    tenía este formulario, el campo queda sin tag. */}
                 <SelectorConAgregar
                   label="Tag"
                   value={form.tag}
                   opciones={tags}
                   onChange={tag => up("tag", tag)}
                   onAgregar={onAgregarTag}
-                  onEliminarOpcion={onEliminarTag}
+                  onEliminarOpcion={async (tag, info) => {
+                    if (await onEliminarTag(tag, info) && info.seleccionada) up("tag", "");
+                  }}
                   placeholder="Nuevo tag..."
                   vacio="Sin tag"
                 />
@@ -2384,7 +2396,8 @@ function CategoriesTab({ categories, products, onCategoriesChange, setMsg }) {
 //   Producto | Categoría | Material/es | Peso | Tiempo | Costo | Precio | Ganancia
 const COL_RENTABILIDAD = "2fr 130px 110px 130px 80px 100px 100px 90px";
 
-function CostosTab({ products, personalizados = [], categories = [], setMsg }) {
+// Exportado para poder montarlo aislado en las pruebas de navegador.
+export function CostosTab({ products, personalizados = [], categories = [], filamentos = [], setMsg }) {
   const [costs, setCosts] = useState(DEFAULT_COSTS);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -2435,6 +2448,12 @@ function CostosTab({ products, personalizados = [], categories = [], setMsg }) {
     delete updated[mat];
     setCosts(c => ({ ...c, materiales: updated }));
   };
+
+  // La lista de materiales es la unión de los configurados y los que existen
+  // en el inventario: un filamento nuevo aparece acá solo, sin que nadie
+  // escriba en settings/costos al crearlo.
+  const filasMateriales = materialesDeCostos(costs, filamentos);
+  const pendientes = filasMateriales.filter(m => m.pendiente);
 
   // Fórmula y armado de filas en src/lib/costos.js: catálogo y personalizados
   // mezclados, con la misma fórmula para los dos.
@@ -2493,23 +2512,45 @@ function CostosTab({ products, personalizados = [], categories = [], setMsg }) {
             cada material, no el precio de venta.
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {Object.entries(costs.materiales).map(([mat, val]) => (
-              <div key={mat} style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                <div style={{ flex: 1, fontSize: 13, fontWeight: 600, color: "var(--text)" }}>{mat}</div>
+            {filasMateriales.map(({ material, costo, pendiente, configurado }) => (
+              <div key={material} style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>{material}</div>
+                  {pendiente && (
+                    <span style={{
+                      display: "inline-block", marginTop: 3, padding: "2px 7px",
+                      background: "#B56B3E18", color: "#B56B3E", borderRadius: 2,
+                      fontSize: 9.5, fontWeight: 700, letterSpacing: 0.8,
+                      textTransform: "uppercase",
+                    }}>
+                      Pendiente de completar
+                    </span>
+                  )}
+                </div>
                 <div style={{ width: 120 }}>
                   <TKInput
                     type="number"
-                    value={val}
-                    onChange={e => upMat(mat, e.target.value)}
+                    value={costo || ""}
+                    onChange={e => upMat(material, e.target.value)}
+                    error={pendiente}
                   />
                 </div>
-                <button
-                  onClick={() => removeMaterial(mat)}
-                  style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)", padding: 4 }}
-                  title="Eliminar material"
-                >
-                  <Icon.trash size={14}/>
-                </button>
+                {/* Si el material solo viene del inventario no hay fila que
+                    borrar: sacarla acá la haría reaparecer en el próximo render. */}
+                {configurado ? (
+                  <button
+                    onClick={() => removeMaterial(material)}
+                    style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)", padding: 4 }}
+                    title="Eliminar material"
+                  >
+                    <Icon.trash size={14}/>
+                  </button>
+                ) : (
+                  <span
+                    style={{ width: 22, flexShrink: 0 }}
+                    title="Viene del inventario: se saca eliminando los filamentos que lo usan"
+                  />
+                )}
               </div>
             ))}
 
@@ -2528,6 +2569,13 @@ function CostosTab({ products, personalizados = [], categories = [], setMsg }) {
           </div>
 
           <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--line)", fontSize: 11, color: "var(--muted)", lineHeight: 1.6 }}>
+            {pendientes.length > 0 && (
+              <div style={{ marginBottom: 10, color: "#B56B3E", fontWeight: 600 }}>
+                {pendientes.length} material(es) sin costo cargado:{" "}
+                {pendientes.map(m => m.material).join(", ")}. Los productos que los usen
+                no calculan precio ni rentabilidad hasta que les pongas un valor.
+              </div>
+            )}
             El precio de venta se deriva de este costo con un margen fijo de{" "}
             <strong style={{ color: "var(--text)" }}>×{MARGEN_MATERIAL}</strong> sobre el material,
             más la hora de máquina sumada aparte (sin margen). El nombre del material tiene que
