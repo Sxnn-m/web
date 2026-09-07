@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import './index.css';
 import { PRODUCTS as FALLBACK_PRODUCTS, CATEGORIES as FALLBACK_CATEGORIES, CONTACT } from './data.js';
-import { TKLogo, Icon } from './components/UI.jsx';
+import { TKLogo, Icon, sinStock } from './components/UI.jsx';
 import { HomeScreen } from './screens/HomeScreen.jsx';
 import { CatalogoScreen } from './screens/CatalogoScreen.jsx';
 import { DetalleScreen } from './screens/DetalleScreen.jsx';
@@ -9,6 +9,8 @@ import { AuthScreen } from './screens/AuthScreen.jsx';
 import { AboutScreen } from './screens/AboutScreen.jsx';
 import { AdminScreen } from './screens/AdminScreen.jsx';
 import { MobileHome, MobileCatalogoHub, MobileCategoria, MobileBuscador, MobileTabBar, MobileHeader } from './screens/mobile/MobileScreens.jsx';
+import { CarritoProvider, useCarrito } from './context/CarritoContext.jsx';
+import { CarritoModal } from './components/CarritoModal.jsx';
 import { auth, db } from './firebase.js';
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
@@ -35,6 +37,7 @@ function Nav({ route, go, user, isAdmin }) {
 
         <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
           <button onClick={() => go("catalogo")} style={iconBtn}><Icon.search/></button>
+          <BotonCarrito/>
           <a href={CONTACT.instagramUrl} target="_blank" rel="noopener noreferrer" style={iconBtn} title="Seguinos en Instagram">
             <Icon.ig/>
           </a>
@@ -55,6 +58,51 @@ function Nav({ route, go, user, isAdmin }) {
         </div>
       )}
     </>
+  );
+}
+
+/**
+ * Ícono de carrito con el contador de UNIDADES (no de líneas): agregar 3 del
+ * mismo producto tiene que mostrar 3, como en cualquier tienda.
+ * El pulso hace que el ícono se note un instante al agregar algo, que es la
+ * confirmación de "se agregó" desde cualquier pantalla.
+ */
+function BotonCarrito() {
+  const { unidades, abrir, pulso } = useCarrito();
+  const [destacado, setDestacado] = useState(false);
+
+  useEffect(() => {
+    if (pulso === 0) return;
+    setDestacado(true);
+    const t = setTimeout(() => setDestacado(false), 500);
+    return () => clearTimeout(t);
+  }, [pulso]);
+
+  return (
+    <button
+      onClick={abrir}
+      style={{
+        ...iconBtn, position: "relative",
+        transform: destacado ? "scale(1.18)" : "scale(1)",
+        transition: "transform .25s",
+      }}
+      title="Tu pedido"
+      aria-label={`Tu pedido, ${unidades} unidad(es)`}
+    >
+      <Icon.cart/>
+      {unidades > 0 && (
+        <span style={{
+          position: "absolute", top: 2, right: 2,
+          background: "var(--accent)", color: "#fff",
+          fontSize: 10, fontWeight: 700, lineHeight: 1,
+          minWidth: 17, height: 17, borderRadius: 9,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          padding: "0 4px",
+        }}>
+          {unidades > 99 ? "99+" : unidades}
+        </span>
+      )}
+    </button>
   );
 }
 
@@ -107,7 +155,8 @@ function FL({ children, onClick }) {
   return <a onClick={onClick} style={{ display: "block", padding: "6px 0", fontSize: 13, color: "var(--text)", cursor: "pointer", textDecoration: "none" }}>{children}</a>;
 }
 
-export default function App() {
+function AppInterna() {
+  const { agregar: agregarAlCarrito } = useCarrito();
   const [route, setRoute] = useState("home");
   const [routeData, setRouteData] = useState({});
   const [user, setUser] = useState(null);
@@ -179,14 +228,20 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  // Reemplaza el viejo "agregar al carrito": lleva la consulta del producto a Instagram DM
-  const addToCart = (product) => {
+  // Suma al carrito. El cierre por Instagram pasó a ser un solo paso al
+  // final, dentro del carrito, en vez de uno por producto.
+  const addToCart = (product, config = {}) => {
+    if (sinStock(product)) return;   // un producto no disponible no se agrega
+    agregarAlCarrito(product, {
+      color: config.color,
+      texto: config.custom ?? config.texto ?? "",
+      cantidad: config.qty ?? config.cantidad ?? 1,
+    });
     const toast = document.createElement("div");
-    toast.textContent = `Te llevamos a Instagram — @${CONTACT.instagramHandle}`;
+    toast.textContent = "Agregado al carrito";
     toast.style.cssText = "position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--anchor);color:#fff;padding:12px 20px;font-family:'DM Sans',sans-serif;font-size:13px;font-weight:600;z-index:200;box-shadow:0 10px 30px rgba(0,0,0,.2)";
     document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 1800);
-    window.open(CONTACT.instagramDmUrl, "_blank", "noopener,noreferrer");
+    setTimeout(() => toast.remove(), 1600);
   };
 
   // El sitio siempre renderiza el árbol desktop, que se adapta por media
@@ -262,6 +317,8 @@ export default function App() {
         </div>
       ) : content}
 
+      <CarritoModal/>
+
       {/* Botón flotante de Instagram */}
       <a
         href={CONTACT.instagramDmUrl}
@@ -280,5 +337,15 @@ export default function App() {
       </a>
 
     </>
+  );
+}
+
+// El provider tiene que envolver a quien usa useCarrito(), así que App queda
+// como cáscara y el árbol real vive en AppInterna.
+export default function App() {
+  return (
+    <CarritoProvider>
+      <AppInterna/>
+    </CarritoProvider>
   );
 }

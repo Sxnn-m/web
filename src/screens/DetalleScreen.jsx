@@ -158,8 +158,10 @@ export function DetalleScreen({ go, addToCart, productId, detalleVariant = "A", 
                 <span style={{ padding: "0 18px", fontSize: 16 }}>{qty}</span>
                 <button onClick={() => setQty(qty + 1)} style={qtyBtn}><Icon.plus/></button>
               </div>
-              <TKButton size="lg" full icon={<Icon.ig size={16}/>} onClick={() => addToCart(product, { color, custom, qty })}>
-                Consultar por Instagram — {fmtARS(product.price * qty)}
+              {/* El cierre por Instagram pasó al carrito: acá se arma la
+                  línea (producto + color + texto + cantidad) y listo. */}
+              <TKButton size="lg" full icon={<Icon.cart size={16}/>} onClick={() => addToCart(product, { color, custom, qty })}>
+                Agregar al carrito — {fmtARS(product.price * qty)}
               </TKButton>
             </div>
           )}
@@ -273,8 +275,8 @@ function DetalleB({ go, addToCart, productId, products = [] }) {
                 <span style={{ padding: "0 18px", fontSize: 16 }}>{qty}</span>
                 <button onClick={() => setQty(qty + 1)} style={qtyBtn}><Icon.plus/></button>
               </div>
-              <TKButton size="lg" full icon={<Icon.ig size={16}/>} onClick={() => addToCart(product, { color, qty })}>
-                Consultar por Instagram
+              <TKButton size="lg" full icon={<Icon.cart size={16}/>} onClick={() => addToCart(product, { color, qty })}>
+                Agregar al carrito
               </TKButton>
             </div>
           )}

@@ -237,8 +237,8 @@ export function ProductCard({ product, onClick, onAdd, layout = "grid" }) {
               <div style={{ fontSize: 20, color: "var(--text)", marginBottom: 10 }}>
                 {fmtARS(product.price)}
               </div>
-              <TKButton size="sm" icon={<Icon.ig size={13}/>} onClick={(e) => { e.stopPropagation(); onAdd?.(product); }}>
-                Consultar
+              <TKButton size="sm" icon={<Icon.cart size={13}/>} onClick={(e) => { e.stopPropagation(); onAdd?.(product); }}>
+                Agregar
               </TKButton>
             </>
           )}
@@ -279,7 +279,7 @@ export function ProductCard({ product, onClick, onAdd, layout = "grid" }) {
               cursor: "pointer", display: "flex", alignItems: "center", gap: 6,
             }}
           >
-            <Icon.ig size={14}/> Consultar
+            <Icon.cart size={14}/> Agregar
           </button>
         )}
       </div>
