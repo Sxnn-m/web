@@ -29,11 +29,21 @@ const NUEVO = "__nuevo__";
  * @param {Function} [resolver] (texto, opciones) => {valor, existente}; permite
  *                              que el llamador normalice lo que se escribe a
  *                              mano contra lo que ya existe
+ * @param {Function} [onAgregar]  avisa cuando se creó un valor que NO existía,
+ *                              para que el llamador lo persista en su catálogo.
+ *                              Sin esto el valor se elige pero no se guarda en
+ *                              ningún lado (los catálogos derivados de un
+ *                              distinct no lo necesitan: aparecen solos).
+ * @param {Function} [onEliminarOpcion] si viene, debajo del select aparecen
+ *                              las opciones como chips con una × para
+ *                              borrarlas del catálogo. Un <select> nativo no
+ *                              admite botones dentro de sus <option>, así que
+ *                              la gestión va afuera.
  */
 export function SelectorConAgregar({
   label, value = "", opciones = [], onChange,
   placeholder = "Nuevo...", vacio = "— Sin especificar —",
-  hint, resolver,
+  hint, resolver, onAgregar, onEliminarOpcion,
 }) {
   const [agregando, setAgregando] = useState(false);
   const [texto, setTexto] = useState("");
@@ -50,6 +60,7 @@ export function SelectorConAgregar({
       ? resolver(crudo, opciones)
       : { valor: crudo, existente: opciones.includes(crudo) };
     onChange(valor);
+    if (!existente) onAgregar?.(valor);
     setAgregando(false);
     setTexto("");
     // Si escribió "eryone" y ya existía "Eryone", se queda la grafía vieja:
@@ -118,6 +129,31 @@ export function SelectorConAgregar({
         {lista.map(o => <option key={o} value={o}>{o}</option>)}
         <option value={NUEVO}>+ Agregar nueva...</option>
       </select>
+      {onEliminarOpcion && opciones.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+          {opciones.map(o => (
+            <span key={o} style={{
+              display: "inline-flex", alignItems: "center", gap: 6,
+              padding: "3px 6px 3px 9px", background: "var(--bg-alt)",
+              border: "1px solid var(--line)", borderRadius: 3, fontSize: 11,
+            }}>
+              {o}
+              <button
+                onClick={() => onEliminarOpcion(o)}
+                title={`Eliminar "${o}" de la lista`}
+                aria-label={`Eliminar ${o}`}
+                style={{
+                  background: "none", border: "none", padding: 0, cursor: "pointer",
+                  color: "var(--muted)", display: "flex", alignItems: "center",
+                }}
+              >
+                <Icon.close size={11}/>
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
       {(aviso || hint) && (
         <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 6 }}>
           {aviso || hint}

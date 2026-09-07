@@ -10,7 +10,7 @@ import { InventarioTab } from './admin/InventarioTab.jsx';
 import { PedidosTab } from './admin/PedidosTab.jsx';
 import {
   calcularDisponibilidad, motivoFaltante, motivoFaltanteInsumo,
-  FACTOR_DISPONIBILIDAD, specsDesdeReceta,
+  FACTOR_DISPONIBILIDAD, specsDesdeReceta, buscarFilamento, necesitaRestock,
 } from '../lib/disponibilidad.js';
 import { cargarInsumos } from '../lib/insumos.js';
 import {
@@ -27,7 +27,11 @@ import { normalizarArchivos } from '../lib/archivosDiseno.js';
 import { CAT_PERSONALIZADOS } from '../lib/filtros.js';
 import {
   cargarFilamentos, cargarPedidos, recalcularDisponibilidad,
+  asegurarFilamentosDeReceta,
 } from '../lib/inventario.js';
+import { materialesUsados, coloresUsados, resolverValor } from '../lib/opcionesFilamento.js';
+import { SelectorConAgregar } from '../components/SelectorConAgregar.jsx';
+import { cargarTags, guardarTags, eliminarTag, productosConTag } from '../lib/tags.js';
 import {
   cargarPrivados, guardarPrivado, enriquecerProductos, migrarDatosPrivados,
   CAMPOS_PRIVADOS,
@@ -60,6 +64,7 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
   const [insumos, setInsumos] = useState([]);
   const [personalizados, setPersonalizados] = useState([]);
   const [mensajes, setMensajes] = useState([]);
+  const [tags, setTags] = useState([]);
   const [editPersonalizado, setEditPersonalizado] = useState(null);
   const [showFormPers, setShowFormPers] = useState(false);
   const [privados, setPrivados] = useState({});
@@ -123,8 +128,15 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
   // ─── Personalizados: alta/edición/borrado ───────────────────
   const handleSavePersonalizado = async (data) => {
     try {
+      const { creados } = await asegurarFilamentosDeReceta(data.receta || [], filamentos);
+      if (creados.length > 0) await loadFilamentos();
       await guardarPersonalizado(data);
-      setMsg(data._id ? "✓ Personalizado actualizado." : "✓ Personalizado creado.");
+      setMsg(
+        (data._id ? "✓ Personalizado actualizado." : "✓ Personalizado creado.") +
+        (creados.length > 0
+          ? ` Se crearon en Inventario con 0 g: ${creados.map(c => `${c.material} · ${c.color}`).join(", ")}.`
+          : "")
+      );
       await loadPersonalizados();
       setShowFormPers(false);
       setEditPersonalizado(null);
@@ -278,7 +290,8 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
         if (snap.exists()) setCostSettings(snap.data());
       } catch (e) { /* silently ignore, use defaults */ }
     };
-    Promise.all([loadProducts(), loadUsers(), loadCosts(), loadFilamentos(), loadPedidos(), loadInsumos(), loadPersonalizados(), loadMensajes()])
+    const loadTags = async () => { setTags(await cargarTags()); };
+    Promise.all([loadProducts(), loadUsers(), loadCosts(), loadFilamentos(), loadPedidos(), loadInsumos(), loadPersonalizados(), loadMensajes(), loadTags()])
       .then(([prods]) => loadPrivados(prods))
       .then(() => setLoading(false));
   }, []);
@@ -316,11 +329,54 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
   };
 
   // ─── Save product (create or update) ────────────────────────
+  const handleAgregarTag = async (tag) => {
+    const nuevos = [...tags, tag];
+    setTags(nuevos);
+    try { await guardarTags(nuevos); }
+    catch (err) { setMsg("No se pudo guardar el tag: " + err.message); }
+  };
+
+  /**
+   * Borrar un tag lo limpia de los productos que lo usaban. Se eligió limpiar
+   * y no dejarlo como texto suelto: un tag borrado que sigue pintando su badge
+   * en el catálogo público, sobre productos que ya no se pueden gestionar, es
+   * un borrado a medias. El conteo se muestra ANTES de confirmar.
+   */
+  const handleEliminarTag = async (tag) => {
+    const enUso = productosConTag(products, tag);
+    const aviso = enUso.length > 0
+      ? `¿Eliminar el tag "${tag}"?\n\nLo usan ${enUso.length} producto(s): ` +
+        `${enUso.slice(0, 5).map(p => p.name).join(", ")}` +
+        `${enUso.length > 5 ? ` y ${enUso.length - 5} más` : ""}.\n\n` +
+        `Se les va a quitar el tag y dejan de mostrar el badge en el catálogo.`
+      : `¿Eliminar el tag "${tag}"? No lo usa ningún producto.`;
+    if (!confirm(aviso)) return;
+
+    try {
+      const { limpiados } = await eliminarTag(tag, tags, products);
+      setTags(await cargarTags());
+      if (limpiados > 0) {
+        await loadProducts();
+        onProductsChange?.();
+      }
+      setMsg(`✓ Tag "${tag}" eliminado${limpiados > 0 ? `, y quitado de ${limpiados} producto(s)` : ""}.`);
+    } catch (err) {
+      setMsg("Error al eliminar el tag: " + err.message);
+    }
+  };
+
   const handleSave = async (data) => {
     try {
+      // Si la receta usa un material+color que no está en inventario, se crea
+      // con 0 g antes de calcular nada: así el rollo queda listado y marcado
+      // para restock, y la disponibilidad se calcula contra el inventario ya
+      // completo (que va a dar "no disponible", como corresponde).
+      const { creados } = await asegurarFilamentosDeReceta(data.receta || [], filamentos);
+      const films = creados.length > 0 ? await loadFilamentos() : filamentos;
+
       // El catálogo público solo lee este booleano: se recalcula al guardar,
       // porque la receta pudo haber cambiado.
-      const disponible = calcularDisponibilidad(data, filamentos, insumos).disponible;
+      const disponible = calcularDisponibilidad(data, films, insumos).disponible;
 
       // El doc público NO lleva receta/origenUrl/notas/insumos: van a la
       // subcolección privada, que solo pueden leer los admins.
@@ -371,6 +427,13 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
       setShowForm(false);
       setEditProduct(null);
       onProductsChange?.();
+      if (creados.length > 0) {
+        setMsg(
+          `✓ Producto guardado. Se crearon en Inventario con 0 g: ` +
+          creados.map(c => `${c.material} · ${c.color}`).join(", ") +
+          `. Cargales filamento para que el producto quede disponible.`
+        );
+      }
     } catch (err) {
       setMsg("Error: " + err.message);
     }
@@ -479,7 +542,8 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
           {tab === "dashboard" && <DashboardTab products={products} users={users} seedProducts={() => {}} categories={propCategories} onCategoriesChange={onCategoriesChange} onProductsChange={onProductsChange} setMsg={setMsg} />}
           {tab === "productos" && (
             showForm
-              ? <ProductForm product={editProduct} onSave={handleSave} onCancel={() => { setShowForm(false); setEditProduct(null); }} categories={propCategories} filamentos={filamentos} costs={costSettings} nextId={siguienteIdProducto(products)} catalogoInsumos={insumos}/>
+              ? <ProductForm product={editProduct} onSave={handleSave} onCancel={() => { setShowForm(false); setEditProduct(null); }} categories={propCategories} filamentos={filamentos} costs={costSettings} nextId={siguienteIdProducto(products)} catalogoInsumos={insumos}
+                  tags={tags} onAgregarTag={handleAgregarTag} onEliminarTag={handleEliminarTag}/>
               : <ProductsTab
                   products={productosFull}
                   costs={costSettings}
@@ -1139,9 +1203,46 @@ function DisponibilidadDetalle({ disp, producto }) {
 }
 
 // ─── Editor de receta de consumo (dentro del ProductForm) ─────────────
-function RecetaEditor({ receta, setReceta, filamentos }) {
-  const materiales = [...new Set(filamentos.map(f => f.material).filter(Boolean))];
-  const colores = [...new Set(filamentos.map(f => f.color).filter(Boolean))];
+/**
+ * Dice si el par material+color de la línea ya existe en inventario y con
+ * cuántos gramos, o que se va a crear al guardar.
+ *
+ * Es lo que aporta la idea de "combinación": los dos desplegables sugieren
+ * cada mitad por separado, pero lo que importa saber es si ESE par existe.
+ */
+function EstadoEnInventario({ linea, filamentos }) {
+  const material = String(linea?.material || "").trim();
+  const color = String(linea?.color || "").trim();
+  if (!material || !color) return null;
+
+  const existente = buscarFilamento(filamentos, material, color);
+  const base = { fontSize: 11, marginTop: 4, lineHeight: 1.5 };
+
+  if (existente) {
+    const alerta = necesitaRestock(existente);
+    return (
+      <div style={{ ...base, color: alerta ? "#B56B3E" : "var(--muted)" }}>
+        En inventario: <strong>{existente.cantidadGramos ?? 0} g</strong>
+        {existente.marca ? ` · ${existente.marca}` : ""}
+        {alerta ? " · marcado para restock" : ""}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ ...base, color: "#B56B3E" }}>
+      No está en inventario: al guardar se crea <strong>{material} · {color}</strong> con 0 g,
+      y va a aparecer en Inventario marcado para restock. El producto queda no
+      disponible hasta que le cargues filamento.
+    </div>
+  );
+}
+
+// Exportado para poder montarlo aislado en pruebas del formulario.
+export function RecetaEditor({ receta, setReceta, filamentos }) {
+  // Mismas listas que el formulario de Inventario, del mismo distinct.
+  const materiales = materialesUsados(filamentos);
+  const colores = coloresUsados(filamentos);
 
   const up = (i, patch) => setReceta(r => r.map((l, j) => j === i ? { ...l, ...patch } : l));
   const quitar = (i) => setReceta(r => r.filter((_, j) => j !== i));
@@ -1158,40 +1259,38 @@ function RecetaEditor({ receta, setReceta, filamentos }) {
         gramos en inventario, para cada línea.
       </div>
 
-      <datalist id="materiales-inventario">
-        {materiales.map(m => <option key={m} value={m}/>)}
-      </datalist>
-      <datalist id="colores-inventario">
-        {colores.map(c => <option key={c} value={c}/>)}
-      </datalist>
-
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         {receta.map((l, i) => (
-          <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 110px 36px", gap: 10, alignItems: "center" }}>
-            <input
-              list="materiales-inventario"
-              value={l.material}
-              onChange={e => up(i, { material: e.target.value })}
-              placeholder="Material (PLA)"
-              style={recetaInput}
-            />
-            <input
-              list="colores-inventario"
-              value={l.color}
-              onChange={e => up(i, { color: e.target.value })}
-              placeholder="Color (Negro)"
-              style={recetaInput}
-            />
-            <input
-              type="number"
-              value={l.gramos}
-              onChange={e => up(i, { gramos: e.target.value })}
-              placeholder="Gramos"
-              style={recetaInput}
-            />
-            <button onClick={() => quitar(i)} style={{ ...actionBtn, color: "#c64138", justifyContent: "center" }} title="Quitar línea">
-              <Icon.trash size={14}/>
-            </button>
+          <div key={i}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 110px 36px", gap: 10, alignItems: "end" }}>
+              <SelectorConAgregar
+                value={l.material}
+                opciones={materiales}
+                onChange={material => up(i, { material })}
+                resolver={resolverValor}
+                placeholder="Nuevo material..."
+                vacio="— Material —"
+              />
+              <SelectorConAgregar
+                value={l.color}
+                opciones={colores}
+                onChange={color => up(i, { color })}
+                resolver={resolverValor}
+                placeholder="Nuevo color..."
+                vacio="— Color —"
+              />
+              <input
+                type="number"
+                value={l.gramos}
+                onChange={e => up(i, { gramos: e.target.value })}
+                placeholder="Gramos"
+                style={recetaInput}
+              />
+              <button onClick={() => quitar(i)} style={{ ...actionBtn, color: "#c64138", justifyContent: "center", height: 42 }} title="Quitar línea">
+                <Icon.trash size={14}/>
+              </button>
+            </div>
+            <EstadoEnInventario linea={l} filamentos={filamentos}/>
           </div>
         ))}
       </div>
@@ -1483,6 +1582,7 @@ const recetaInput = {
 function ProductForm({
   product, onSave, onCancel, categories = [], filamentos = [], costs = DEFAULT_COSTS,
   nextId = "", catalogoInsumos = [], modo = "producto",
+  tags = [], onAgregarTag, onEliminarTag,
 }) {
   // modo "personalizado": sin categoría, subcategoría, tag ni visible, y el ID
   // correlativo se reemplaza por el nombre del cliente.
@@ -1735,15 +1835,19 @@ function ProductForm({
                 nunca sale al catálogo público. */}
             {!esPersonalizado && (
               <>
-                <div>
-                  <div style={labelStyle}>Tag</div>
-                  <select value={form.tag} onChange={e => up("tag", e.target.value)} style={selectStyle}>
-                    <option value="">Sin tag</option>
-                    <option value="Best seller">Best seller</option>
-                    <option value="Nuevo">Nuevo</option>
-                    <option value="Premium">Premium</option>
-                  </select>
-                </div>
+                {/* La lista vive en settings/tags, no hardcodeada. La × de
+                    cada chip la borra del catálogo y de los productos que la
+                    usaban, avisando cuántos son. */}
+                <SelectorConAgregar
+                  label="Tag"
+                  value={form.tag}
+                  opciones={tags}
+                  onChange={tag => up("tag", tag)}
+                  onAgregar={onAgregarTag}
+                  onEliminarOpcion={onEliminarTag}
+                  placeholder="Nuevo tag..."
+                  vacio="Sin tag"
+                />
 
                 {/* Visible toggle */}
                 <div style={{ display: "flex", alignItems: "center", gap: 10, gridColumn: "1 / -1", padding: "12px 0", borderTop: "1px solid var(--line)" }}>
