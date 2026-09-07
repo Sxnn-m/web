@@ -2,7 +2,9 @@ import { useState } from 'react';
 import { TKButton, TKInput, Icon } from '../../components/UI.jsx';
 import { UMBRAL_RESTOCK, necesitaRestock } from '../../lib/disponibilidad.js';
 import { crearFilamento, actualizarFilamento, eliminarFilamento } from '../../lib/inventario.js';
-import { marcasDeFilamentos, resolverMarca } from '../../lib/marcas.js';
+import {
+  materialesUsados, coloresUsados, marcasUsadas, resolverValor,
+} from '../../lib/opcionesFilamento.js';
 import { SelectorConAgregar } from '../../components/SelectorConAgregar.jsx';
 import { DetalleHistorial, RestockBadge, fmtFecha } from './DetalleHistorial.jsx';
 
@@ -29,9 +31,11 @@ export function InventarioTab({ filamentos, onChanged, setMsg }) {
 
   const abierto = filamentos.find(f => f._id === seleccionado) || null;
 
-  // La lista de marcas es un distinct sobre los filamentos: no hay colección
-  // aparte, una marca vive mientras la use al menos un rollo.
-  const marcas = marcasDeFilamentos(filamentos);
+  // Las tres listas son un distinct sobre los filamentos: no hay colecciones
+  // aparte, un valor vive mientras lo use al menos un rollo.
+  const materiales = materialesUsados(filamentos);
+  const colores = coloresUsados(filamentos);
+  const marcas = marcasUsadas(filamentos);
 
   const openNuevo = () => {
     setEditando(null);
@@ -109,14 +113,35 @@ export function InventarioTab({ filamentos, onChanged, setMsg }) {
             {editando ? "Editar filamento" : "Nuevo filamento"}
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 160px", gap: 16, marginBottom: 16 }} className="form-layout">
-            <TKInput label="Material" value={form.material} onChange={e => setForm(f => ({ ...f, material: e.target.value }))} placeholder="PLA" />
-            <TKInput label="Color" value={form.color} onChange={e => setForm(f => ({ ...f, color: e.target.value }))} placeholder="Negro" />
+            {/* Los tres campos usan el mismo combobox. Material y color
+                arman la clave con la que las recetas encuentran el filamento,
+                así que elegirlos de una lista evita que un typo deje un rollo
+                huérfano; resolverValor además pega lo tipeado a la grafía
+                existente cuando ya hay una. */}
+            <SelectorConAgregar
+              label="Material"
+              value={form.material}
+              opciones={materiales}
+              onChange={material => setForm(f => ({ ...f, material }))}
+              resolver={resolverValor}
+              placeholder="Nuevo material..."
+              hint="Elegí una de la lista o agregá una nueva."
+            />
+            <SelectorConAgregar
+              label="Color"
+              value={form.color}
+              opciones={colores}
+              onChange={color => setForm(f => ({ ...f, color }))}
+              resolver={resolverValor}
+              placeholder="Nuevo color..."
+              hint="Elegí una de la lista o agregá una nueva."
+            />
             <SelectorConAgregar
               label="Marca"
               value={form.marca}
               opciones={marcas}
               onChange={marca => setForm(f => ({ ...f, marca }))}
-              resolver={resolverMarca}
+              resolver={resolverValor}
               placeholder="Nueva marca..."
               hint="Elegí una de la lista o agregá una nueva."
             />
