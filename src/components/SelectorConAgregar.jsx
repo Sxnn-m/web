@@ -1,26 +1,35 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { TKButton, TKInput, Icon } from './UI.jsx';
 
 // ─── Selector con opción de agregar ──────────────────────────────────
 // Desplegable de valores ya usados + la posibilidad de cargar uno nuevo sin
-// salir del formulario. Pensado para catálogos que no tienen colección
-// propia y se derivan de los datos existentes (marcas de filamento, por
-// ejemplo): la lista se arma con un distinct y crece sola.
+// salir del formulario, y de sacar una opción del catálogo.
+//
+// NO usa un <select> nativo: no admite botones dentro de sus <option>, y la
+// papelera de borrado tiene que estar dentro de cada fila de la lista. Es un
+// dropdown propio con la misma apariencia, más el manejo de Escape y de clic
+// afuera que el nativo daba gratis.
 //
 // No reutiliza el bloque de materiales del tab Costos porque ese resuelve
 // otro problema: edita un mapa material → precio, con una fila y un valor
-// por material. Acá se elige UN valor de una lista. Mismo aspecto, otra
-// estructura de datos.
+// por material. Acá se elige UN valor de una lista.
 
-const selectStyle = {
+const cajaStyle = {
   width: "100%", padding: "12px 14px",
   background: "var(--bg)", border: "1px solid var(--line)",
   borderRadius: 4, fontFamily: "'DM Sans', system-ui, sans-serif",
   fontSize: 14, color: "var(--text)", outline: "none",
   boxSizing: "border-box", cursor: "pointer",
+  display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
+  textAlign: "left",
 };
 
-const NUEVO = "__nuevo__";
+const opcionStyle = {
+  display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
+  width: "100%", padding: "9px 12px", background: "none", border: "none",
+  fontFamily: "'DM Sans', system-ui, sans-serif", fontSize: 14,
+  color: "var(--text)", cursor: "pointer", textAlign: "left",
+};
 
 /**
  * @param {string}   value      valor elegido ("" = ninguno)
@@ -29,29 +38,42 @@ const NUEVO = "__nuevo__";
  * @param {Function} [resolver] (texto, opciones) => {valor, existente}; permite
  *                              que el llamador normalice lo que se escribe a
  *                              mano contra lo que ya existe
- * @param {Function} [onAgregar]  avisa cuando se creó un valor que NO existía,
+ * @param {Function} [onAgregar] avisa cuando se creó un valor que NO existía,
  *                              para que el llamador lo persista en su catálogo.
- *                              Sin esto el valor se elige pero no se guarda en
- *                              ningún lado (los catálogos derivados de un
- *                              distinct no lo necesitan: aparecen solos).
- * @param {Function} [onEliminarOpcion] si viene, debajo del select aparecen
- *                              las opciones como chips con una × para
- *                              borrarlas del catálogo. Un <select> nativo no
- *                              admite botones dentro de sus <option>, así que
- *                              la gestión va afuera.
+ *                              Los catálogos derivados de un distinct no lo
+ *                              necesitan: el valor aparece solo.
+ * @param {Function} [onEliminarOpcion] (valor, {seleccionada}) => void. Si
+ *                              viene, cada opción de la lista muestra su
+ *                              papelera. La confirmación la hace el llamador,
+ *                              que es quien sabe qué se lleva puesto el
+ *                              borrado (cuántos productos usan ese tag, por
+ *                              ejemplo); "seleccionada" avisa si es el valor
+ *                              cargado en el formulario abierto.
  */
 export function SelectorConAgregar({
   label, value = "", opciones = [], onChange,
   placeholder = "Nuevo...", vacio = "— Sin especificar —",
   hint, resolver, onAgregar, onEliminarOpcion,
 }) {
+  const [abierto, setAbierto] = useState(false);
   const [agregando, setAgregando] = useState(false);
   const [texto, setTexto] = useState("");
   const [aviso, setAviso] = useState("");
 
-  // Un valor guardado que ya no está en la lista (su último filamento se
-  // borró) igual tiene que poder verse y conservarse al editar.
+  // Un valor guardado que ya no está en la lista (su última referencia se
+  // borró, o se ocultó la opción) igual tiene que poder verse y conservarse
+  // al editar.
   const lista = value && !opciones.includes(value) ? [...opciones, value] : opciones;
+
+  // Escape cierra, como en el select nativo.
+  useEffect(() => {
+    if (!abierto) return;
+    const alTeclear = (e) => { if (e.key === "Escape") setAbierto(false); };
+    document.addEventListener("keydown", alTeclear);
+    return () => document.removeEventListener("keydown", alTeclear);
+  }, [abierto]);
+
+  const elegir = (v) => { setAviso(""); onChange(v); setAbierto(false); };
 
   const confirmar = () => {
     const crudo = texto.trim();
@@ -70,15 +92,24 @@ export function SelectorConAgregar({
 
   const cancelar = () => { setAgregando(false); setTexto(""); };
 
+  const eliminar = (e, opcion) => {
+    // Sin esto, el clic en la papelera también elegiría la opción.
+    e.stopPropagation();
+    setAbierto(false);
+    onEliminarOpcion(opcion, { seleccionada: opcion === value });
+  };
+
+  const etiqueta = label ? (
+    <div style={{
+      fontSize: 11, fontWeight: 600, letterSpacing: 0.8,
+      textTransform: "uppercase", color: "var(--muted)", marginBottom: 6,
+    }}>{label}</div>
+  ) : null;
+
   if (agregando) {
     return (
       <div>
-        {label && (
-          <div style={{
-            fontSize: 11, fontWeight: 600, letterSpacing: 0.8,
-            textTransform: "uppercase", color: "var(--muted)", marginBottom: 6,
-          }}>{label}</div>
-        )}
+        {etiqueta}
         <div style={{ display: "flex", gap: 8 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <TKInput
@@ -110,49 +141,93 @@ export function SelectorConAgregar({
 
   return (
     <div>
-      {label && (
-        <div style={{
-          fontSize: 11, fontWeight: 600, letterSpacing: 0.8,
-          textTransform: "uppercase", color: "var(--muted)", marginBottom: 6,
-        }}>{label}</div>
-      )}
-      <select
-        value={value}
-        onChange={e => {
-          if (e.target.value === NUEVO) { setAviso(""); setAgregando(true); return; }
-          setAviso("");
-          onChange(e.target.value);
-        }}
-        style={selectStyle}
-      >
-        <option value="">{vacio}</option>
-        {lista.map(o => <option key={o} value={o}>{o}</option>)}
-        <option value={NUEVO}>+ Agregar nueva...</option>
-      </select>
-      {onEliminarOpcion && opciones.length > 0 && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
-          {opciones.map(o => (
-            <span key={o} style={{
-              display: "inline-flex", alignItems: "center", gap: 6,
-              padding: "3px 6px 3px 9px", background: "var(--bg-alt)",
-              border: "1px solid var(--line)", borderRadius: 3, fontSize: 11,
-            }}>
-              {o}
-              <button
-                onClick={() => onEliminarOpcion(o)}
-                title={`Eliminar "${o}" de la lista`}
-                aria-label={`Eliminar ${o}`}
-                style={{
-                  background: "none", border: "none", padding: 0, cursor: "pointer",
-                  color: "var(--muted)", display: "flex", alignItems: "center",
-                }}
+      {etiqueta}
+      <div style={{ position: "relative" }}>
+        <button
+          type="button"
+          onClick={() => { setAviso(""); setAbierto(v => !v); }}
+          style={{ ...cajaStyle, borderColor: abierto ? "var(--accent)" : "var(--line)" }}
+          aria-haspopup="listbox"
+          aria-expanded={abierto}
+        >
+          <span style={{
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            color: value ? "var(--text)" : "var(--muted)",
+          }}>
+            {value || vacio}
+          </span>
+          <span style={{ color: "var(--muted)", flexShrink: 0, fontSize: 9 }}>▼</span>
+        </button>
+
+        {abierto && (
+          <>
+            {/* Capa para cerrar al tocar afuera, como hace el select nativo. */}
+            <div onClick={() => setAbierto(false)} style={{ position: "fixed", inset: 0, zIndex: 78 }}/>
+            <div
+              role="listbox"
+              style={{
+                position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 79,
+                background: "var(--bg)", border: "1px solid var(--line-strong)",
+                borderRadius: 4, boxShadow: "0 12px 32px rgba(0,0,0,.16)",
+                maxHeight: 260, overflowY: "auto",
+              }}
+            >
+              <button type="button" onClick={() => elegir("")}
+                style={{ ...opcionStyle, color: "var(--muted)" }}
+                onMouseEnter={e => (e.currentTarget.style.background = "var(--bg-alt)")}
+                onMouseLeave={e => (e.currentTarget.style.background = "none")}
               >
-                <Icon.close size={11}/>
+                {vacio}
               </button>
-            </span>
-          ))}
-        </div>
-      )}
+
+              {lista.map(o => (
+                <div
+                  key={o}
+                  role="option"
+                  aria-selected={o === value}
+                  onClick={() => elegir(o)}
+                  style={{
+                    ...opcionStyle,
+                    background: o === value ? "var(--bg-alt)" : "none",
+                    fontWeight: o === value ? 600 : 400,
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.background = "var(--bg-alt)")}
+                  onMouseLeave={e => (e.currentTarget.style.background = o === value ? "var(--bg-alt)" : "none")}
+                >
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {o}
+                  </span>
+                  {onEliminarOpcion && (
+                    <button
+                      type="button"
+                      onClick={(e) => eliminar(e, o)}
+                      title={`Eliminar "${o}" de las opciones`}
+                      aria-label={`Eliminar ${o} de las opciones`}
+                      style={{
+                        background: "none", border: "none", padding: 2, cursor: "pointer",
+                        color: "var(--muted)", display: "flex", alignItems: "center", flexShrink: 0,
+                      }}
+                      onMouseEnter={e => (e.currentTarget.style.color = "#c64138")}
+                      onMouseLeave={e => (e.currentTarget.style.color = "var(--muted)")}
+                    >
+                      <Icon.trash size={13}/>
+                    </button>
+                  )}
+                </div>
+              ))}
+
+              <button type="button"
+                onClick={() => { setAviso(""); setAbierto(false); setAgregando(true); }}
+                style={{ ...opcionStyle, borderTop: "1px solid var(--line)", color: "var(--accent)", fontWeight: 600 }}
+                onMouseEnter={e => (e.currentTarget.style.background = "var(--bg-alt)")}
+                onMouseLeave={e => (e.currentTarget.style.background = "none")}
+              >
+                + Agregar nueva...
+              </button>
+            </div>
+          </>
+        )}
+      </div>
 
       {(aviso || hint) && (
         <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 6 }}>

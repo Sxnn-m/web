@@ -46,13 +46,61 @@ export function gramosPorMaterial(receta = []) {
  * "PLA+" y en la configuración solo existe "PLA", NO se considera encontrado,
  * porque son materiales con costos distintos.
  *
- * @returns {number|null} costo por gramo, o null si el material no está configurado
+ * Un costo en 0 o vacío cuenta como NO configurado, no como "gratis": el
+ * botón "Agregar" del tab Costos crea el material en 0, y un material que
+ * aparece solo porque se cargó un filamento tampoco tiene precio todavía.
+ * Devolver 0 hacía que la rentabilidad calculara con costo cero en silencio
+ * y mostrara una ganancia inflada; devolviendo null, la tabla muestra "—" y
+ * el motivo.
+ *
+ * @returns {number|null} costo por gramo, o null si el material no está
+ *                        configurado o su precio todavía está en 0
  */
 export function costoPorGramo(material, costs = DEFAULT_COSTS) {
   const objetivo = normalizar(material);
   const entrada = Object.entries(costs.materiales || {})
     .find(([nombre]) => normalizar(nombre) === objetivo);
-  return entrada ? (Number(entrada[1]) || 0) : null;
+  if (!entrada) return null;
+  const valor = Number(entrada[1]);
+  return Number.isFinite(valor) && valor > 0 ? valor : null;
+}
+
+/**
+ * Materiales que el tab Costos tiene que mostrar: los ya configurados más
+ * los que existen en el inventario de filamentos.
+ *
+ * Se DERIVA en vez de escribirse al crear el filamento. Así no hay que
+ * acoplar la capa de inventario con la de costos (ni mantenerlas
+ * sincronizadas), funciona igual venga el filamento del tab Inventario o de
+ * la receta de un producto, y de paso aparecen los materiales que ya existen
+ * hoy sin costo cargado. Recién cuando se le escribe un precio se persiste.
+ *
+ * @returns {Array<{material: string, costo: number, pendiente: boolean}>}
+ */
+export function materialesDeCostos(costs = DEFAULT_COSTS, filamentos = []) {
+  const filas = new Map();
+
+  for (const [material, costo] of Object.entries(costs.materiales || {})) {
+    const valor = Number(costo) || 0;
+    filas.set(normalizar(material), {
+      material, costo: valor, pendiente: valor <= 0, configurado: true,
+    });
+  }
+
+  for (const f of filamentos) {
+    const material = String(f?.material || "").trim();
+    if (!material) continue;
+    const clave = normalizar(material);
+    if (filas.has(clave)) continue;
+    // Solo existe como filamento: se lista para que se le cargue el precio,
+    // pero no hay nada que borrar de settings/costos todavía.
+    filas.set(clave, { material, costo: 0, pendiente: true, configurado: false });
+  }
+
+  // Los pendientes primero: son los que hay que completar.
+  return [...filas.values()].sort((a, b) =>
+    (b.pendiente - a.pendiente) || a.material.localeCompare(b.material, "es")
+  );
 }
 
 /**
