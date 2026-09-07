@@ -11,11 +11,13 @@ import { AdminScreen } from './screens/AdminScreen.jsx';
 import { MobileHome, MobileCatalogoHub, MobileCategoria, MobileBuscador, MobileTabBar, MobileHeader } from './screens/mobile/MobileScreens.jsx';
 import { CarritoProvider, useCarrito } from './context/CarritoContext.jsx';
 import { CarritoModal } from './components/CarritoModal.jsx';
+import { nombreVisible, mostrarEmail } from './lib/usuario.js';
 import { auth, db } from './firebase.js';
-import { onAuthStateChanged } from 'firebase/auth';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
 
-function Nav({ route, go, user, isAdmin }) {
+// Exportado para poder montarlo aislado en pruebas del header.
+export function Nav({ route, go, user, isAdmin, onLogout }) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -24,8 +26,19 @@ function Nav({ route, go, user, isAdmin }) {
         padding: "18px 0", borderBottom: "1px solid var(--line)",
         position: "sticky", top: 0, background: "var(--bg)", zIndex: 50,
       }}>
-        <div onClick={() => go("home")} style={{ cursor: "pointer" }}>
-          <TKLogo size={22}/>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+          <div onClick={() => go("home")} style={{ cursor: "pointer" }}>
+            <TKLogo size={22}/>
+          </div>
+          {/* Qué cuenta está activa. Sin sesión no se muestra nada. */}
+          {user && (
+            <span style={{
+              fontSize: 12, color: "var(--muted)", whiteSpace: "nowrap",
+              overflow: "hidden", textOverflow: "ellipsis", maxWidth: 180,
+            }} title={user.email}>
+              {nombreVisible(user)}
+            </span>
+          )}
         </div>
 
         <div className="nav-desktop" style={{ display: "flex", gap: 28, alignItems: "center" }}>
@@ -41,9 +54,7 @@ function Nav({ route, go, user, isAdmin }) {
           <a href={CONTACT.instagramUrl} target="_blank" rel="noopener noreferrer" style={iconBtn} title="Seguinos en Instagram">
             <Icon.ig/>
           </a>
-          <button onClick={() => go(user ? "admin" : "auth")} style={{ ...iconBtn, gap: 7 }} title="Acceso backoffice">
-            <Icon.user/>
-          </button>
+          <MenuPerfil user={user} isAdmin={isAdmin} go={go} onLogout={onLogout}/>
           <button className="nav-mobile" onClick={() => setOpen(!open)} style={{...iconBtn, display: "none"}}>
             {open ? <Icon.close/> : <Icon.menu/>}
           </button>
@@ -103,6 +114,89 @@ function BotonCarrito() {
         </span>
       )}
     </button>
+  );
+}
+
+/**
+ * Ícono de perfil. Sin sesión hace lo de siempre: lleva a login/registro.
+ * Con sesión abre un menú, porque antes mandaba a "admin" y un cliente
+ * logueado terminaba de vuelta en la pantalla de login sin entender por qué.
+ */
+function MenuPerfil({ user, isAdmin, go, onLogout }) {
+  const [abierto, setAbierto] = useState(false);
+
+  if (!user) {
+    return (
+      <button onClick={() => go("auth")} style={{ ...iconBtn, gap: 7 }} title="Iniciar sesión">
+        <Icon.user/>
+      </button>
+    );
+  }
+
+  const item = {
+    display: "flex", alignItems: "center", gap: 10, width: "100%",
+    padding: "11px 16px", background: "none", border: "none",
+    fontFamily: "'DM Sans', system-ui, sans-serif", fontSize: 13,
+    color: "var(--text)", cursor: "pointer", textAlign: "left",
+  };
+
+  return (
+    <div style={{ position: "relative" }}>
+      <button
+        onClick={() => setAbierto(v => !v)}
+        style={{ ...iconBtn, gap: 7, color: abierto ? "var(--accent)" : "var(--text)" }}
+        title={user.email}
+        aria-label="Menú de cuenta"
+        aria-expanded={abierto}
+      >
+        <Icon.user/>
+      </button>
+
+      {abierto && (
+        <>
+          {/* Capa para cerrar al tocar afuera. */}
+          <div onClick={() => setAbierto(false)} style={{ position: "fixed", inset: 0, zIndex: 98 }}/>
+          <div style={{
+            position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 99,
+            minWidth: 220, background: "var(--bg)",
+            border: "1px solid var(--line-strong)",
+            boxShadow: "0 12px 32px rgba(0,0,0,.16)", borderRadius: 4,
+            overflow: "hidden",
+          }}>
+            <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--line)" }}>
+              <div style={{ fontSize: 13, fontWeight: 600, wordBreak: "break-word" }}>
+                {nombreVisible(user)}
+              </div>
+              {mostrarEmail(user) && (
+                <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2, wordBreak: "break-all" }}>
+                  {user.email}
+                </div>
+              )}
+            </div>
+
+            {isAdmin && (
+              <button
+                onClick={() => { setAbierto(false); go("admin"); }}
+                style={item}
+                onMouseEnter={e => (e.currentTarget.style.background = "var(--bg-alt)")}
+                onMouseLeave={e => (e.currentTarget.style.background = "none")}
+              >
+                <Icon.layers size={14}/> Backoffice
+              </button>
+            )}
+
+            <button
+              onClick={() => { setAbierto(false); onLogout(); }}
+              style={{ ...item, color: "#c64138", borderTop: "1px solid var(--line)" }}
+              onMouseEnter={e => (e.currentTarget.style.background = "var(--bg-alt)")}
+              onMouseLeave={e => (e.currentTarget.style.background = "none")}
+            >
+              <Icon.back size={14}/> Cerrar sesión
+            </button>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -201,12 +295,21 @@ function AppInterna() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (currentUser) {
+        // Nombre provisorio hasta que responda Firestore, para que el header
+        // no parpadee vacío.
         setUser({ email: currentUser.email, nombre: currentUser.displayName || currentUser.email });
-        // Check user role from Firestore
+        // El mismo doc trae el rol y el nombre. El de Firestore tiene
+        // prioridad: una cuenta creada antes de que el registro copiara el
+        // nombre al displayName solo lo tiene ahí.
         try {
           const userDoc = await getDoc(doc(db, "users", currentUser.uid));
           if (userDoc.exists()) {
-            setIsAdmin(userDoc.data().role === "admin");
+            const datos = userDoc.data();
+            setIsAdmin(datos.role === "admin");
+            setUser({
+              email: currentUser.email,
+              nombre: datos.nombre?.trim() || currentUser.displayName || currentUser.email,
+            });
           } else {
             setIsAdmin(false);
           }
@@ -221,6 +324,20 @@ function AppInterna() {
     });
     return () => unsubscribe();
   }, []);
+
+  /**
+   * Cierra la sesión y vuelve al inicio. onAuthStateChanged limpia user e
+   * isAdmin solo, así que no queda nada de la cuenta anterior en memoria.
+   * El carrito NO se toca: es del navegador, no de la cuenta.
+   */
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+    } catch (err) {
+      console.error("No se pudo cerrar sesión:", err);
+    }
+    go("home");
+  };
 
   const go = (r, data = {}) => {
     setRoute(r);
@@ -297,13 +414,13 @@ function AppInterna() {
 
   const content = isMobile ? (
     <div className="app-wrap mobile-wrap" style={{ padding: "0 16px", display: "flex", flexDirection: "column", minHeight: 824 }}>
-      <MobileHeader route={route} go={go} user={user}/>
+      <MobileHeader route={route} go={go} user={user} isAdmin={isAdmin} onLogout={handleLogout}/>
       <div style={{ flex: 1 }}>{renderScreen()}</div>
       <MobileTabBar route={route} go={go} user={user}/>
     </div>
   ) : (
     <div className="app-wrap" style={{ maxWidth: 1240, margin: "0 auto", padding: "0 24px" }}>
-      <Nav route={route} go={go} user={user} isAdmin={isAdmin}/>
+      <Nav route={route} go={go} user={user} isAdmin={isAdmin} onLogout={handleLogout}/>
       {renderScreen()}
       <Footer go={go}/>
     </div>
