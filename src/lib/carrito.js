@@ -7,12 +7,14 @@
 export const MAX_CANTIDAD = 99;
 
 /**
- * Identidad de una línea: el mismo producto con el mismo color y el mismo
- * texto grabado es la misma línea y suma cantidad. Cambiar cualquiera de las
- * tres cosas hace una línea nueva, porque son piezas distintas de imprimir.
+ * Identidad de una línea: el mismo producto con el mismo color, el mismo texto
+ * grabado y las mismas opciones de insumo es la misma línea y suma cantidad.
+ * Cambiar cualquiera de esas cosas hace una línea nueva, porque son piezas
+ * distintas de imprimir — y con las opciones de insumo, además, de distinto
+ * precio.
  */
-export const claveLinea = (productoId, colorId, texto = "") =>
-  `${productoId}|${colorId || ""}|${String(texto).trim().toLowerCase()}`;
+export const claveLinea = (productoId, colorId, texto = "", opciones = "") =>
+  `${productoId}|${colorId || ""}|${String(texto).trim().toLowerCase()}|${opciones || ""}`;
 
 const limitar = (n) => Math.max(1, Math.min(MAX_CANTIDAD, Math.round(Number(n) || 1)));
 
@@ -24,10 +26,13 @@ const limitar = (n) => Math.max(1, Math.min(MAX_CANTIDAD, Math.round(Number(n) |
  *
  * @returns {Array} el carrito nuevo (no muta el original)
  */
-export function agregarLinea(carrito = [], producto, { color, texto = "", cantidad = 1 } = {}) {
+export function agregarLinea(
+  carrito = [], producto,
+  { color, texto = "", cantidad = 1, opciones = null, precioUnitario = null } = {}
+) {
   if (!producto?.id) return carrito;
 
-  const clave = claveLinea(producto.id, color?.id, texto);
+  const clave = claveLinea(producto.id, color?.id, texto, opciones?.clave);
   const suma = limitar(cantidad);
   const existente = carrito.find(l => l.clave === clave);
 
@@ -41,12 +46,20 @@ export function agregarLinea(carrito = [], producto, { color, texto = "", cantid
     clave,
     productoId: producto.id,
     nombre: producto.name || "Producto",
-    precioUnitario: Number(producto.price) || 0,
+    // El precio de la línea puede no ser el del producto: las opciones de
+    // insumo lo cambian. Si el llamador lo calculó, manda el suyo.
+    precioUnitario: precioUnitario !== null
+      ? Number(precioUnitario) || 0
+      : Number(producto.price) || 0,
     img: producto.img || producto.images?.[0] || "",
     colorId: color?.id || "",
     colorNombre: color?.name || "",
     colorHex: color?.hex || "",
     texto: String(texto).trim(),
+    // Qué se eligió en cada grupo de variante de insumo: el mapa para el
+    // pedido y la etiqueta legible para el resumen de Instagram.
+    opcionesInsumo: opciones?.seleccion ? { ...opciones.seleccion } : {},
+    opcionesTexto: opciones?.etiqueta || "",
     cantidad: suma,
   }];
 }
@@ -89,6 +102,9 @@ export function normalizarCarrito(valor) {
       colorNombre: String(l.colorNombre || ""),
       colorHex: String(l.colorHex || ""),
       texto: String(l.texto || ""),
+      opcionesInsumo: l.opcionesInsumo && typeof l.opcionesInsumo === "object"
+        ? { ...l.opcionesInsumo } : {},
+      opcionesTexto: String(l.opcionesTexto || ""),
       cantidad: limitar(l.cantidad),
     }));
 }
@@ -108,6 +124,7 @@ export function resumenDePedido(carrito = []) {
   const lineas = carrito.map(l => {
     const partes = [`${l.cantidad}x ${l.nombre}`];
     if (l.colorNombre) partes.push(`color ${l.colorNombre}`);
+    if (l.opcionesTexto) partes.push(l.opcionesTexto);
     if (l.texto) partes.push(`texto "${l.texto}"`);
     return `• ${partes.join(" · ")} — ${pesos(subtotalLinea(l))}`;
   });

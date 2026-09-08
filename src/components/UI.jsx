@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import logoFull from '../assets/logo-full.jpg';
+import { normalizarGruposPublicos, precioDesde, tieneOpcionesConPrecio } from '../lib/variantesInsumo.js';
 
 export const fmtARS = (n) => "$ " + Math.round(n).toLocaleString("es-AR");
 
@@ -195,6 +196,19 @@ export const sinStock = (product) => product?.disponible === false;
 
 // ---------- Product card ----------
 export function ProductCard({ product, onClick, onAdd, layout = "grid" }) {
+  // Un producto con grupos de insumo obliga a elegir, y la opción más barata
+  // ya sube el precio: mostrar el base solo sería un precio que nadie paga.
+  const grupos = normalizarGruposPublicos(product.variantesInsumo);
+  const desde = tieneOpcionesConPrecio(grupos);
+  const precioMostrado = desde ? precioDesde(product.price, grupos) : (product.price || 0);
+  const Precio = () => (
+    <>
+      {desde && (
+        <span style={{ fontSize: "0.7em", color: "var(--muted)", marginRight: 4 }}>Desde</span>
+      )}
+      {fmtARS(precioMostrado)}
+    </>
+  );
   // El único dato de stock que ve el público es "disponible", calculado desde
   // la receta + el inventario de filamentos e insumos. El campo "stock" del
   // producto era un contador manual que nadie mantenía: alimentaba un badge
@@ -237,7 +251,7 @@ export function ProductCard({ product, onClick, onAdd, layout = "grid" }) {
           ) : (
             <>
               <div style={{ fontSize: 20, color: "var(--text)", marginBottom: 10 }}>
-                {fmtARS(product.price)}
+                <Precio/>
               </div>
               <TKButton size="sm" icon={<Icon.cart size={13}/>} onClick={(e) => { e.stopPropagation(); onAdd?.(product); }}>
                 Agregar
@@ -296,7 +310,7 @@ export function ProductCard({ product, onClick, onAdd, layout = "grid" }) {
           <SinStockBadge size="sm"/>
         ) : (
           <div style={{ fontSize: 16, color: "var(--accent)" }}>
-            {fmtARS(product.price)}
+            <Precio/>
           </div>
         )}
       </div>

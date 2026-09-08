@@ -21,6 +21,9 @@ import {
   calcularDisponibilidad, consumoDeVariante, variantesPublicas,
   normalizarVariantesPublicas, migrarAVariante,
 } from './variantes.js';
+import {
+  insumosDeSeleccion, gruposPublicos, normalizarGruposPublicos,
+} from './variantesInsumo.js';
 
 export const COL_FILAMENTOS = "filamentos";
 export const COL_PEDIDOS = "pedidos";
@@ -217,6 +220,13 @@ export async function recalcularDisponibilidad(productos = [], filamentos = [], 
       patch.variantes = publicas;
     }
 
+    // Ídem los grupos de insumo: nombre, precio de cada opción y si hay stock.
+    // El insumo al que apuntan se queda en el doc privado.
+    const gruposPub = gruposPublicos(p.variantesInsumo || [], insumos);
+    if (JSON.stringify(normalizarGruposPublicos(p.variantesInsumo)) !== JSON.stringify(gruposPub)) {
+      patch.variantesInsumo = gruposPub;
+    }
+
     // Notación de punto: actualiza solo estas claves del mapa specs.
     if ((p.specs?.material || "") !== specs.material) patch["specs.material"] = specs.material;
     if ((p.specs?.peso || "") !== specs.peso) patch["specs.peso"] = specs.peso;
@@ -403,19 +413,34 @@ export function planDeConsumo(pedido, productos = [], personalizados = []) {
  *
  * A diferencia del filamento no hay desperdicio: un imán entra o no entra.
  */
-export function planDeInsumos(pedido, productos = [], personalizados = []) {
+export function planDeInsumos(pedido, productos = [], personalizados = [], catalogoInsumos = []) {
   const plan = [];
-  for (const item of pedido.items || []) {
+  for (const [indice, item] of (pedido.items || []).entries()) {
     const producto = buscarProductoDeLinea(item, productos, personalizados);
     if (!producto) continue;
     const cantidadPedido = Number(item.cantidad) || 0;
-    for (const linea of lineasDeInsumo(producto)) {
+    // Los insumos FIJOS del producto, más el de la opción elegida en cada
+    // grupo de variante de insumo. Un producto puede llevar los dos: el imán
+    // siempre, y el LED según la luz que se haya pedido.
+    const lineas = [
+      ...lineasDeInsumo(producto),
+      ...insumosDeSeleccion(
+        producto.variantesInsumo || [], item.opcionesInsumo || {}, catalogoInsumos),
+    ];
+    for (const linea of lineas) {
       plan.push({
-        clave: `${item.productoId}|${linea.insumoId}`,
+        // El índice de la línea del pedido entra en la clave: el mismo
+        // producto puede pedirse dos veces con opciones distintas, y sin él
+        // los insumos fijos de las dos colisionaban (se usa como key de React
+        // en el modal de impresión). El agrupado por insumo lo hace después
+        // agruparConsumo, que suma por insumoId.
+        clave: `${indice}|${item.productoId}|${linea.opcionId || ""}|${linea.insumoId}`,
         productoId: item.productoId,
         productoNombre: item.productoNombre,
         insumoId: linea.insumoId,
         nombre: linea.nombre,
+        grupoNombre: linea.grupoNombre || "",
+        opcionNombre: linea.opcionNombre || "",
         cantidadPorUnidad: linea.cantidad,
         cantidad: cantidadPedido,
         unidadesConsumidas: linea.cantidad * cantidadPedido,

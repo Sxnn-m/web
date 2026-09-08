@@ -17,9 +17,13 @@ export async function cargarInsumos() {
     .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || ""));
 }
 
-export async function crearInsumo({ nombre, precioUnidad = 0, cantidadDisponible = 0 }) {
+// "tipo" agrupa insumos relacionados (ej. "Luz" para el LED monocolor y el
+// RGB) al armar las variantes de insumo de un producto. Es descriptivo: NO
+// entra en el cálculo de stock ni en el de costos.
+export async function crearInsumo({ nombre, tipo = "", precioUnidad = 0, cantidadDisponible = 0 }) {
   const ref = await addDoc(collection(db, COL_INSUMOS), {
     nombre: String(nombre).trim(),
+    tipo: String(tipo).trim(),
     precioUnidad: Number(precioUnidad) || 0,
     cantidadDisponible: Number(cantidadDisponible) || 0,
     updatedAt: serverTimestamp(),
@@ -27,9 +31,10 @@ export async function crearInsumo({ nombre, precioUnidad = 0, cantidadDisponible
   return ref.id;
 }
 
-export async function actualizarInsumo(id, { nombre, precioUnidad, cantidadDisponible }) {
+export async function actualizarInsumo(id, { nombre, tipo, precioUnidad, cantidadDisponible }) {
   const data = { updatedAt: serverTimestamp() };
   if (nombre !== undefined) data.nombre = String(nombre).trim();
+  if (tipo !== undefined) data.tipo = String(tipo).trim();
   if (precioUnidad !== undefined) data.precioUnidad = Number(precioUnidad) || 0;
   if (cantidadDisponible !== undefined) data.cantidadDisponible = Number(cantidadDisponible) || 0;
   await updateDoc(doc(db, COL_INSUMOS, id), data);

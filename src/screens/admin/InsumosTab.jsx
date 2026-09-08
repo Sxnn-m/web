@@ -23,11 +23,11 @@ export function InsumosTab({ insumos, onChanged, setMsg }) {
   const [seleccionado, setSeleccionado] = useState(null); // _id del insumo abierto
   const [showForm, setShowForm] = useState(false);
   const [editando, setEditando] = useState(null);
-  const [form, setForm] = useState({ nombre: "", precioUnidad: 0, cantidadDisponible: 0 });
+  const [form, setForm] = useState({ nombre: "", tipo: "", precioUnidad: 0, cantidadDisponible: 0 });
 
   const openNuevo = () => {
     setEditando(null);
-    setForm({ nombre: "", precioUnidad: 0, cantidadDisponible: 0 });
+    setForm({ nombre: "", tipo: "", precioUnidad: 0, cantidadDisponible: 0 });
     setShowForm(true);
   };
 
@@ -35,6 +35,7 @@ export function InsumosTab({ insumos, onChanged, setMsg }) {
     setEditando(i);
     setForm({
       nombre: i.nombre || "",
+      tipo: i.tipo || "",
       precioUnidad: i.precioUnidad ?? 0,
       cantidadDisponible: i.cantidadDisponible ?? 0,
     });
@@ -89,7 +90,8 @@ export function InsumosTab({ insumos, onChanged, setMsg }) {
   }
 
   const enAlerta = insumos.filter(necesitaRestockInsumo).length;
-  const COL = "2fr 120px 120px 140px 90px";
+  // Nombre | Tipo | Precio | Disponible | Alerta | Acciones
+  const COL = "2fr 120px 120px 120px 130px 90px";
 
   return (
     <>
@@ -103,16 +105,23 @@ export function InsumosTab({ insumos, onChanged, setMsg }) {
           <div style={{ fontSize: 18, marginBottom: 16 }}>
             {editando ? "Editar insumo" : "Nuevo insumo"}
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "2fr 160px 160px", gap: 16, marginBottom: 16 }} className="form-layout">
+          <div style={{ display: "grid", gridTemplateColumns: "2fr 160px 160px 160px", gap: 16, marginBottom: 16 }} className="form-layout">
             <TKInput label="Nombre" value={form.nombre}
               onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))}
               placeholder="Imán neodimio 10mm" />
+            <TKInput label="Tipo (opcional)" value={form.tipo}
+              onChange={e => setForm(f => ({ ...f, tipo: e.target.value }))}
+              placeholder="Ej: Luz"
+              hint="Agrupa insumos intercambiables." />
             <TKInput label="Precio por unidad (ARS)" type="number" value={form.precioUnidad}
               onChange={e => setForm(f => ({ ...f, precioUnidad: e.target.value }))} />
             <TKInput label="Cantidad disponible" type="number" value={form.cantidadDisponible}
               onChange={e => setForm(f => ({ ...f, cantidadDisponible: e.target.value }))} />
           </div>
           <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 12, lineHeight: 1.5 }}>
+            El <strong>tipo</strong> es opcional y solo sirve para reconocer insumos
+            intercambiables entre sí (ej. "Luz" para el LED monocolor y el RGB) al armar las
+            variantes de insumo de un producto: no afecta stock ni costos.
             Para sumar unidades usá "Registrar restock" en el detalle del insumo: queda asentado
             en el historial. El precio por unidad se copia al producto cuando lo agregás a su receta.
             Cambiarlo acá <strong>no</strong> recalcula los productos ya guardados: cada producto
@@ -140,7 +149,7 @@ export function InsumosTab({ insumos, onChanged, setMsg }) {
             fontSize: 10, textTransform: "uppercase", letterSpacing: 1.5,
             color: "var(--muted)", fontWeight: 700,
           }}>
-            <div>Nombre</div><div>Precio unidad</div><div>Disponible</div><div>Alerta</div><div>Acciones</div>
+            <div>Nombre</div><div>Tipo</div><div>Precio unidad</div><div>Disponible</div><div>Alerta</div><div>Acciones</div>
           </div>
 
           {insumos.map(i => {
@@ -159,6 +168,9 @@ export function InsumosTab({ insumos, onChanged, setMsg }) {
                   title="Ver historial"
                 >
                   {i.nombre}
+                </div>
+                <div style={{ color: i.tipo ? "var(--text)" : "var(--muted)", fontSize: 12 }}>
+                  {i.tipo || "—"}
                 </div>
                 <div>{fmtARS(i.precioUnidad || 0)}</div>
                 <div style={{ fontWeight: 700, color: alerta ? "#c64138" : "var(--text)" }}>

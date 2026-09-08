@@ -10,6 +10,7 @@ import {
   agruparConsumo, validarStock, textoFaltante,
 } from '../../lib/consumoPedido.js';
 import { buscarFilamento } from '../../lib/disponibilidad.js';
+import { etiquetaSeleccion } from '../../lib/variantesInsumo.js';
 
 const actionBtn = {
   background: "none", border: "1px solid var(--line)", padding: "6px 8px",
@@ -29,7 +30,8 @@ const labelStyle = {
 };
 
 const lineaVacia = () =>
-  ({ tipo: "catalogo", productoId: "", varianteId: "", cantidad: 1, precioUnitario: 0 });
+  ({ tipo: "catalogo", productoId: "", varianteId: "", opcionesInsumo: {},
+     cantidad: 1, precioUnitario: 0 });
 
 /**
  * Código visible de una línea de pedido. Prioriza el snapshot guardado al
@@ -104,6 +106,45 @@ function VarianteSelect({ variantes = [], valor, onChange, deshabilitado }) {
         </option>
       ))}
     </select>
+  );
+}
+
+/**
+ * Una opción por grupo de variante de insumo. Como con la variante de color,
+ * acá se listan TODAS: manda lo que se vendió, no lo que hay hoy en stock.
+ */
+function OpcionesInsumoSelect({ grupos = [], valores = {}, onChange, deshabilitado }) {
+  if (deshabilitado || grupos.length === 0) {
+    return (
+      <div style={{ padding: "12px 10px", fontSize: 11, color: "var(--muted)" }}>
+        {deshabilitado ? "—" : "Sin grupos"}
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      {grupos.map(g => (
+        <select
+          key={g.id}
+          value={valores[g.id] || ""}
+          onChange={e => onChange(g.id, e.target.value)}
+          title={g.nombre}
+          style={{
+            width: "100%", padding: "9px 8px", background: "var(--bg)",
+            border: `1px solid ${valores[g.id] ? "var(--line)" : "#c64138"}`,
+            borderRadius: 4, fontSize: 12, color: "var(--text)", outline: "none",
+            boxSizing: "border-box", fontFamily: "'DM Sans', system-ui, sans-serif",
+          }}
+        >
+          <option value="">{g.nombre || "Grupo"}: elegir</option>
+          {(g.opciones || []).map(o => (
+            <option key={o.id} value={o.id}>
+              {o.nombre}{o.disponible ? "" : " · sin stock"}
+            </option>
+          ))}
+        </select>
+      ))}
+    </div>
   );
 }
 
@@ -194,6 +235,7 @@ export function PedidosTab({ pedidos, productos, personalizados = [], filamentos
       detalle: p.id || "",
       price: p.price,
       variantes: p.variantes || [],
+      gruposInsumo: p.variantesInsumo || [],
       busqueda: `${p.name || ""} ${p.id || ""}`.toLowerCase(),
     })), [productos]);
 
@@ -207,6 +249,7 @@ export function PedidosTab({ pedidos, productos, personalizados = [], filamentos
       detalle: p.clienteNombre ? `Cliente: ${p.clienteNombre}` : "",
       price: p.price,
       variantes: p.variantes || [],
+      gruposInsumo: p.variantesInsumo || [],
       busqueda: `${p.name || ""} ${p.clienteNombre || ""}`.toLowerCase(),
     })), [personalizados]);
 
@@ -226,13 +269,18 @@ export function PedidosTab({ pedidos, productos, personalizados = [], filamentos
       // Con una sola variante no hay nada que elegir: se preselecciona para
       // no obligar a un clic que siempre daría lo mismo.
       varianteId: variantes.length === 1 ? variantes[0].id : "",
+      // Ídem cada grupo de insumo con una sola opción.
+      opcionesInsumo: Object.fromEntries(
+        (o?.gruposInsumo || [])
+          .filter(g => (g.opciones || []).length === 1)
+          .map(g => [g.id, g.opciones[0].id])),
     });
   };
 
   // Cambiar de tipo limpia la selección: el producto elegido es de la otra
   // colección y no tiene sentido conservarlo.
   const cambiarTipo = (i, tipo) =>
-    upLinea(i, { tipo, productoId: "", varianteId: "", precioUnitario: 0 });
+    upLinea(i, { tipo, productoId: "", varianteId: "", opcionesInsumo: {}, precioUnitario: 0 });
 
   const resetForm = () => {
     setCliente("");
@@ -255,6 +303,17 @@ export function PedidosTab({ pedidos, productos, personalizados = [], filamentos
           opcionesDe(l.tipo).find(x => x._id === l.productoId)?.nombre).join(", ")}.`
       );
     }
+    // Un grupo de insumo sin opción elegida deja el descuento sin saber qué
+    // insumo tocar, igual que una línea sin variante de color.
+    const sinOpcion = validas.flatMap(l => {
+      const o = opcionesDe(l.tipo).find(x => x._id === l.productoId);
+      return (o?.gruposInsumo || [])
+        .filter(g => !(l.opcionesInsumo || {})[g.id])
+        .map(g => `${o?.nombre}: ${g.nombre}`);
+    });
+    if (sinOpcion.length > 0) {
+      return alert(`Elegí una opción en: ${sinOpcion.join(", ")}.`);
+    }
     if (validas.length === 0) return alert("Agregá al menos un producto con cantidad mayor a 0.");
 
     setGuardando(true);
@@ -276,6 +335,11 @@ export function PedidosTab({ pedidos, productos, personalizados = [], filamentos
             // receta ya no lleva color.
             varianteId: l.varianteId || "",
             varianteNombre: variante?.nombre || "",
+            // Qué opción se pidió en cada grupo: sin esto el descuento no
+            // sabe qué insumo tocar, y el detalle del pedido no muestra la
+            // combinación que se vendió.
+            opcionesInsumo: { ...(l.opcionesInsumo || {}) },
+            opcionesTexto: etiquetaSeleccion(o?.gruposInsumo || [], l.opcionesInsumo || {}),
             cantidad: Number(l.cantidad) || 0,
             precioUnitario: Number(l.precioUnitario) || 0,
           };
@@ -335,7 +399,7 @@ export function PedidosTab({ pedidos, productos, personalizados = [], filamentos
           <div style={{ ...labelStyle, marginBottom: 10 }}>Productos del pedido</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 12 }}>
             {lineas.map((l, i) => (
-              <div key={i} style={{ display: "grid", gridTemplateColumns: "130px 1fr 150px 80px 120px 100px 36px", gap: 10, alignItems: "end" }}>
+              <div key={i} style={{ display: "grid", gridTemplateColumns: "120px 1fr 130px 150px 70px 110px 90px 36px", gap: 10, alignItems: "end" }}>
                 <div>
                   {i === 0 && <div style={labelStyle}>Tipo</div>}
                   <div style={{ display: "flex", border: "1px solid var(--line)", borderRadius: 4, overflow: "hidden" }}>
@@ -372,6 +436,16 @@ export function PedidosTab({ pedidos, productos, personalizados = [], filamentos
                     variantes={(opcionesDe(l.tipo).find(x => x._id === l.productoId) || {}).variantes || []}
                     valor={l.varianteId}
                     onChange={varianteId => upLinea(i, { varianteId })}
+                    deshabilitado={!l.productoId}
+                  />
+                </div>
+                <div>
+                  {i === 0 && <div style={labelStyle}>Opciones</div>}
+                  <OpcionesInsumoSelect
+                    grupos={(opcionesDe(l.tipo).find(x => x._id === l.productoId) || {}).gruposInsumo || []}
+                    valores={l.opcionesInsumo || {}}
+                    onChange={(grupoId, opcionId) =>
+                      upLinea(i, { opcionesInsumo: { ...(l.opcionesInsumo || {}), [grupoId]: opcionId } })}
                     deshabilitado={!l.productoId}
                   />
                 </div>
@@ -525,6 +599,13 @@ export function PedidosTab({ pedidos, productos, personalizados = [], filamentos
                           <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>
                             {codigoDeLinea(it, productos, personalizados)}
                           </div>
+                          {/* La combinación exacta que se vendió: color y las
+                              opciones de cada grupo de insumo. */}
+                          {(it.varianteNombre || it.opcionesTexto) && (
+                            <div style={{ fontSize: 11, color: "var(--text)", marginTop: 3 }}>
+                              {[it.varianteNombre, it.opcionesTexto].filter(Boolean).join(" · ")}
+                            </div>
+                          )}
                         </div>
                         <div>{it.cantidad}</div>
                         <div>{fmtARS(it.precioUnitario || 0)}</div>
@@ -576,7 +657,9 @@ export function PedidosTab({ pedidos, productos, personalizados = [], filamentos
 // ─── Modal: marcar como impreso + gramos desperdiciados ──────────────
 function ModalImpresion({ pedido, productos, personalizados = [], filamentos, insumos = [], onClose, onDone }) {
   const plan = useMemo(() => planDeConsumo(pedido, productos, personalizados), [pedido, productos, personalizados]);
-  const planInsumos = useMemo(() => planDeInsumos(pedido, productos, personalizados), [pedido, productos, personalizados]);
+  const planInsumos = useMemo(
+    () => planDeInsumos(pedido, productos, personalizados, insumos),
+    [pedido, productos, personalizados, insumos]);
   const [desperdicios, setDesperdicios] = useState({});
   const [guardando, setGuardando] = useState(false);
   const [errorStock, setErrorStock] = useState("");   // faltante detectado por la transacción
