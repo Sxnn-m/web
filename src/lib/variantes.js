@@ -21,6 +21,7 @@ import {
   claveFilamento, buscarFilamento, FACTOR_DISPONIBILIDAD,
   lineasDeInsumo, buscarInsumo, FACTOR_DISPONIBILIDAD_INSUMO,
 } from './disponibilidad.js';
+import { disponibilidadDeGrupos, gruposArmables } from './variantesInsumo.js';
 
 /** Id corto y estable para una línea de receta o una variante. */
 export function nuevoId(prefijo = "v") {
@@ -202,11 +203,22 @@ export function disponibilidadPorVariantes(producto, filamentos = [], insumos = 
     };
   });
 
+  // Segundo eje: los grupos de variante de insumo. El producto se puede armar
+  // solo si CADA grupo tiene al menos una opción con stock. Sin grupos el eje
+  // no aplica y no bloquea nada.
+  const gruposInsumo = disponibilidadDeGrupos(producto?.variantesInsumo || [], insumos);
+  const insumosArmables = gruposArmables(gruposInsumo);
+
   return {
-    disponible: evaluadas.some(v => v.disponible),
+    // Una combinación completa necesita las dos cosas: un color imprimible y
+    // una opción de cada grupo de insumo.
+    disponible: evaluadas.some(v => v.disponible) && insumosArmables,
     sinReceta: lineasUtiles(receta).length === 0,
     sinVariantes: variantes.length === 0,
     variantes: evaluadas,
+    gruposInsumo,
+    // Grupos que dejaron al producto sin poder armarse, para poder nombrarlos.
+    gruposSinOpciones: gruposInsumo.filter(g => !g.disponible),
     detalleInsumos,
     faltantesInsumos,
   };
@@ -231,6 +243,8 @@ export function calcularDisponibilidad(producto, filamentos = [], insumos = []) 
     sinReceta: porVariantes.sinReceta,
     sinVariantes: porVariantes.sinVariantes,
     variantes: porVariantes.variantes,
+    gruposInsumo: porVariantes.gruposInsumo,
+    gruposSinOpciones: porVariantes.gruposSinOpciones,
     detalle: elegida?.detalle || [],
     faltantes: elegida?.faltantes || [],
     detalleInsumos: porVariantes.detalleInsumos,

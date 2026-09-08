@@ -17,6 +17,10 @@ import {
   nombreSugerido, nuevoId, filamentosDeVariantes, variantesPublicas,
   variantesPrivadas, filasDeInventario,
 } from '../lib/variantes.js';
+import {
+  nuevoIdInsumo, disponibilidadDeGrupo, insumosDuplicados, gruposPublicos,
+  gruposPrivados, normalizarGruposPublicos,
+} from '../lib/variantesInsumo.js';
 import { cargarInsumos } from '../lib/insumos.js';
 import {
   cargarPersonalizadosCompletos, guardarPersonalizado, eliminarPersonalizado,
@@ -467,7 +471,7 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
       // catálogo), que se usa arriba en el mismo bloque.
       const {
         _id, receta, origenUrl, notas, insumos: insumosProducto, archivos,
-        variantes: variantesEnteras, ...publico
+        variantes: variantesEnteras, variantesInsumo: gruposEnteros, ...publico
       } = data;
       const privado = {
         receta: receta || [],
@@ -477,10 +481,15 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
         archivos: archivos || [],
         // Solo la asignación de colores.
         variantes: variantesPrivadas(variantesEnteras || []),
+        // Y a qué insumo apunta cada opción, con su cantidad.
+        variantesInsumo: gruposPrivados(gruposEnteros || []),
       };
       // Y al doc público solo el nombre visible, la aclaración y el booleano.
       publico.variantes = variantesPublicas(
         { ...data, receta: receta || [] }, films, insumos);
+      // De los grupos, el nombre y el precio de cada opción: el navegador los
+      // necesita para mostrar cuánto sale cada una. El insumo no viaja.
+      publico.variantesInsumo = gruposPublicos(gruposEnteros || [], insumos);
 
       // Al crear, el ID visible se recalcula contra la lista fresca para que
       // dos altas seguidas no puedan quedarse con el mismo número.
@@ -1642,6 +1651,264 @@ export function VariantesEditor({ receta, variantes, setVariantes, filamentos })
   );
 }
 
+// ─── Variantes de insumo ─────────────────────────────────────────────
+// Grupos de opciones que cambian QUÉ insumo lleva la pieza (ej. "Tipo de luz":
+// Monocolor o RGB). A diferencia del color, cada opción tiene su precio: el
+// del insumo que consume. Mismo acordeón que las variantes de color.
+
+export function VariantesInsumoEditor({ grupos, setGrupos, catalogo, insumosFijos = [] }) {
+  const [abiertos, setAbiertos] = useState(() => new Set());
+  const alternar = (id) => setAbiertos(previos => {
+    const nuevos = new Set(previos);
+    if (nuevos.has(id)) nuevos.delete(id); else nuevos.add(id);
+    return nuevos;
+  });
+
+  const up = (i, patch) => setGrupos(gs => gs.map((g, j) => j === i ? { ...g, ...patch } : g));
+  const quitar = (i) => setGrupos(gs => gs.filter((_, j) => j !== i));
+
+  const upOpcion = (i, j, patch) => setGrupos(gs => gs.map((g, gi) => gi !== i ? g : {
+    ...g,
+    opciones: g.opciones.map((o, oi) => {
+      if (oi !== j) return o;
+      const nueva = { ...o, ...patch };
+      // El nombre visible se autocompleta con el del insumo mientras no lo
+      // hayan escrito a mano.
+      if (patch.insumoId !== undefined && !o.nombreEditado) {
+        nueva.nombre = catalogo.find(x => x._id === patch.insumoId)?.nombre || "";
+      }
+      return nueva;
+    }),
+  }));
+  const quitarOpcion = (i, j) => setGrupos(gs => gs.map((g, gi) =>
+    gi !== i ? g : { ...g, opciones: g.opciones.filter((_, oi) => oi !== j) }));
+  const agregarOpcion = (i) => setGrupos(gs => gs.map((g, gi) =>
+    gi !== i ? g : { ...g, opciones: [...g.opciones, { id: nuevoIdInsumo("o"), nombre: "", insumoId: "", cantidad: 1 }] }));
+
+  const agregar = () => {
+    const id = nuevoIdInsumo("g");
+    setGrupos(gs => [...gs, { id, nombre: "", opciones: [
+      { id: nuevoIdInsumo("o"), nombre: "", insumoId: "", cantidad: 1 },
+      { id: nuevoIdInsumo("o"), nombre: "", insumoId: "", cantidad: 1 },
+    ]}]);
+    setAbiertos(previos => new Set(previos).add(id));
+  };
+
+  const duplicados = insumosDuplicados(insumosFijos, grupos, catalogo);
+
+  return (
+    <div style={{ marginBottom: 16, paddingTop: 16, borderTop: "1px solid var(--line)" }}>
+      <div style={{ ...labelStyle, marginBottom: 4 }}>Variantes de insumo</div>
+      <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 12, lineHeight: 1.5 }}>
+        Grupos de opciones que cambian qué insumo lleva la pieza (ej. "Tipo de luz":
+        Monocolor o RGB). Cada opción suma <strong>su</strong> precio al del producto, así que
+        el cliente ve un precio distinto según lo que elija. Se combinan con las variantes de
+        color: si hay 3 colores y 2 luces, son 6 combinaciones.
+      </div>
+
+      <div style={{ padding: "10px 12px", background: "#B56B3E15", borderLeft: "3px solid #B56B3E", fontSize: 11.5, lineHeight: 1.6, marginBottom: 12 }}>
+        Un insumo se carga <strong>una sola vez</strong>: o como insumo fijo (arriba), si la pieza
+        siempre lo lleva, o como opción de un grupo, si el cliente elige entre varios. Cargarlo en
+        los dos lados cobraría el costo dos veces.
+        {duplicados.length > 0 && (
+          <div style={{ color: "#c64138", fontWeight: 700, marginTop: 6 }}>
+            Está en los dos lados: {duplicados.join(", ")}. Sacalo de uno.
+          </div>
+        )}
+      </div>
+
+      {catalogo.length === 0 && (
+        <div style={{ fontSize: 12, color: "#B56B3E", padding: "6px 0" }}>
+          El catálogo de insumos está vacío. Cargalos en el tab Insumos para poder usarlos acá.
+        </div>
+      )}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        {grupos.map((g, i) => {
+          const evaluado = disponibilidadDeGrupo(g, catalogo);
+          const sinOpciones = g.opciones.filter(o => !o.insumoId).length;
+          return (
+            <GrupoInsumoCard
+              key={g.id}
+              indice={i}
+              grupo={g}
+              abierto={abiertos.has(g.id)}
+              conStock={evaluado.opciones.filter(o => o.disponible).length}
+              sinInsumo={sinOpciones}
+              onAlternar={() => alternar(g.id)}
+              onQuitar={() => quitar(i)}
+            >
+              <TKInput
+                label="Nombre del grupo"
+                value={g.nombre}
+                onChange={e => up(i, { nombre: e.target.value })}
+                placeholder="Ej: Tipo de luz"
+                hint="El rótulo que ve el cliente arriba del selector."
+              />
+
+              <div style={{ ...labelStyle, margin: "14px 0 6px" }}>Opciones</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {g.opciones.map((o, j) => {
+                  const insumo = catalogo.find(x => x._id === o.insumoId);
+                  const evaluada = evaluado.opciones[j];
+                  return (
+                    <div key={o.id}>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 80px 36px", gap: 8, alignItems: "end" }}>
+                        <div>
+                          {j === 0 && <div style={{ ...labelStyle, marginBottom: 4 }}>Insumo</div>}
+                          <select
+                            value={o.insumoId}
+                            onChange={e => upOpcion(i, j, { insumoId: e.target.value })}
+                            style={{ ...selectStyle, borderColor: o.insumoId ? "var(--line)" : "#c64138" }}
+                          >
+                            <option value="">Seleccionar insumo...</option>
+                            {catalogo.map(x => (
+                              <option key={x._id} value={x._id}>
+                                {x.tipo ? `[${x.tipo}] ` : ""}{x.nombre} — {fmtARS(x.precioUnidad || 0)}/u
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          {j === 0 && <div style={{ ...labelStyle, marginBottom: 4 }}>Nombre visible</div>}
+                          <input
+                            value={o.nombre}
+                            onChange={e => upOpcion(i, j, { nombre: e.target.value, nombreEditado: true })}
+                            placeholder="Ej: RGB"
+                            style={recetaInput}
+                          />
+                        </div>
+                        <div>
+                          {j === 0 && <div style={{ ...labelStyle, marginBottom: 4 }}>Cantidad</div>}
+                          <input
+                            type="number" min="1"
+                            value={o.cantidad}
+                            onChange={e => upOpcion(i, j, { cantidad: e.target.value })}
+                            style={recetaInput}
+                          />
+                        </div>
+                        <button onClick={() => quitarOpcion(i, j)}
+                          style={{ ...actionBtn, color: "#c64138", justifyContent: "center", height: 42 }}
+                          title="Quitar opción">
+                          <Icon.trash size={14}/>
+                        </button>
+                      </div>
+                      <div style={{ fontSize: 11, marginTop: 4, lineHeight: 1.5,
+                        color: !o.insumoId ? "#c64138" : evaluada?.disponible ? "var(--muted)" : "#B56B3E" }}>
+                        {!o.insumoId ? "Elegí el insumo: sin él la opción no se puede ofrecer."
+                          : `Suma ${fmtARS(evaluada?.precio || 0)} al precio · ` +
+                            `${evaluada?.enCatalogo ?? 0} u. en catálogo` +
+                            (evaluada?.disponible ? "" : " · sin stock, no se va a ofrecer")}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <button onClick={() => agregarOpcion(i)} style={{
+                background: "none", border: "1px dashed var(--line-strong)",
+                padding: "6px 12px", cursor: "pointer", color: "var(--muted)",
+                fontSize: 12, display: "flex", alignItems: "center", gap: 6, marginTop: 10,
+              }}>
+                <Icon.plus size={12}/> Agregar opción
+              </button>
+
+              {g.opciones.length < 2 && (
+                <div style={{ fontSize: 11, color: "#B56B3E", marginTop: 8 }}>
+                  Un grupo con una sola opción no le da nada que elegir al cliente.
+                </div>
+              )}
+            </GrupoInsumoCard>
+          );
+        })}
+      </div>
+
+      {grupos.length === 0 && (
+        <div style={{ fontSize: 12, color: "var(--muted)", padding: "6px 0" }}>
+          Sin grupos: el producto se vende con sus insumos fijos y un solo precio.
+        </div>
+      )}
+
+      <button onClick={agregar} disabled={catalogo.length === 0} style={{
+        background: "none", border: "1px dashed var(--line-strong)",
+        padding: "8px 14px", cursor: catalogo.length === 0 ? "not-allowed" : "pointer",
+        color: "var(--muted)", opacity: catalogo.length === 0 ? 0.5 : 1,
+        fontSize: 12, display: "flex", alignItems: "center", gap: 6, marginTop: 12,
+      }}>
+        <Icon.plus size={12}/> Agregar grupo
+      </button>
+    </div>
+  );
+}
+
+/** Misma tarjeta plegable que las variantes de color. */
+function GrupoInsumoCard({ indice, grupo, abierto, conStock, sinInsumo, onAlternar, onQuitar, children }) {
+  return (
+    <div style={{ background: "var(--bg-alt)", border: "1px solid var(--line)", borderRadius: 4 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "10px 12px" }}>
+        <button type="button" onClick={onAlternar} aria-expanded={abierto}
+          title={abierto ? "Colapsar" : "Expandir"}
+          style={{
+            flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 8,
+            background: "none", border: "none", padding: 0, cursor: "pointer",
+            textAlign: "left", fontFamily: "'DM Sans', system-ui, sans-serif",
+          }}>
+          <span style={{
+            color: "var(--muted)", display: "flex", flexShrink: 0,
+            transform: abierto ? "none" : "rotate(-90deg)", transition: "transform .15s",
+          }}>
+            <Icon.chevron size={15}/>
+          </span>
+          <span style={{
+            fontSize: 11, fontWeight: 700, letterSpacing: 1,
+            textTransform: "uppercase", color: "var(--muted)", flexShrink: 0,
+          }}>
+            Grupo {indice + 1}
+          </span>
+          {grupo.nombre ? (
+            <span style={{
+              fontSize: 13, fontWeight: 600, color: "var(--text)",
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            }}>
+              · {grupo.nombre}
+            </span>
+          ) : (
+            <span style={{ fontSize: 12, color: "var(--muted)", fontStyle: "italic" }}>
+              · sin nombre
+            </span>
+          )}
+          <span style={{
+            flexShrink: 0, padding: "2px 7px", borderRadius: 2,
+            background: (conStock > 0 ? "#4a7a52" : "#c64138") + "18",
+            color: conStock > 0 ? "#4a7a52" : "#c64138",
+            fontSize: 9.5, fontWeight: 700, letterSpacing: 0.6, textTransform: "uppercase",
+          }}>
+            {conStock} de {grupo.opciones.length} en stock
+          </span>
+          {sinInsumo > 0 && (
+            <span style={{
+              flexShrink: 0, padding: "2px 7px", borderRadius: 2,
+              background: "#B56B3E18", color: "#B56B3E",
+              fontSize: 9.5, fontWeight: 700, letterSpacing: 0.6, textTransform: "uppercase",
+            }}>
+              {sinInsumo} sin insumo
+            </span>
+          )}
+        </button>
+        <button onClick={onQuitar} style={{ ...actionBtn, color: "#c64138", flexShrink: 0 }}
+          title="Eliminar grupo">
+          <Icon.trash size={14}/>
+        </button>
+      </div>
+      {abierto && (
+        <div style={{ padding: "12px 14px 14px", borderTop: "1px solid var(--line)" }}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Campo Precio: automático por fórmula, o manual con toggle ────────
 function PrecioField({ manual, onToggleManual, valorManual, onChangeManual, sugerido, precioFinal }) {
   const noCalculable = !sugerido.calculable;
@@ -1859,7 +2126,7 @@ function SpecCalculada({ label, valor, vacio }) {
 }
 
 // ─── Preview en vivo de la disponibilidad mientras se edita la receta ──
-function DisponibilidadPreview({ receta, variantes = [], filamentos, insumos = [], catalogoInsumos = [] }) {
+function DisponibilidadPreview({ receta, variantes = [], filamentos, insumos = [], gruposInsumo = [], catalogoInsumos = [] }) {
   const limpia = receta
     .filter(l => String(l.material || "").trim() && (Number(l.gramos) || 0) > 0)
     .map(l => ({ ...l, material: l.material.trim(), gramos: Number(l.gramos) }));
@@ -1882,7 +2149,8 @@ function DisponibilidadPreview({ receta, variantes = [], filamentos, insumos = [
 
   // Cada variante se evalúa por separado y alcanza con que una tenga stock.
   const disp = disponibilidadPorVariantes(
-    { receta: limpia, variantes, insumos }, filamentos, catalogoInsumos);
+    { receta: limpia, variantes, insumos, variantesInsumo: gruposInsumo },
+    filamentos, catalogoInsumos);
   const color = disp.disponible ? "#4a7a52" : "#c64138";
   const conStock = disp.variantes.filter(v => v.disponible).length;
 
@@ -1905,6 +2173,15 @@ function DisponibilidadPreview({ receta, variantes = [], filamentos, insumos = [
           </li>
         ))}
       </ul>
+
+      {/* Un grupo de insumo sin ninguna opción con stock deja al producto sin
+          poder armarse, aunque haya colores disponibles. */}
+      {(disp.gruposSinOpciones || []).length > 0 && (
+        <div style={{ marginTop: 8, color: "#c64138" }}>
+          Sin opciones con stock en: {disp.gruposSinOpciones.map(g => g.nombre || "(sin nombre)").join(", ")}.
+          El producto no se puede armar hasta reponer alguno de esos insumos.
+        </div>
+      )}
 
       {(disp.faltantesInsumos.length > 0) && (
         <ul style={{ margin: "8px 0 0", paddingLeft: 18, color: "var(--muted)" }}>
@@ -1960,6 +2237,19 @@ export function ProductForm({
   // normalizarReceta le pone id a las líneas viejas, que no lo tenían: es lo
   // que permite que una variante le asigne un color a cada una.
   const [receta, setReceta] = useState(() => normalizarReceta(product?.receta || []));
+  const [gruposInsumo, setGruposInsumo] = useState(() =>
+    (product?.variantesInsumo || []).map(g => ({
+      id: g.id || nuevoIdInsumo("g"),
+      nombre: g.nombre || "",
+      opciones: (g.opciones || []).map(o => ({
+        id: o.id || nuevoIdInsumo("o"),
+        nombre: o.nombre || "",
+        insumoId: o.insumoId || "",
+        cantidad: Math.max(1, Number(o.cantidad) || 1),
+        nombreEditado: Boolean(o.nombre),
+      })),
+    }))
+  );
   const [variantes, setVariantes] = useState(() =>
     (product?.variantes || []).map(v => ({
       id: v.id || nuevoId("v"),
@@ -2025,6 +2315,24 @@ export function ProductForm({
         recetaLimpia.map(l => [l.id, String(v.colores[l.id]).trim()])
       ),
     })), [variantes, recetaLimpia]);
+
+  // Grupos válidos: con nombre y con al menos una opción que apunte a un
+  // insumo. Los incompletos no se guardan — ofrecerían algo inexistente.
+  const gruposLimpios = useMemo(() => gruposInsumo
+    .map(g => ({
+      id: g.id,
+      nombre: (g.nombre || "").trim(),
+      opciones: g.opciones
+        .filter(o => o.insumoId)
+        .map(o => ({
+          id: o.id,
+          nombre: (o.nombre || "").trim()
+            || catalogoInsumos.find(x => x._id === o.insumoId)?.nombre || "",
+          insumoId: o.insumoId,
+          cantidad: Math.max(1, Number(o.cantidad) || 1),
+        })),
+    }))
+    .filter(g => g.nombre && g.opciones.length > 0), [gruposInsumo, catalogoInsumos]);
 
   // Material y peso salen de la receta y se recalculan en vivo mientras se edita.
   const specsCalculadas = useMemo(() => specsDesdeReceta(recetaLimpia), [recetaLimpia]);
@@ -2094,6 +2402,7 @@ export function ProductForm({
       // Enteras. Quien guarda las parte en su mitad pública (products) y su
       // mitad privada (privado/data).
       variantes: variantesLimpias,
+      variantesInsumo: gruposLimpios,
       // specs.material y specs.peso salen de la receta; el tiempo, de los dos
       // campos numéricos. El texto libre "5h 30min" ya no se guarda: se genera
       // al mostrar a partir de tiempoHoras/tiempoMinutos.
@@ -2294,9 +2603,12 @@ export function ProductForm({
           {/* Insumos opcionales (imanes, tornillos, cable...) */}
           <InsumosEditor lineas={lineasInsumo} setLineas={setLineasInsumo} catalogo={catalogoInsumos}/>
 
+          <VariantesInsumoEditor grupos={gruposInsumo} setGrupos={setGruposInsumo}
+            catalogo={catalogoInsumos} insumosFijos={insumosLimpios}/>
+
           {/* Vista previa de disponibilidad con el inventario actual */}
           <DisponibilidadPreview receta={receta} variantes={variantesLimpias} filamentos={filamentos}
-            insumos={insumosLimpios} catalogoInsumos={catalogoInsumos}/>
+            insumos={insumosLimpios} gruposInsumo={gruposLimpios} catalogoInsumos={catalogoInsumos}/>
 
           {/* ── Datos internos: nunca se muestran en el catálogo público ── */}
           <div style={{ marginTop: 24, paddingTop: 16, borderTop: "1px solid var(--line)" }}>

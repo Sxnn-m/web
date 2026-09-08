@@ -16,6 +16,7 @@ import {
 } from 'firebase/firestore';
 import { cargarPrivados, guardarPrivado, enriquecerProductos } from './productosPrivados.js';
 import { variantesPrivadas, normalizarVariantesPublicas } from './variantes.js';
+import { gruposPrivados, normalizarGruposPublicos } from './variantesInsumo.js';
 
 export const COL_PERSONALIZADOS = "personalizados";
 
@@ -42,7 +43,8 @@ export async function cargarPersonalizadosCompletos() {
  */
 export async function guardarPersonalizado(data) {
   const {
-    _id, receta, origenUrl, notas, insumos, archivos, variantes, ...publico
+    _id, receta, origenUrl, notas, insumos, archivos, variantes,
+    variantesInsumo, ...publico
   } = data;
   const privado = {
     receta: receta || [],
@@ -53,6 +55,7 @@ export async function guardarPersonalizado(data) {
     // los archivos tienen que volver a escribirse o se pierde el índice.
     archivos: archivos || [],
     variantes: variantesPrivadas(variantes || []),
+    variantesInsumo: gruposPrivados(variantesInsumo || []),
   };
   // Un personalizado no es de lectura pública, pero mantiene el mismo esquema
   // partido que products: así el plan de consumo de un pedido resuelve los
@@ -60,6 +63,7 @@ export async function guardarPersonalizado(data) {
   publico.variantes = normalizarVariantesPublicas(
     (variantes || []).map(v => ({ ...v, disponible: false }))
   );
+  publico.variantesInsumo = normalizarGruposPublicos(variantesInsumo || []);
 
   let id = _id;
   if (id) {

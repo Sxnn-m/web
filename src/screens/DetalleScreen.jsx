@@ -1,5 +1,9 @@
 import { useState } from 'react';
 import { normalizarVariantesPublicas, ordenarPorDisponibilidad } from '../lib/variantes.js';
+import {
+  normalizarGruposPublicos, seleccionInicial, precioDeSeleccion,
+  etiquetaSeleccion, claveSeleccion, opcionElegida,
+} from '../lib/variantesInsumo.js';
 import { TKButton, TKInput, TKPill, Icon, ProductCard, fmtARS, SinStockBadge, sinStock } from '../components/UI.jsx';
 import { formatTiempoProducto } from '../lib/tiempoImpresion.js';
 import { descripcionPublica } from '../lib/descripcion.js';
@@ -52,6 +56,17 @@ export function DetalleScreen({ go, addToCart, productId, detalleVariant = "A", 
   const [varianteId, setVarianteId] = useState(null);
   const variante = conStock.find(v => v.id === varianteId) || conStock[0] || null;
   const setVariante = (v) => setVarianteId(v?.id || null);
+
+  // Grupos de insumo: cada uno cambia qué lleva la pieza y cuánto sale.
+  const grupos = normalizarGruposPublicos(product.variantesInsumo);
+  const [seleccion, setSeleccion] = useState(() => seleccionInicial(grupos));
+  const elegir = (grupoId, opcionId) =>
+    setSeleccion(s => ({ ...s, [grupoId]: opcionId }));
+
+  // El precio base NO incluye ninguna opción (calcularRentabilidad solo suma
+  // los insumos fijos), así que el precio real es base + lo elegido.
+  const extra = precioDeSeleccion(grupos, seleccion);
+  const precioFinal = (Number(product.price) || 0) + extra;
 
   const related = products.filter(p => p.cat === product.cat && p.id !== product.id).slice(0, 4);
 
@@ -158,8 +173,15 @@ export function DetalleScreen({ go, addToCart, productId, detalleVariant = "A", 
               </div>
             </div>
           ) : (
-            <div style={{ fontSize: 36, color: "var(--accent)", marginBottom: 28 }}>
-              {fmtARS(product.price)}
+            <div style={{ marginBottom: 28 }}>
+              <div style={{ fontSize: 36, color: "var(--accent)" }}>
+                {fmtARS(precioFinal)}
+              </div>
+              {extra > 0 && (
+                <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>
+                  {fmtARS(product.price)} + {fmtARS(extra)} por lo que elegiste
+                </div>
+              )}
             </div>
           )}
 
@@ -172,6 +194,16 @@ export function DetalleScreen({ go, addToCart, productId, detalleVariant = "A", 
             elegida={variante}
             onElegir={setVariante}
           />
+
+          {/* Un selector por grupo de insumo, con el mismo estilo. */}
+          {grupos.map(g => (
+            <SelectorDeGrupo
+              key={g.id}
+              grupo={g}
+              elegida={opcionElegida(g, seleccion)}
+              onElegir={(o) => elegir(g.id, o.id)}
+            />
+          ))}
 
           {/* Texto personalizado */}
           <div style={{ marginBottom: 24 }}>
@@ -192,8 +224,18 @@ export function DetalleScreen({ go, addToCart, productId, detalleVariant = "A", 
               </div>
               {/* El cierre por Instagram pasó al carrito: acá se arma la
                   línea (producto + color + texto + cantidad) y listo. */}
-              <TKButton size="lg" full icon={<Icon.cart size={16}/>} onClick={() => addToCart(product, { color: varianteComoColor(variante), custom, qty })}>
-                Agregar al carrito — {fmtARS(product.price * qty)}
+              <TKButton size="lg" full icon={<Icon.cart size={16}/>} onClick={() => addToCart(product, {
+                color: varianteComoColor(variante), custom, qty,
+                // La línea del carrito congela el precio de ESTA combinación,
+                // no el del producto pelado.
+                precioUnitario: precioFinal,
+                opciones: {
+                  seleccion,
+                  etiqueta: etiquetaSeleccion(grupos, seleccion),
+                  clave: claveSeleccion(seleccion),
+                },
+              })}>
+                Agregar al carrito — {fmtARS(precioFinal * qty)}
               </TKButton>
             </div>
           )}
@@ -292,6 +334,61 @@ function SelectorDeVariante({ variantes, elegida, onElegir }) {
             >
               {v.nombre}
               {!v.disponible && (
+                <span style={{ fontSize: 10, marginLeft: 6, textDecoration: "none", display: "inline-block" }}>
+                  sin stock
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Selector de un grupo de insumo. Mismo estilo que el de color: agotadas
+ * deshabilitadas, tachadas y al final. Cada opción muestra lo que suma al
+ * precio, que es la razón de ser del grupo.
+ */
+function SelectorDeGrupo({ grupo, elegida, onElegir }) {
+  const conStock = grupo.opciones.filter(o => o.disponible);
+  if (conStock.length === 0) return null;
+  const ordenadas = [...grupo.opciones].sort(
+    (a, b) => (b.disponible === true) - (a.disponible === true));
+
+  return (
+    <div style={{ marginBottom: 24 }}>
+      <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: 0.8, textTransform: "uppercase", color: "var(--muted)", marginBottom: 6 }}>
+        {grupo.nombre} · <span style={{ color: "var(--text)" }}>{elegida?.nombre || "—"}</span>
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {ordenadas.map(o => {
+          const activa = o.id === elegida?.id;
+          return (
+            <button
+              key={o.id}
+              onClick={() => o.disponible && onElegir(o)}
+              disabled={!o.disponible}
+              title={o.disponible ? o.nombre : `${o.nombre} — sin stock`}
+              style={{
+                padding: "9px 14px", cursor: o.disponible ? "pointer" : "not-allowed",
+                background: activa ? "var(--accent)" : "var(--bg)",
+                color: activa ? "#fff" : o.disponible ? "var(--text)" : "var(--muted)",
+                border: `1px solid ${activa ? "var(--accent)" : "var(--line-strong)"}`,
+                borderRadius: 4, fontFamily: "'DM Sans', system-ui, sans-serif",
+                fontSize: 13, fontWeight: activa ? 600 : 400,
+                textDecoration: o.disponible ? "none" : "line-through",
+                opacity: o.disponible ? 1 : 0.55,
+              }}
+            >
+              {o.nombre}
+              {o.precio > 0 && (
+                <span style={{ fontSize: 11, marginLeft: 6, textDecoration: "none", display: "inline-block", opacity: 0.85 }}>
+                  +{fmtARS(o.precio)}
+                </span>
+              )}
+              {!o.disponible && (
                 <span style={{ fontSize: 10, marginLeft: 6, textDecoration: "none", display: "inline-block" }}>
                   sin stock
                 </span>
