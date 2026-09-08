@@ -395,7 +395,7 @@ function AppInterna() {
         // La key remonta la pantalla al cambiar de producto (por ejemplo desde
       // "Podría gustarte"): sin ella React reutiliza la instancia y el color,
       // la cantidad y el texto grabado quedan los del producto anterior.
-      case "detalle": return <DetalleScreen key={routeData.id} go={go} addToCart={addToCart} productId={routeData.id} products={publicProducts}/>;
+      case "detalle": return <DetalleScreen key={routeData.id} go={go} addToCart={addToCart} productId={routeData.id} products={publicProducts} categories={publicCategories}/>;
         case "auth": return <AuthScreen go={go} onLogin={setUser}/>;
         case "about": return <AboutScreen go={go} categories={publicCategories}/>;
         case "admin": return isAdmin ? <AdminScreen go={go} onProductsChange={loadProducts} onCategoriesChange={loadCategories} categories={categories} products={products}/> : <AuthScreen go={go} onLogin={setUser}/>;
@@ -413,7 +413,7 @@ function AppInterna() {
       // La key remonta la pantalla al cambiar de producto (por ejemplo desde
       // "Podría gustarte"): sin ella React reutiliza la instancia y el color,
       // la cantidad y el texto grabado quedan los del producto anterior.
-      case "detalle": return <DetalleScreen key={routeData.id} go={go} addToCart={addToCart} productId={routeData.id} products={publicProducts}/>;
+      case "detalle": return <DetalleScreen key={routeData.id} go={go} addToCart={addToCart} productId={routeData.id} products={publicProducts} categories={publicCategories}/>;
       case "auth": return <AuthScreen go={go} onLogin={setUser}/>;
       case "about": return <AboutScreen go={go} categories={publicCategories}/>;
       case "admin": return isAdmin ? <AdminScreen go={go} onProductsChange={loadProducts} onCategoriesChange={loadCategories} categories={categories} products={products}/> : <AuthScreen go={go} onLogin={setUser}/>;

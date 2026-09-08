@@ -19,8 +19,13 @@ function specsVisibles(product) {
   ].filter(([, valor]) => valor);
 }
 
-export function DetalleScreen({ go, addToCart, productId, detalleVariant = "A", products = [] }) {
+export function DetalleScreen({ go, addToCart, productId, detalleVariant = "A", products = [], categories = [] }) {
   const product = products.find(p => p.id === productId) || products[0] || {};
+  // product.cat guarda el ID de la categoría ("deco"), no su nombre. Si la
+  // categoría ya no existe se muestra el valor crudo: perder el nivel del
+  // camino sería peor que mostrarlo sin traducir.
+  const nombreCategoria =
+    categories.find(c => c.id === product.cat)?.name || product.cat || "";
   const agotado = sinStock(product);
 
   // Build gallery from images array or fallback to single img
@@ -60,6 +65,16 @@ export function DetalleScreen({ go, addToCart, productId, detalleVariant = "A", 
         {" / "}
         <span style={{ cursor: "pointer" }} onClick={() => go("catalogo")}>CATÁLOGO</span>
         {" / "}
+        {/* Categoría: filtra por ella sola, sin subcategoría. */}
+        {nombreCategoria && (
+          <>
+            <span style={{ cursor: "pointer" }}
+              onClick={() => go("catalogo", { cat: product.cat })}>
+              {nombreCategoria.toUpperCase()}
+            </span>
+            {" / "}
+          </>
+        )}
         {/* Este crumb dice la SUBcategoría, así que tiene que filtrar por ella:
             antes navegaba con { cat }, y terminabas en la categoría padre
             entera. CatalogoScreen lee "sub" con el nombre exacto, el mismo
@@ -124,8 +139,10 @@ export function DetalleScreen({ go, addToCart, productId, detalleVariant = "A", 
         {/* Info */}
         <div>
           <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 14 }}>
+            {/* El ID (TKPx) es referencia interna del backoffice: no se muestra
+                en el catálogo. */}
             <span style={{ fontSize: 11, color: "var(--muted)", letterSpacing: 1.5 }}>
-              {product.id.toUpperCase()} · {product.sub}
+              {product.sub}
             </span>
             {product.tag && <TKPill variant={product.tag === "Premium" ? "dark" : "default"}>{product.tag}</TKPill>}
           </div>

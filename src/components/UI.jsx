@@ -218,8 +218,9 @@ export function ProductCard({ product, onClick, onAdd, layout = "grid" }) {
         </div>
         <div>
           <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
+            {/* Sin el ID: es referencia interna del backoffice. */}
             <span style={{ fontSize: 11, color: "var(--muted)" }}>
-              {product.id.toUpperCase()} · {product.sub}
+              {product.sub}
             </span>
             {product.tag && <TKPill variant={product.tag === "Premium" ? "dark" : "default"}>{product.tag}</TKPill>}
           </div>
