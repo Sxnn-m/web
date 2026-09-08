@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { normalizarVariantesPublicas } from '../lib/variantes.js';
+import { normalizarVariantesPublicas, ordenarPorDisponibilidad } from '../lib/variantes.js';
 import { TKButton, TKInput, TKPill, Icon, ProductCard, fmtARS, SinStockBadge, sinStock } from '../components/UI.jsx';
 import { formatTiempoProducto } from '../lib/tiempoImpresion.js';
 import { descripcionPublica } from '../lib/descripcion.js';
@@ -239,6 +239,10 @@ function SelectorDeVariante({ variantes, elegida, onElegir }) {
   // selector con todo deshabilitado sería ruido.
   if (conStock.length === 0) return null;
 
+  // Lo que se puede comprar va primero; las agotadas quedan juntas al final,
+  // en vez de intercaladas entre las que sí están.
+  const ordenadas = ordenarPorDisponibilidad(variantes);
+
   return (
     <div style={{ marginBottom: 24 }}>
       <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: 0.8, textTransform: "uppercase", color: "var(--muted)", marginBottom: 4 }}>
@@ -250,7 +254,7 @@ function SelectorDeVariante({ variantes, elegida, onElegir }) {
         </div>
       )}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
-        {variantes.map(v => {
+        {ordenadas.map(v => {
           const activa = v.id === elegida?.id;
           return (
             <button
