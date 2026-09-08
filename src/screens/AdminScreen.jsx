@@ -1415,6 +1415,83 @@ export function RecetaEditor({ receta, setReceta, filamentos }) {
 // Una variante = un color por cada línea de receta, más el nombre que ve el
 // cliente. El vínculo con el filamento es interno: nunca sale al catálogo.
 
+/**
+ * Una variante, plegable. El encabezado es lo único que queda visible al
+ * colapsarla, así que lleva todo lo que hace falta para reconocerla sin
+ * abrirla: el número, el nombre que ve el cliente (en vivo, porque sale del
+ * mismo estado que el input) y si le falta algún color. El botón de eliminar
+ * va FUERA del botón que pliega — anidar botones no es HTML válido y además
+ * borrar sin querer al intentar plegar sería el peor error posible acá.
+ */
+function VarianteCard({ indice, variante, abierta, onAlternar, onQuitar, faltanColores, children }) {
+  return (
+    <div style={{
+      background: "var(--bg-alt)", border: "1px solid var(--line)", borderRadius: 4,
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "10px 12px" }}>
+        <button
+          type="button"
+          onClick={onAlternar}
+          aria-expanded={abierta}
+          title={abierta ? "Colapsar" : "Expandir"}
+          style={{
+            flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 8,
+            background: "none", border: "none", padding: 0, cursor: "pointer",
+            textAlign: "left", fontFamily: "'DM Sans', system-ui, sans-serif",
+          }}
+        >
+          <span style={{
+            color: "var(--muted)", display: "flex", flexShrink: 0,
+            transform: abierta ? "none" : "rotate(-90deg)",
+            transition: "transform .15s",
+          }}>
+            <Icon.chevron size={15}/>
+          </span>
+          <span style={{
+            fontSize: 11, fontWeight: 700, letterSpacing: 1,
+            textTransform: "uppercase", color: "var(--muted)", flexShrink: 0,
+          }}>
+            Variante {indice + 1}
+          </span>
+          {variante.nombre ? (
+            <span style={{
+              fontSize: 13, fontWeight: 600, color: "var(--text)",
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            }}>
+              · {variante.nombre}
+            </span>
+          ) : (
+            <span style={{ fontSize: 12, color: "var(--muted)", fontStyle: "italic" }}>
+              · sin nombre
+            </span>
+          )}
+          {faltanColores > 0 && (
+            <span style={{
+              flexShrink: 0, padding: "2px 7px", borderRadius: 2,
+              background: "#B56B3E18", color: "#B56B3E",
+              fontSize: 9.5, fontWeight: 700, letterSpacing: 0.6,
+              textTransform: "uppercase",
+            }}>
+              Falta{faltanColores > 1 ? "n" : ""} {faltanColores} color{faltanColores > 1 ? "es" : ""}
+            </span>
+          )}
+        </button>
+
+        <button onClick={onQuitar} style={{ ...actionBtn, color: "#c64138", flexShrink: 0 }}
+          title="Eliminar variante">
+          <Icon.trash size={14}/>
+        </button>
+      </div>
+
+      {abierta && (
+        <div style={{ padding: "0 14px 14px", borderTop: "1px solid var(--line)", paddingTop: 12 }}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function VariantesEditor({ receta, variantes, setVariantes, filamentos }) {
   const colores = coloresUsados(filamentos);
   const lineas = receta.filter(l => String(l.material || "").trim() && (Number(l.gramos) || 0) > 0);
@@ -1430,9 +1507,24 @@ export function VariantesEditor({ receta, variantes, setVariantes, filamentos })
     return v.nombreEditado ? nueva : { ...nueva, nombre: nombreSugerido(receta, nueva) };
   }));
 
-  const agregar = () => setVariantes(vs => [
-    ...vs, { id: nuevoId("v"), nombre: "", aclaracion: "", colores: {}, disponible: false },
-  ]);
+  // Qué tarjetas están abiertas. Es estado de UI y vive solo acá: no se guarda
+  // con la variante ni entra en lo que se persiste. Las ya cargadas arrancan
+  // colapsadas, que es el motivo del acordeón; la que se agrega se abre para
+  // poder completarla.
+  const [abiertas, setAbiertas] = useState(() => new Set());
+  const alternar = (id) => setAbiertas(previas => {
+    const nuevas = new Set(previas);
+    if (nuevas.has(id)) nuevas.delete(id); else nuevas.add(id);
+    return nuevas;
+  });
+
+  const agregar = () => {
+    const id = nuevoId("v");
+    setVariantes(vs => [
+      ...vs, { id, nombre: "", aclaracion: "", colores: {}, disponible: false },
+    ]);
+    setAbiertas(previas => new Set(previas).add(id));
+  };
 
   return (
     <div style={{ marginBottom: 16, paddingTop: 16, borderTop: "1px solid var(--line)" }}>
@@ -1450,19 +1542,17 @@ export function VariantesEditor({ receta, variantes, setVariantes, filamentos })
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           {variantes.map((v, i) => (
-            <div key={v.id} style={{
-              padding: 14, background: "var(--bg-alt)", border: "1px solid var(--line)",
-              borderRadius: 4,
-            }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: "var(--muted)" }}>
-                  Variante {i + 1}
-                </span>
-                <button onClick={() => quitar(i)} style={{ ...actionBtn, color: "#c64138" }} title="Eliminar variante">
-                  <Icon.trash size={14}/>
-                </button>
-              </div>
-
+            <VarianteCard
+              key={v.id}
+              indice={i}
+              variante={v}
+              abierta={abiertas.has(v.id)}
+              onAlternar={() => alternar(v.id)}
+              onQuitar={() => quitar(i)}
+              // Colapsada esconde los selectores de color: si le falta alguno,
+              // el encabezado tiene que decirlo o el aviso queda tapado.
+              faltanColores={lineas.filter(l => !String(v.colores?.[l.id] || "").trim()).length}
+            >
               {/* Un selector de color por línea de receta */}
               <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 12 }}>
                 {lineas.map(l => (
@@ -1500,7 +1590,7 @@ export function VariantesEditor({ receta, variantes, setVariantes, filamentos })
                   hint="Qué parte del producto varía."
                 />
               </div>
-            </div>
+            </VarianteCard>
           ))}
         </div>
       )}
