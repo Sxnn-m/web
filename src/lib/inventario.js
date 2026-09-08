@@ -24,6 +24,9 @@ import {
 import {
   insumosDeSeleccion, gruposPublicos, normalizarGruposPublicos,
 } from './variantesInsumo.js';
+import {
+  tiposDe, tipoIdEfectivo, etiquetaDeReferencia, ID_TIPO_BASE,
+} from './tiposInsumo.js';
 
 export const COL_FILAMENTOS = "filamentos";
 export const COL_PEDIDOS = "pedidos";
@@ -423,7 +426,15 @@ export function planDeInsumos(pedido, productos = [], personalizados = [], catal
     // grupo de variante de insumo. Un producto puede llevar los dos: el imán
     // siempre, y el LED según la luz que se haya pedido.
     const lineas = [
-      ...lineasDeInsumo(producto),
+      // Los fijos resuelven acá su tipo contra el catálogo: las líneas
+      // guardadas antes de los tipos no traen tipoId, y sin resolverlo ahora
+      // la agrupación por tipo del pedido no podría emparejarlas con las de
+      // variante, que sí lo traen.
+      ...lineasDeInsumo(producto).map(l => ({
+        ...l,
+        tipoId: tipoIdEfectivo(catalogoInsumos, l.insumoId, l.tipoId),
+        nombre: etiquetaDeReferencia(catalogoInsumos, l.insumoId, l.tipoId, l.nombre),
+      })),
       ...insumosDeSeleccion(
         producto.variantesInsumo || [], item.opcionesInsumo || {}, catalogoInsumos),
     ];
@@ -434,11 +445,13 @@ export function planDeInsumos(pedido, productos = [], personalizados = [], catal
         // los insumos fijos de las dos colisionaban (se usa como key de React
         // en el modal de impresión). El agrupado por insumo lo hace después
         // agruparConsumo, que suma por insumoId.
-        clave: `${indice}|${item.productoId}|${linea.opcionId || ""}|${linea.insumoId}`,
+        clave: `${indice}|${item.productoId}|${linea.opcionId || ""}|${linea.insumoId}|${linea.tipoId || ""}`,
         productoId: item.productoId,
         productoNombre: item.productoNombre,
         insumoId: linea.insumoId,
+        tipoId: linea.tipoId || "",
         nombre: linea.nombre,
+        tipoNombre: linea.tipoNombre || "",
         grupoNombre: linea.grupoNombre || "",
         opcionNombre: linea.opcionNombre || "",
         cantidadPorUnidad: linea.cantidad,
@@ -480,15 +493,14 @@ export async function marcarPedidoImpreso(
     const f = buscarFilamento(filamentos, item.material, item.color);
     return f ? { id: f._id } : null;
   };
-  const idInsumo = (item) => {
-    const i = insumos.find(x => x._id === item.insumoId);
-    return i ? { id: i._id } : null;
-  };
-
   return runTransaction(db, async (tx) => {
     // ── 1. Lecturas (todas antes de cualquier escritura) ──
     const refsFilamento = new Map();
-    const refsInsumo = new Map();
+    // Los tipos de un insumo son un ARRAY del mismo documento: se lee una vez
+    // por insumo, no una por tipo, o la segunda lectura traería el array sin
+    // el descuento de la primera.
+    const refsInsumo = new Map();      // insumoId → DocumentReference
+    const tiposLeidos = new Map();     // insumoId → array de tipos recién leído
     const stockLeido = new Map();
 
     for (const f of consumo.filamentos) {
@@ -501,12 +513,21 @@ export async function marcarPedidoImpreso(
     }
 
     for (const i of consumo.insumos) {
-      const encontrado = idInsumo(i);
-      if (!encontrado) continue;
-      const ref = doc(db, COL_INSUMOS, encontrado.id);
-      refsInsumo.set(i.insumoId, ref);
-      const snap = await tx.get(ref);
-      stockLeido.set(`i:${i.insumoId}`, snap.exists() ? Number(snap.data().cantidadDisponible) || 0 : null);
+      if (!insumos.some(x => x._id === i.insumoId)) continue;
+      if (!refsInsumo.has(i.insumoId)) {
+        const ref = doc(db, COL_INSUMOS, i.insumoId);
+        refsInsumo.set(i.insumoId, ref);
+        const snap = await tx.get(ref);
+        tiposLeidos.set(i.insumoId, snap.exists()
+          ? tiposDe({ _id: i.insumoId, ...snap.data() })
+          : null);
+      }
+      const tipos = tiposLeidos.get(i.insumoId);
+      // Exacto, sin caer al primer tipo: el tipoId ya viene resuelto desde
+      // planDeInsumos, así que si no está es porque lo borraron en el medio, y
+      // descontar de otro tipo sería vaciar el stock equivocado en silencio.
+      const tipo = tipos ? tipos.find(t => t.tipoId === i.tipoId) : null;
+      stockLeido.set(`i:${i.clave}`, tipo ? Number(tipo.cantidadDisponible) || 0 : null);
     }
 
     // ── 2. Validación contra lo recién leído ──
@@ -517,8 +538,8 @@ export async function marcarPedidoImpreso(
         return v === undefined || v === null ? null : { id: f.clave, disponible: v };
       },
       (i) => {
-        const v = stockLeido.get(`i:${i.insumoId}`);
-        return v === undefined || v === null ? null : { id: i.insumoId, disponible: v };
+        const v = stockLeido.get(`i:${i.clave}`);
+        return v === undefined || v === null ? null : { id: i.clave, disponible: v };
       }
     );
 
@@ -533,9 +554,24 @@ export async function marcarPedidoImpreso(
         updatedAt: serverTimestamp(),
       });
     }
+    // Un solo update por insumo con el array de tipos ya descontado: dos
+    // updates al mismo documento se pisarían y el segundo tipo se llevaría
+    // puesto el descuento del primero.
+    const nuevosTipos = new Map(tiposLeidos);
     for (const i of resultado.insumos) {
-      tx.update(refsInsumo.get(i.insumoId), {
-        cantidadDisponible: i.disponible - i.total,
+      const tipos = nuevosTipos.get(i.insumoId);
+      if (!tipos) continue;
+      nuevosTipos.set(i.insumoId, tipos.map(t => t.tipoId === i.tipoId
+        ? { ...t, cantidadDisponible: i.disponible - i.total }
+        : t));
+    }
+    for (const [insumoId, tipos] of nuevosTipos) {
+      if (!tipos) continue;
+      tx.update(refsInsumo.get(insumoId), {
+        tipos,
+        // El insumo que todavía estuviera plano queda migrado acá también.
+        precioUnidad: deleteField(),
+        cantidadDisponible: deleteField(),
         updatedAt: serverTimestamp(),
       });
     }
@@ -552,10 +588,13 @@ export async function marcarPedidoImpreso(
         fecha: serverTimestamp(),
       });
     }
+    // El gasto de un insumo va al historial de SU tipo:
+    // insumos/{id}/tipos/{tipoId}/gastos.
     for (const linea of planInsumos) {
       const ref = refsInsumo.get(linea.insumoId);
       if (!ref) continue;
-      tx.set(doc(collection(ref, "gastos")), {
+      const tipoId = linea.tipoId || ID_TIPO_BASE;
+      tx.set(doc(collection(ref, "tipos", tipoId, "gastos")), {
         producto: linea.productoNombre,
         cantidadConsumida: linea.unidadesConsumidas,
         numeroOrden: pedido.numeroOrden,

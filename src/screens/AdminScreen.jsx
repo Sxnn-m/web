@@ -23,6 +23,10 @@ import {
 } from '../lib/variantesInsumo.js';
 import { cargarInsumos } from '../lib/insumos.js';
 import {
+  tiposDe, buscarTipo, esMultiTipo, resolverInsumoTipo, etiquetaInsumoTipo,
+  etiquetaDeReferencia, tipoIdEfectivo, claveTipo,
+} from '../lib/tiposInsumo.js';
+import {
   cargarPersonalizadosCompletos, guardarPersonalizado, eliminarPersonalizado,
 } from '../lib/personalizados.js';
 import { InsumosTab } from './admin/InsumosTab.jsx';
@@ -1672,10 +1676,20 @@ export function VariantesInsumoEditor({ grupos, setGrupos, catalogo, insumosFijo
     opciones: g.opciones.map((o, oi) => {
       if (oi !== j) return o;
       const nueva = { ...o, ...patch };
-      // El nombre visible se autocompleta con el del insumo mientras no lo
-      // hayan escrito a mano.
-      if (patch.insumoId !== undefined && !o.nombreEditado) {
-        nueva.nombre = catalogo.find(x => x._id === patch.insumoId)?.nombre || "";
+      // Cambiar de insumo ancla el primer tipo del nuevo: el tipo anterior es
+      // de otro insumo y no significa nada acá.
+      if (patch.insumoId !== undefined) {
+        nueva.tipoId = tiposDe(catalogo.find(x => x._id === patch.insumoId))[0]?.tipoId || "";
+      }
+      // El nombre visible se autocompleta mientras no lo hayan escrito a mano.
+      // Con varios tipos el que distingue a la opción es el TIPO ("RGB"), no
+      // el insumo, que es el mismo en todas.
+      if ((patch.insumoId !== undefined || patch.tipoId !== undefined) && !o.nombreEditado) {
+        const insumo = catalogo.find(x => x._id === nueva.insumoId);
+        const tipo = insumo ? buscarTipo(insumo, nueva.tipoId) : null;
+        nueva.nombre = insumo
+          ? (esMultiTipo(insumo) ? tipo?.nombre || "" : insumo.nombre || "")
+          : "";
       }
       return nueva;
     }),
@@ -1683,13 +1697,13 @@ export function VariantesInsumoEditor({ grupos, setGrupos, catalogo, insumosFijo
   const quitarOpcion = (i, j) => setGrupos(gs => gs.map((g, gi) =>
     gi !== i ? g : { ...g, opciones: g.opciones.filter((_, oi) => oi !== j) }));
   const agregarOpcion = (i) => setGrupos(gs => gs.map((g, gi) =>
-    gi !== i ? g : { ...g, opciones: [...g.opciones, { id: nuevoIdInsumo("o"), nombre: "", insumoId: "", cantidad: 1 }] }));
+    gi !== i ? g : { ...g, opciones: [...g.opciones, { id: nuevoIdInsumo("o"), nombre: "", insumoId: "", tipoId: "", cantidad: 1 }] }));
 
   const agregar = () => {
     const id = nuevoIdInsumo("g");
     setGrupos(gs => [...gs, { id, nombre: "", opciones: [
-      { id: nuevoIdInsumo("o"), nombre: "", insumoId: "", cantidad: 1 },
-      { id: nuevoIdInsumo("o"), nombre: "", insumoId: "", cantidad: 1 },
+      { id: nuevoIdInsumo("o"), nombre: "", insumoId: "", tipoId: "", cantidad: 1 },
+      { id: nuevoIdInsumo("o"), nombre: "", insumoId: "", tipoId: "", cantidad: 1 },
     ]}]);
     setAbiertos(previos => new Set(previos).add(id));
   };
@@ -1768,9 +1782,16 @@ export function VariantesInsumoEditor({ grupos, setGrupos, catalogo, insumosFijo
                 {g.opciones.map((o, j) => {
                   const insumo = catalogo.find(x => x._id === o.insumoId);
                   const evaluada = evaluado.opciones[j];
+                  const tipos = tiposDe(insumo);
+                  const eligeTipo = tipos.length > 1;
+                  const tipoElegido = insumo ? buscarTipo(insumo, o.tipoId) : null;
                   return (
                     <div key={o.id}>
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 80px 36px", gap: 8, alignItems: "end" }}>
+                      <div style={{
+                        display: "grid",
+                        gridTemplateColumns: eligeTipo ? "1fr 1fr 1fr 80px 36px" : "1fr 1fr 80px 36px",
+                        gap: 8, alignItems: "end",
+                      }}>
                         <div>
                           {j === 0 && <div style={{ ...labelStyle, marginBottom: 4 }}>Insumo</div>}
                           <select
@@ -1781,11 +1802,30 @@ export function VariantesInsumoEditor({ grupos, setGrupos, catalogo, insumosFijo
                             <option value="">Seleccionar insumo...</option>
                             {catalogo.map(x => (
                               <option key={x._id} value={x._id}>
-                                {x.tipo ? `[${x.tipo}] ` : ""}{x.nombre} — {fmtARS(x.precioUnidad || 0)}/u
+                                {x.tipo ? `[${x.tipo}] ` : ""}{x.nombre}
+                                {esMultiTipo(x)
+                                  ? ` — ${tiposDe(x).length} tipos`
+                                  : ` — ${fmtARS(tiposDe(x)[0]?.precioUnidad || 0)}/u`}
                               </option>
                             ))}
                           </select>
                         </div>
+                        {eligeTipo && (
+                          <div>
+                            {j === 0 && <div style={{ ...labelStyle, marginBottom: 4 }}>Tipo</div>}
+                            <select
+                              value={tipoElegido?.tipoId || ""}
+                              onChange={e => upOpcion(i, j, { tipoId: e.target.value })}
+                              style={selectStyle}
+                            >
+                              {tipos.map(t => (
+                                <option key={t.tipoId} value={t.tipoId}>
+                                  {t.nombre} — {fmtARS(t.precioUnidad || 0)}/u ({t.cantidadDisponible} disp.)
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
                         <div>
                           {j === 0 && <div style={{ ...labelStyle, marginBottom: 4 }}>Nombre visible</div>}
                           <input
@@ -1814,6 +1854,7 @@ export function VariantesInsumoEditor({ grupos, setGrupos, catalogo, insumosFijo
                         color: !o.insumoId ? "#c64138" : evaluada?.disponible ? "var(--muted)" : "#B56B3E" }}>
                         {!o.insumoId ? "Elegí el insumo: sin él la opción no se puede ofrecer."
                           : `${evaluada?.enCatalogo ?? 0} u. en catálogo` +
+                            (eligeTipo && tipoElegido ? ` de "${tipoElegido.nombre}"` : "") +
                             (evaluada?.disponible ? "" : " · sin stock, no se va a ofrecer")}
                       </div>
 
@@ -2089,19 +2130,36 @@ function PrecioField({ manual, onToggleManual, valorManual, onChangeManual, suge
 // unidad del producto. El precio no se escribe a mano: sale de
 // cantidad × precioUnidad del catálogo, igual que Material y Peso.
 function InsumosEditor({ lineas, setLineas, catalogo }) {
-  const up = (i, patch) => setLineas(list => list.map((l, j) => j === i ? { ...l, ...patch } : l));
+  const up = (i, patch) => setLineas(list => list.map((l, j) => {
+    if (j !== i) return l;
+    const nueva = { ...l, ...patch };
+    // Al cambiar de insumo el tipo anterior no aplica: se ancla el primero del
+    // insumo nuevo, y si tiene varios el selector de al lado deja elegir otro.
+    if (patch.insumoId !== undefined) {
+      nueva.tipoId = tiposDe(catalogo.find(x => x._id === patch.insumoId))[0]?.tipoId || "";
+    }
+    return nueva;
+  }));
   const quitar = (i) => setLineas(list => list.filter((_, j) => j !== i));
-  const agregar = () => setLineas(list => [...list, { insumoId: "", cantidad: 1 }]);
+  const agregar = () => setLineas(list => [...list, { insumoId: "", tipoId: "", cantidad: 1 }]);
 
-  /** Precio vigente del catálogo; si el insumo ya no existe, el del snapshot. */
+  /** Precio vigente del TIPO elegido; si ya no está, el del snapshot. */
   const precioDe = (l) => {
-    const insumo = catalogo.find(i => i._id === l.insumoId);
-    return insumo ? Number(insumo.precioUnidad) || 0 : Number(l.precioUnidad) || 0;
+    const { tipo } = resolverInsumoTipo(catalogo, l.insumoId, l.tipoId);
+    return tipo ? Number(tipo.precioUnidad) || 0 : Number(l.precioUnidad) || 0;
   };
   const subtotalDe = (l) => precioDe(l) * Math.max(1, Number(l.cantidad) || 1);
 
   const total = lineas.filter(l => l.insumoId).reduce((s, l) => s + subtotalDe(l), 0);
-  const yaElegidos = new Set(lineas.map(l => l.insumoId).filter(Boolean));
+  // Se bloquea un insumo solo cuando TODOS sus tipos ya están en otra línea:
+  // llevar el led monocolor y el RGB fijos en la misma pieza es válido.
+  const usados = new Set(lineas
+    .filter(l => l.insumoId)
+    .map(l => claveTipo(l.insumoId, tipoIdEfectivo(catalogo, l.insumoId, l.tipoId))));
+  const agotado = (x, lineaActual) => tiposDe(x)
+    .every(t => claveTipo(x._id, t.tipoId) !== claveTipo(
+      lineaActual.insumoId, tipoIdEfectivo(catalogo, lineaActual.insumoId, lineaActual.tipoId))
+      && usados.has(claveTipo(x._id, t.tipoId)));
 
   return (
     <div style={{ marginBottom: 16, paddingTop: 16, borderTop: "1px solid var(--line)" }}>
@@ -2122,8 +2180,17 @@ function InsumosEditor({ lineas, setLineas, catalogo }) {
         {lineas.map((l, i) => {
           const insumo = catalogo.find(x => x._id === l.insumoId);
           const huerfano = l.insumoId && !insumo;
+          const tipos = tiposDe(insumo);
+          // Con un solo tipo se ancla solo y el selector sería una fila con una
+          // única opción: se muestra únicamente cuando hay algo que elegir.
+          const eligeTipo = tipos.length > 1;
+          const tipoElegido = insumo ? buscarTipo(insumo, l.tipoId) : null;
           return (
-            <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 90px 120px 36px", gap: 10, alignItems: "center" }}>
+            <div key={i} style={{
+              display: "grid",
+              gridTemplateColumns: eligeTipo ? "1fr 1fr 90px 120px 36px" : "1fr 90px 120px 36px",
+              gap: 10, alignItems: "center",
+            }}>
               <div>
                 {i === 0 && <div style={{ ...labelStyle, marginBottom: 4 }}>Insumo</div>}
                 <select
@@ -2133,8 +2200,12 @@ function InsumosEditor({ lineas, setLineas, catalogo }) {
                 >
                   <option value="">Seleccionar insumo...</option>
                   {catalogo.map(x => (
-                    <option key={x._id} value={x._id} disabled={yaElegidos.has(x._id) && x._id !== l.insumoId}>
-                      {x.nombre} — {fmtARS(x.precioUnidad || 0)}/u ({x.cantidadDisponible ?? 0} disp.)
+                    <option key={x._id} value={x._id} disabled={agotado(x, l)}>
+                      {x.nombre}
+                      {esMultiTipo(x)
+                        ? ` — ${tiposDe(x).length} tipos`
+                        : ` — ${fmtARS(tiposDe(x)[0]?.precioUnidad || 0)}/u ` +
+                          `(${tiposDe(x)[0]?.cantidadDisponible ?? 0} disp.)`}
                     </option>
                   ))}
                 </select>
@@ -2144,6 +2215,22 @@ function InsumosEditor({ lineas, setLineas, catalogo }) {
                   </div>
                 )}
               </div>
+              {eligeTipo && (
+                <div>
+                  {i === 0 && <div style={{ ...labelStyle, marginBottom: 4 }}>Tipo</div>}
+                  <select
+                    value={tipoElegido?.tipoId || ""}
+                    onChange={e => up(i, { tipoId: e.target.value })}
+                    style={selectStyle}
+                  >
+                    {tipos.map(t => (
+                      <option key={t.tipoId} value={t.tipoId}>
+                        {t.nombre} — {fmtARS(t.precioUnidad || 0)}/u ({t.cantidadDisponible} disp.)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div>
                 {i === 0 && <div style={{ ...labelStyle, marginBottom: 4 }}>Cantidad</div>}
                 <input
@@ -2346,6 +2433,8 @@ export function ProductForm({
         id: o.id || nuevoIdInsumo("o"),
         nombre: o.nombre || "",
         insumoId: o.insumoId || "",
+        // Vacío en las opciones anteriores a los tipos: se ancla al primero.
+        tipoId: o.tipoId || "",
         cantidad: Math.max(1, Number(o.cantidad) || 1),
         manual: o.manual === true || (o.precioManual !== null && o.precioManual !== undefined),
         precioManual: o.precioManual ?? null,
@@ -2374,6 +2463,10 @@ export function ProductForm({
       .filter(i => i && i.insumoId)
       .map(i => ({
         insumoId: i.insumoId,
+        // Las líneas guardadas antes de los tipos no lo traen: queda vacío y
+        // buscarTipo() lo ancla al primer tipo del insumo, que es el que ya
+        // estaba usando.
+        tipoId: i.tipoId || "",
         cantidad: Math.max(1, Number(i.cantidad) || 1),
         nombre: i.nombre || "",
         precioUnidad: Number(i.precioUnidad) || 0,
@@ -2430,8 +2523,11 @@ export function ProductForm({
         .map(o => ({
           id: o.id,
           nombre: (o.nombre || "").trim()
-            || catalogoInsumos.find(x => x._id === o.insumoId)?.nombre || "",
+            || etiquetaDeReferencia(catalogoInsumos, o.insumoId, o.tipoId) || "",
           insumoId: o.insumoId,
+          // El tipo se resuelve al guardar: una opción vieja sin tipoId queda
+          // anclada explícitamente al tipo que ya estaba usando.
+          tipoId: tipoIdEfectivo(catalogoInsumos, o.insumoId, o.tipoId),
           cantidad: Math.max(1, Number(o.cantidad) || 1),
           // Se guarda aunque hoy no aplique (más de un grupo): sacar el grupo
           // extra tiene que devolverlo a la vida sin recargarlo a mano.
@@ -2450,12 +2546,14 @@ export function ProductForm({
   const insumosLimpios = useMemo(() => lineasInsumo
     .filter(l => l.insumoId)
     .map(l => {
-      const insumo = catalogoInsumos.find(x => x._id === l.insumoId);
+      const { insumo, tipo } = resolverInsumoTipo(catalogoInsumos, l.insumoId, l.tipoId);
       const cantidad = Math.max(1, Number(l.cantidad) || 1);
-      const precioUnidad = insumo ? Number(insumo.precioUnidad) || 0 : Number(l.precioUnidad) || 0;
+      const precioUnidad = tipo ? Number(tipo.precioUnidad) || 0 : Number(l.precioUnidad) || 0;
       return {
         insumoId: l.insumoId,
-        nombre: insumo?.nombre || l.nombre || "",
+        // Igual que en las opciones: el tipo queda anclado explícitamente.
+        tipoId: tipo?.tipoId || l.tipoId || "",
+        nombre: insumo ? etiquetaInsumoTipo(insumo, tipo) : l.nombre || "",
         cantidad,
         precioUnidad,
         subtotal: cantidad * precioUnidad,

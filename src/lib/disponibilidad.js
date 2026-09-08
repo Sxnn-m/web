@@ -2,6 +2,8 @@
 // Sin dependencias de React ni de Firestore: se puede testear/reusar
 // desde el backoffice, desde un script o desde una Cloud Function.
 
+import { tiposDe, resolverInsumoTipo, etiquetaInsumoTipo } from './tiposInsumo.js';
+
 /** Gramos por debajo de los cuales un filamento se marca para restock. */
 export const UMBRAL_RESTOCK = 350;
 
@@ -31,9 +33,16 @@ export const claveFilamento = (material, color) =>
 export const necesitaRestock = (filamento) =>
   Number(filamento?.cantidadGramos || 0) < UMBRAL_RESTOCK;
 
-/** ¿Este insumo del catálogo necesita restock? */
-export const necesitaRestockInsumo = (insumo) =>
-  Number(insumo?.cantidadDisponible || 0) <= UMBRAL_RESTOCK_INSUMO;
+/**
+ * ¿Este TIPO de insumo necesita restock? El stock vive en el tipo, no en el
+ * insumo: un "Led" puede tener el monocolor lleno y el RGB en cero.
+ */
+export const necesitaRestockInsumo = (tipo) =>
+  Number(tipo?.cantidadDisponible || 0) <= UMBRAL_RESTOCK_INSUMO;
+
+/** ¿Alguno de los tipos de este insumo está en alerta? */
+export const insumoEnAlerta = (insumo) =>
+  tiposDe(insumo).some(necesitaRestockInsumo);
 
 /** Busca un insumo del catálogo por su id de documento. */
 export function buscarInsumo(insumos = [], insumoId) {
@@ -43,15 +52,20 @@ export function buscarInsumo(insumos = [], insumoId) {
 
 /**
  * Normaliza las líneas de insumo de un producto.
- * Shape actual: { insumoId, nombre, cantidad, precioUnidad, subtotal }.
+ * Shape actual: { insumoId, tipoId, nombre, cantidad, precioUnidad, subtotal }.
  * Se ignoran las líneas sin insumoId (formato viejo de texto libre): no se
  * pueden chequear contra el catálogo.
+ *
+ * Las líneas guardadas antes de los tipos no traen tipoId: se dejan vacías y
+ * buscarTipo() las ancla al primer tipo del insumo, que es el que heredó el
+ * precio y el stock que esa línea ya estaba usando.
  */
 export function lineasDeInsumo(producto) {
   return (producto?.insumos || [])
     .filter(l => l && l.insumoId)
     .map(l => ({
       insumoId: l.insumoId,
+      tipoId: l.tipoId || "",
       nombre: l.nombre || "",
       cantidad: Math.max(1, Number(l.cantidad) || 1),
     }));
@@ -121,6 +135,31 @@ export function specsDesdeReceta(receta = []) {
   };
 }
 
+/**
+ * Evalúa una línea de insumo fijo contra el catálogo: cuánto pide, cuánto hay
+ * del TIPO al que apunta, y si alcanza.
+ *
+ * El stock que cuenta es el del tipo anclado, no el del insumo: tener 40 leds
+ * monocolor no habilita un producto que lleva el RGB.
+ */
+export function detalleDeLineaInsumo(linea, insumos = []) {
+  const { insumo, tipo } = resolverInsumoTipo(insumos, linea.insumoId, linea.tipoId);
+  const enCatalogo = tipo ? Number(tipo.cantidadDisponible) || 0 : 0;
+  const requerido = linea.cantidad * FACTOR_DISPONIBILIDAD_INSUMO;
+  return {
+    insumoId: linea.insumoId,
+    tipoId: tipo?.tipoId || linea.tipoId || "",
+    // El nombre del catálogo manda; el del producto es un snapshot viejo.
+    nombre: insumo ? etiquetaInsumoTipo(insumo, tipo) : linea.nombre,
+    tipoNombre: tipo?.nombre || "",
+    cantidadPorUnidad: linea.cantidad,
+    requerido,
+    enCatalogo,
+    existe: Boolean(insumo && tipo),
+    ok: Boolean(insumo && tipo) && enCatalogo >= requerido,
+  };
+}
+
 /** Busca en el inventario el filamento que coincide en material Y color. */
 export function buscarFilamento(filamentos = [], material, color) {
   const clave = claveFilamento(material, color);
@@ -167,21 +206,7 @@ export function calcularDisponibilidadPorReceta(producto, filamentos = [], insum
 
   // Los insumos se evalúan siempre, incluso sin receta, para que el detalle
   // del backoffice muestre el panorama completo.
-  const detalleInsumos = lineasDeInsumo(producto).map(linea => {
-    const insumo = buscarInsumo(insumos, linea.insumoId);
-    const enCatalogo = insumo ? Number(insumo.cantidadDisponible) || 0 : 0;
-    const requerido = linea.cantidad * FACTOR_DISPONIBILIDAD_INSUMO;
-    return {
-      insumoId: linea.insumoId,
-      // El nombre del catálogo manda; el del producto es un snapshot viejo.
-      nombre: insumo?.nombre || linea.nombre,
-      cantidadPorUnidad: linea.cantidad,
-      requerido,
-      enCatalogo,
-      existe: Boolean(insumo),
-      ok: Boolean(insumo) && enCatalogo >= requerido,
-    };
-  });
+  const detalleInsumos = lineasDeInsumo(producto).map(l => detalleDeLineaInsumo(l, insumos));
   const faltantesInsumos = detalleInsumos.filter(d => !d.ok);
 
   // Sin receta cargada no hay forma de evaluar el consumo: el producto no

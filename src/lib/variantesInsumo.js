@@ -6,19 +6,20 @@
 // Misma partición en dos documentos que las variantes de color:
 //
 //   products/{id}              variantesInsumo: [{id, nombre, opciones:
-//                                [{id, nombre, precio, disponible}]}]
+//                                [{id, nombre, precio, precioManual, disponible}]}]
 //   products/{id}/privado/data variantesInsumo: [{id, opciones:
-//                                [{id, insumoId, cantidad}]}]
+//                                [{id, insumoId, tipoId, cantidad}]}]
 //
 // El precio SÍ es público: sin él el navegador no puede mostrar cuánto sale
-// cada opción. Lo que no sale nunca es a qué insumo apunta, cuántas unidades
-// consume ni cuántas quedan en el catálogo.
+// cada opción. Lo que no sale nunca es a qué insumo ni a qué tipo apunta,
+// cuántas unidades consume ni cuántas quedan en el catálogo.
 //
 // El precio base del producto NO incluye ninguna opción: calcularRentabilidad
 // suma producto.insumos (los FIJOS), y las variantes viven en otro campo. Por
 // eso el precio público es base + selección, sin restar nada.
 
 import { FACTOR_DISPONIBILIDAD_INSUMO } from './disponibilidad.js';
+import { resolverInsumoTipo, etiquetaInsumoTipo } from './tiposInsumo.js';
 
 /** Id corto y estable para un grupo o una opción. */
 export function nuevoIdInsumo(prefijo = "g") {
@@ -39,6 +40,9 @@ export function normalizarGruposPrivados(grupos = []) {
         .map(o => ({
           id: String(o.id),
           insumoId: texto(o.insumoId),
+          // Qué TIPO de ese insumo lleva la opción. Vacío en las opciones
+          // guardadas antes de los tipos: buscarTipo() cae al primero.
+          tipoId: texto(o.tipoId),
           cantidad: cantidadDe(o.cantidad),
         })),
     }));
@@ -78,6 +82,7 @@ export function unirGruposInsumo(publicos = [], privados = []) {
       opciones: g.opciones.map(o => ({
         ...o,
         insumoId: privadas.get(o.id)?.insumoId || "",
+        tipoId: privadas.get(o.id)?.tipoId || "",
         cantidad: privadas.get(o.id)?.cantidad ?? 1,
         // El precio manual es un precio: vive en la mitad pública.
         manual: o.precioManual !== null,
@@ -90,17 +95,21 @@ export function unirGruposInsumo(publicos = [], privados = []) {
 export const insumoDeOpcion = (catalogo = [], opcion) =>
   catalogo.find(i => i._id === opcion?.insumoId) || null;
 
+/** El insumo Y el tipo concreto al que apunta una opción. */
+export const referenciaDeOpcion = (catalogo = [], opcion) =>
+  resolverInsumoTipo(catalogo, opcion?.insumoId, opcion?.tipoId);
+
 /**
- * Lo que suma esa opción al precio: cantidad × precio unitario del catálogo.
- * Si el insumo ya no está, cae al snapshot guardado en la opción — igual que
- * hacen los insumos fijos.
+ * Lo que suma esa opción al precio: cantidad × precio unitario del TIPO
+ * elegido. Si el insumo ya no está, cae al snapshot guardado en la opción —
+ * igual que hacen los insumos fijos.
  */
 export function precioDeOpcion(opcion, catalogo = []) {
-  const insumo = insumoDeOpcion(catalogo, opcion);
-  const unitario = insumo
-    ? Number(insumo.precioUnidad) || 0
+  const { tipo } = referenciaDeOpcion(catalogo, opcion);
+  const unitario = tipo
+    ? Number(tipo.precioUnidad) || 0
     : Number(opcion?.precio) || 0;
-  return insumo ? unitario * cantidadDe(opcion?.cantidad) : unitario;
+  return tipo ? unitario * cantidadDe(opcion?.cantidad) : unitario;
 }
 
 /**
@@ -111,18 +120,24 @@ export function precioDeOpcion(opcion, catalogo = []) {
  */
 export function disponibilidadDeGrupo(grupo, catalogo = []) {
   const opciones = (grupo?.opciones || []).map(o => {
-    const insumo = insumoDeOpcion(catalogo, o);
-    const enCatalogo = insumo ? Number(insumo.cantidadDisponible) || 0 : 0;
+    const { insumo, tipo } = referenciaDeOpcion(catalogo, o);
+    // El stock que cuenta es el del TIPO: tener leds monocolor de sobra no
+    // habilita la opción RGB.
+    const enCatalogo = tipo ? Number(tipo.cantidadDisponible) || 0 : 0;
     const requerido = cantidadDe(o.cantidad) * FACTOR_DISPONIBILIDAD_INSUMO;
     return {
       ...o,
       // El nombre del catálogo manda; el de la opción es lo que ve el cliente.
-      insumoNombre: insumo?.nombre || "",
+      insumoNombre: insumo ? etiquetaInsumoTipo(insumo, tipo) : "",
+      tipoNombre: tipo?.nombre || "",
+      // El tipo REAL al que quedó anclada: con una opción vieja sin tipoId es
+      // el primero del insumo, y es el que hay que descontar.
+      tipoId: tipo?.tipoId || o.tipoId || "",
       precio: precioDeOpcion(o, catalogo),
       requerido,
       enCatalogo,
-      existe: Boolean(insumo),
-      disponible: Boolean(insumo) && enCatalogo >= requerido,
+      existe: Boolean(insumo && tipo),
+      disponible: Boolean(insumo && tipo) && enCatalogo >= requerido,
     };
   });
   return {
@@ -281,7 +296,9 @@ export function insumosDeSeleccion(grupos = [], seleccion = {}, catalogo = []) {
     if (!pedida || !pedida.insumoId) continue;
     salida.push({
       insumoId: pedida.insumoId,
+      tipoId: pedida.tipoId || "",
       nombre: pedida.insumoNombre || pedida.nombre || "",
+      tipoNombre: pedida.tipoNombre || "",
       cantidad: cantidadDe(pedida.cantidad),
       grupoId: grupo.id,
       grupoNombre: grupo.nombre || "",
@@ -293,20 +310,34 @@ export function insumosDeSeleccion(grupos = [], seleccion = {}, catalogo = []) {
 }
 
 /**
- * Insumos cargados en DOS lados a la vez: como insumo fijo del producto y
- * dentro de alguna opción de variante. Es un error de carga —el costo se
- * contaría dos veces— y el formulario lo avisa nombrando el insumo.
+ * El MISMO TIPO cargado en dos lados a la vez: como insumo fijo del producto y
+ * dentro de alguna opción de variante. Se cobra y se descuenta dos veces
+ * —sumadas, no por separado, ver agruparConsumo()—, así que no está prohibido,
+ * pero casi siempre es un error de carga y el formulario lo avisa.
+ *
+ * Se compara por insumo + tipo: usar el Led monocolor como fijo y ofrecer el
+ * RGB como opción es una combinación válida y no se marca.
  */
 export function insumosDuplicados(insumosFijos = [], grupos = [], catalogo = []) {
+  const claveDe = (insumoId, tipoId) => {
+    const { tipo } = resolverInsumoTipo(catalogo, insumoId, tipoId);
+    return `${insumoId}|${tipo?.tipoId || tipoId || ""}`;
+  };
   const fijos = new Set(
-    (insumosFijos || []).map(l => l?.insumoId).filter(Boolean)
+    (insumosFijos || [])
+      .filter(l => l?.insumoId)
+      .map(l => claveDe(l.insumoId, l.tipoId))
   );
   const repetidos = new Map();
   for (const g of grupos || []) {
     for (const o of g?.opciones || []) {
-      if (!o?.insumoId || !fijos.has(o.insumoId)) continue;
-      const insumo = catalogo.find(i => i._id === o.insumoId);
-      repetidos.set(o.insumoId, insumo?.nombre || o.nombre || o.insumoId);
+      if (!o?.insumoId) continue;
+      const clave = claveDe(o.insumoId, o.tipoId);
+      if (!fijos.has(clave)) continue;
+      const { insumo, tipo } = resolverInsumoTipo(catalogo, o.insumoId, o.tipoId);
+      repetidos.set(clave, insumo
+        ? etiquetaInsumoTipo(insumo, tipo)
+        : o.nombre || o.insumoId);
     }
   }
   return [...repetidos.values()];
