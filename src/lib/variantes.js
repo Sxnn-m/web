@@ -242,6 +242,47 @@ export function calcularDisponibilidad(producto, filamentos = [], insumos = []) 
 export const esDisponible = (producto, filamentos, insumos) =>
   calcularDisponibilidad(producto, filamentos, insumos).disponible;
 
+/**
+ * Todas las combinaciones material+color que consume el producto, mirando
+ * TODAS sus variantes, para el detalle de inventario del backoffice.
+ *
+ * Se agrupa por material+color+gramos, no solo por material+color: dos
+ * variantes pueden apuntar al mismo rollo con consumos distintos (una pieza
+ * bicolor Negro/Blanco gasta 100 g de PLA Negro, y la Negro/Negro gasta 140 g
+ * del mismo rollo). Fusionarlas mostraría un requerimiento que no es el de
+ * ninguna de las dos. Cuando el consumo coincide —el caso habitual— la fila
+ * es una sola y lista las variantes que la comparten.
+ *
+ * @returns {Array<{material, color, gramosPorUnidad, requerido, enInventario,
+ *                  existe, ok, variantes: string[]}>}
+ */
+export function filasDeInventario(producto, filamentos = []) {
+  const receta = producto?.receta || [];
+  const variantes = Array.isArray(producto?.variantes) ? producto.variantes : [];
+  const filas = new Map();
+
+  for (const variante of variantes) {
+    const { detalle } = disponibilidadDeVariante(receta, variante, filamentos);
+    const etiqueta = variante.nombre || "(sin nombre)";
+    for (const d of detalle) {
+      const clave = `${claveFilamento(d.material, d.color)}|${d.gramosPorUnidad}`;
+      const previa = filas.get(clave);
+      if (previa) {
+        if (!previa.variantes.includes(etiqueta)) previa.variantes.push(etiqueta);
+      } else {
+        filas.set(clave, { ...d, variantes: [etiqueta] });
+      }
+    }
+  }
+
+  // Los faltantes arriba: son los que hay que reponer.
+  return [...filas.values()].sort((a, b) =>
+    (a.ok - b.ok) ||
+    a.material.localeCompare(b.material, "es") ||
+    a.color.localeCompare(b.color, "es")
+  );
+}
+
 /** La parte pública derivada, lista para escribir en products/{id}. */
 export function variantesPublicas(producto, filamentos = [], insumos = []) {
   return disponibilidadPorVariantes(producto, filamentos, insumos).variantes

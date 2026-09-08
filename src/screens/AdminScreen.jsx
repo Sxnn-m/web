@@ -15,7 +15,7 @@ import {
 import {
   calcularDisponibilidad, disponibilidadPorVariantes, normalizarReceta,
   nombreSugerido, nuevoId, filamentosDeVariantes, variantesPublicas,
-  variantesPrivadas,
+  variantesPrivadas, filasDeInventario,
 } from '../lib/variantes.js';
 import { cargarInsumos } from '../lib/insumos.js';
 import {
@@ -759,7 +759,8 @@ function DashboardTab({ products, users, categories, onCategoriesChange, onProdu
 }
 
 // ─── Products Table ─────────────────────────────────────
-function ProductsTab({
+// Exportado para poder montarlo aislado en las pruebas de navegador.
+export function ProductsTab({
   products, costs = DEFAULT_COSTS, filamentos = [], insumos = [], categories = [], pendientesDeMigrar = 0,
   onEdit, onDelete, onNew, onToggleVisible, onRecalcular, onMigrarPrivados,
   onMigrarVariantes, pendientesDeVariantes = 0,
@@ -984,7 +985,7 @@ function ProductsTab({
                   </div>
                 </div>
 
-                {abierto && <DisponibilidadDetalle disp={disp} producto={p}/>}
+                {abierto && <DisponibilidadDetalle disp={disp} producto={p} filamentos={filamentos}/>}
               </div>
             );
           })}
@@ -1117,7 +1118,7 @@ function PersonalizadosTab({
                   </div>
                 </div>
 
-                {abierto && <DisponibilidadDetalle disp={disp} producto={p}/>}
+                {abierto && <DisponibilidadDetalle disp={disp} producto={p} filamentos={filamentos}/>}
               </div>
             );
           })}
@@ -1218,7 +1219,9 @@ function ModalRenumeracion({ plan, onClose, onConfirm }) {
 }
 
 // ─── Detalle expandible de disponibilidad (solo backoffice) ───────────
-function DisponibilidadDetalle({ disp, producto }) {
+// Material | Color | Variante(s) | Por unidad | Necesario | En inventario | Estado
+const COL_INVENTARIO = "1.2fr 1fr 1.4fr 90px 110px 110px 80px";
+function DisponibilidadDetalle({ disp, producto, filamentos = [] }) {
   if (disp.sinReceta) {
     return (
       <div style={{ padding: "12px 16px 16px 34px", background: "var(--bg-alt)", fontSize: 12, color: "#c64138", lineHeight: 1.6 }}>
@@ -1231,26 +1234,51 @@ function DisponibilidadDetalle({ disp, producto }) {
       </div>
     );
   }
+  // TODAS las combinaciones de TODAS las variantes, no solo las de la que se
+  // está ofreciendo: si no, una variante sin stock queda invisible acá.
+  const filasInventario = filasDeInventario(producto, filamentos);
+  const faltantesTodos = filasInventario.filter(d => !d.ok);
+
   return (
     <div style={{ padding: "12px 16px 18px 34px", background: "var(--bg-alt)" }}>
       <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 1.2, color: "var(--muted)", fontWeight: 700, marginBottom: 8 }}>
-        Receta vs. inventario — se exige {FACTOR_DISPONIBILIDAD}× el consumo de una unidad
+        Receta vs. inventario — se exige {FACTOR_DISPONIBILIDAD}× el consumo de una unidad,
+        para cada variante
       </div>
+      {/* Estado de cada variante, antes del detalle: la tabla de abajo está
+          unificada por rollo, así que sola no responde "¿esta variante se
+          puede imprimir?". */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+        {(disp.variantes || []).map(v => (
+          <span key={v.id} style={{
+            padding: "3px 9px", borderRadius: 2, fontSize: 11, fontWeight: 600,
+            background: (v.disponible ? "#4a7a52" : "#c64138") + "18",
+            color: v.disponible ? "#4a7a52" : "#c64138",
+          }}>
+            {v.nombre || "(sin nombre)"} — {v.disponible ? "con stock"
+              : v.motivo === "sin-color" ? `falta el color de ${v.materialesSinColor.join(", ")}`
+              : v.motivo === "sin-insumos" ? "faltan insumos"
+              : "sin stock"}
+          </span>
+        ))}
+      </div>
+
       <div style={{
-        display: "grid", gridTemplateColumns: "1.4fr 1fr 110px 120px 120px 90px",
+        display: "grid", gridTemplateColumns: COL_INVENTARIO,
         gap: 10, padding: "8px 0", fontSize: 10, textTransform: "uppercase",
         letterSpacing: 1.2, color: "var(--muted)", fontWeight: 700,
       }}>
-        <div>Material</div><div>Color</div><div>Por unidad</div><div>Necesario (×{FACTOR_DISPONIBILIDAD})</div><div>En inventario</div><div>Estado</div>
+        <div>Material</div><div>Color</div><div>Variante(s)</div><div>Por unidad</div><div>Necesario (×{FACTOR_DISPONIBILIDAD})</div><div>En inventario</div><div>Estado</div>
       </div>
-      {disp.detalle.map((d, i) => (
+      {filasInventario.map((d, i) => (
         <div key={i} style={{
-          display: "grid", gridTemplateColumns: "1.4fr 1fr 110px 120px 120px 90px",
+          display: "grid", gridTemplateColumns: COL_INVENTARIO,
           gap: 10, padding: "8px 0", fontSize: 12, borderTop: "1px solid var(--line)",
           alignItems: "center",
         }}>
           <div style={{ fontWeight: 600 }}>{d.material}</div>
           <div>{d.color}</div>
+          <div style={{ fontSize: 11, color: "var(--muted)" }}>{d.variantes.join(", ")}</div>
           <div>{d.gramosPorUnidad} g</div>
           <div style={{ fontWeight: 600 }}>{d.requerido} g</div>
           <div style={{ color: d.ok ? "var(--text)" : "#c64138", fontWeight: d.ok ? 400 : 700 }}>
@@ -1259,9 +1287,9 @@ function DisponibilidadDetalle({ disp, producto }) {
           <div style={{ color: d.ok ? "#4a7a52" : "#c64138", fontWeight: 700 }}>{d.ok ? "OK" : "Falta"}</div>
         </div>
       ))}
-      {disp.faltantes.length > 0 && (
+      {faltantesTodos.length > 0 && (
         <ul style={{ margin: "12px 0 0", paddingLeft: 18, fontSize: 12, color: "#c64138", lineHeight: 1.7 }}>
-          {disp.faltantes.map((f, i) => <li key={i}>{motivoFaltante(f)}</li>)}
+          {faltantesTodos.map((f, i) => <li key={i}>{motivoFaltante(f)}</li>)}
         </ul>
       )}
 
@@ -2266,15 +2294,6 @@ export function ProductForm({
           {/* Insumos opcionales (imanes, tornillos, cable...) */}
           <InsumosEditor lineas={lineasInsumo} setLineas={setLineasInsumo} catalogo={catalogoInsumos}/>
 
-          {/* Respaldo de los .stl/.3mf. Se sube y se borra en el acto contra
-              Storage, sin esperar al "Guardar" del formulario. */}
-          <ArchivosDiseno
-            productId={product?._id || null}
-            archivos={archivos}
-            onChange={setArchivos}
-            coleccion={modo === "personalizado" ? "personalizados" : "products"}
-          />
-
           {/* Vista previa de disponibilidad con el inventario actual */}
           <DisponibilidadPreview receta={receta} variantes={variantesLimpias} filamentos={filamentos}
             insumos={insumosLimpios} catalogoInsumos={catalogoInsumos}/>
@@ -2294,7 +2313,7 @@ export function ProductForm({
                 hint="Thingiverse, Printables, Cults3D, etc. Se muestra como link en la tabla de Productos."
               />
             </div>
-            <div>
+            <div style={{ marginBottom: 16 }}>
               <div style={{ ...labelStyle, marginBottom: 6 }}>Notas internas</div>
               <textarea
                 value={form.notas}
@@ -2310,6 +2329,16 @@ export function ProductForm({
                 }}
               />
             </div>
+
+            {/* Respaldo de los .stl/.3mf: también es dato interno, va con el
+                resto. Se sube y se borra en el acto contra Storage, sin
+                esperar al "Guardar" del formulario. */}
+            <ArchivosDiseno
+              productId={product?._id || null}
+              archivos={archivos}
+              onChange={setArchivos}
+              coleccion={modo === "personalizado" ? "personalizados" : "products"}
+            />
           </div>
 
           <div style={{ display: "flex", gap: 12, marginTop: 24 }}>
