@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { COLORS_FILAMENT } from '../data.js';
+import { normalizarVariantesPublicas } from '../lib/variantes.js';
 import { TKButton, TKInput, TKPill, Icon, ProductCard, fmtARS, SinStockBadge, sinStock } from '../components/UI.jsx';
 import { formatTiempoProducto } from '../lib/tiempoImpresion.js';
 import { descripcionPublica } from '../lib/descripcion.js';
@@ -35,10 +35,18 @@ export function DetalleScreen({ go, addToCart, productId, detalleVariant = "A", 
   const [imgElegida, setImgElegida] = useState(null);
   const activeImg = gallery.includes(imgElegida) ? imgElegida : (gallery[0] || "");
   const setActiveImg = setImgElegida;
-  const [color, setColor] = useState(COLORS_FILAMENT[2]);
   const [qty, setQty] = useState(1);
   const [custom, setCustom] = useState("");
   const [tab, setTab] = useState("desc");
+
+  // Las variantes vienen del doc público del producto: nombre, aclaración y
+  // si hay stock. Los colores de filamento que hay detrás nunca llegan acá.
+  const variantes = normalizarVariantesPublicas(product.variantes);
+  const conStock = variantes.filter(v => v.disponible);
+  // Arranca en la primera con stock: nunca en una agotada.
+  const [varianteId, setVarianteId] = useState(null);
+  const variante = conStock.find(v => v.id === varianteId) || conStock[0] || null;
+  const setVariante = (v) => setVarianteId(v?.id || null);
 
   const related = products.filter(p => p.cat === product.cat && p.id !== product.id).slice(0, 4);
 
@@ -131,23 +139,12 @@ export function DetalleScreen({ go, addToCart, productId, detalleVariant = "A", 
             {product.desc}
           </p>
 
-          {/* Color */}
-          <div style={{ marginBottom: 24 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: 0.8, textTransform: "uppercase", color: "var(--muted)", marginBottom: 10 }}>
-              Color · <span style={{ color: "var(--text)" }}>{color.name}</span>
-            </div>
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              {COLORS_FILAMENT.map(c => (
-                <button key={c.id} onClick={() => setColor(c)} title={c.name}
-                  style={{
-                    width: 36, height: 36, borderRadius: "50%", cursor: "pointer",
-                    background: c.hex, border: `2px solid ${color.id === c.id ? "var(--accent)" : "var(--line)"}`,
-                    outline: color.id === c.id ? "2px solid var(--bg)" : "none",
-                    outlineOffset: -4,
-                  }}/>
-              ))}
-            </div>
-          </div>
+          {/* Color: las variantes reales del producto, no una paleta fija */}
+          <SelectorDeVariante
+            variantes={variantes}
+            elegida={variante}
+            onElegir={setVariante}
+          />
 
           {/* Texto personalizado */}
           <div style={{ marginBottom: 24 }}>
@@ -168,7 +165,7 @@ export function DetalleScreen({ go, addToCart, productId, detalleVariant = "A", 
               </div>
               {/* El cierre por Instagram pasó al carrito: acá se arma la
                   línea (producto + color + texto + cantidad) y listo. */}
-              <TKButton size="lg" full icon={<Icon.cart size={16}/>} onClick={() => addToCart(product, { color, custom, qty })}>
+              <TKButton size="lg" full icon={<Icon.cart size={16}/>} onClick={() => addToCart(product, { color: varianteComoColor(variante), custom, qty })}>
                 Agregar al carrito — {fmtARS(product.price * qty)}
               </TKButton>
             </div>
@@ -214,10 +211,75 @@ export function DetalleScreen({ go, addToCart, productId, detalleVariant = "A", 
   );
 }
 
+/**
+ * El carrito guarda el color como {id, name}: la variante entra con esa misma
+ * forma, así la línea del pedido y el resumen de Instagram no cambian.
+ */
+const varianteComoColor = (v) => v ? { id: v.id, name: v.nombre } : null;
+
+/**
+ * Selector de variante. Lista TODAS las variantes del producto, con las
+ * agotadas deshabilitadas y tachadas: el cliente ve la oferta completa de la
+ * pieza y entiende que ese color existe pero hoy no está. Nunca se expone
+ * qué filamento hay detrás ni cuánto queda.
+ */
+function SelectorDeVariante({ variantes, elegida, onElegir }) {
+  const conStock = variantes.filter(v => v.disponible);
+  // Sin ninguna disponible el producto ya muestra "Sin stock" arriba: un
+  // selector con todo deshabilitado sería ruido.
+  if (conStock.length === 0) return null;
+
+  return (
+    <div style={{ marginBottom: 24 }}>
+      <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: 0.8, textTransform: "uppercase", color: "var(--muted)", marginBottom: 4 }}>
+        Color · <span style={{ color: "var(--text)" }}>{elegida?.nombre || "—"}</span>
+      </div>
+      {elegida?.aclaracion && (
+        <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 8 }}>
+          {elegida.aclaracion}
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
+        {variantes.map(v => {
+          const activa = v.id === elegida?.id;
+          return (
+            <button
+              key={v.id}
+              onClick={() => v.disponible && onElegir(v)}
+              disabled={!v.disponible}
+              title={v.disponible ? v.aclaracion || v.nombre : `${v.nombre} — sin stock`}
+              style={{
+                padding: "9px 14px", cursor: v.disponible ? "pointer" : "not-allowed",
+                background: activa ? "var(--accent)" : "var(--bg)",
+                color: activa ? "#fff" : v.disponible ? "var(--text)" : "var(--muted)",
+                border: `1px solid ${activa ? "var(--accent)" : "var(--line-strong)"}`,
+                borderRadius: 4, fontFamily: "'DM Sans', system-ui, sans-serif",
+                fontSize: 13, fontWeight: activa ? 600 : 400,
+                textDecoration: v.disponible ? "none" : "line-through",
+                opacity: v.disponible ? 1 : 0.55,
+              }}
+            >
+              {v.nombre}
+              {!v.disponible && (
+                <span style={{ fontSize: 10, marginLeft: 6, textDecoration: "none", display: "inline-block" }}>
+                  sin stock
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function DetalleB({ go, addToCart, productId, products = [] }) {
   const product = products.find(p => p.id === productId) || products[0] || {};
   const agotado = sinStock(product);
-  const [color, setColor] = useState(COLORS_FILAMENT[2]);
+  const variantes = normalizarVariantesPublicas(product.variantes);
+  const conStock = variantes.filter(v => v.disponible);
+  const [varianteId, setVarianteId] = useState(null);
+  const variante = conStock.find(v => v.id === varianteId) || conStock[0] || null;
   const [qty, setQty] = useState(1);
 
   return (
@@ -264,15 +326,11 @@ function DetalleB({ go, addToCart, productId, products = [] }) {
           </div>
         </div>
         <div>
-          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: 0.8, textTransform: "uppercase", color: "var(--muted)", marginBottom: 10 }}>
-            Color — {color.name}
-          </div>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 28 }}>
-            {COLORS_FILAMENT.map(c => (
-              <button key={c.id} onClick={() => setColor(c)}
-                style={{ width: 40, height: 40, borderRadius: "50%", cursor: "pointer", background: c.hex, border: `2px solid ${color.id === c.id ? "var(--accent)" : "var(--line)"}`, outline: color.id === c.id ? "2px solid var(--bg)" : "none", outlineOffset: -4 }}/>
-            ))}
-          </div>
+          <SelectorDeVariante
+            variantes={variantes}
+            elegida={variante}
+            onElegir={v => setVarianteId(v?.id || null)}
+          />
           {agotado ? (
             <TKButton size="lg" full disabled>Sin stock</TKButton>
           ) : (
@@ -282,7 +340,7 @@ function DetalleB({ go, addToCart, productId, products = [] }) {
                 <span style={{ padding: "0 18px", fontSize: 16 }}>{qty}</span>
                 <button onClick={() => setQty(qty + 1)} style={qtyBtn}><Icon.plus/></button>
               </div>
-              <TKButton size="lg" full icon={<Icon.cart size={16}/>} onClick={() => addToCart(product, { color, qty })}>
+              <TKButton size="lg" full icon={<Icon.cart size={16}/>} onClick={() => addToCart(product, { color: varianteComoColor(variante), qty })}>
                 Agregar al carrito
               </TKButton>
             </div>

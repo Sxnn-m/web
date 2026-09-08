@@ -60,15 +60,10 @@ export const PRODUCTS = [
   { id: "p16", cat: "lamparas", sub: "Apliques", name: "Aplique de Pared", price: 8400, img: IMG.lampAplique, tag: null, desc: "Aplique con patrón geométrico. Proyección de luz indirecta.", specs: { material: "PLA", tiempo: "9h", peso: "200g" } },
 ];
 
-export const COLORS_FILAMENT = [
-  { id: "blanco", name: "Blanco", hex: "#F5F5F2" },
-  { id: "negro", name: "Negro", hex: "#1a1a1a" },
-  { id: "azul", name: "Azul Pizarra", hex: "#345C83" },
-  { id: "beige", name: "Beige", hex: "#D9CBB8" },
-  { id: "rojo", name: "Rojo", hex: "#c64138" },
-  { id: "verde", name: "Verde", hex: "#4a7a52" },
-  { id: "amarillo", name: "Amarillo", hex: "#e8c547" },
-];
+// COLORS_FILAMENT: era una paleta fija de 7 colores que el detalle público
+// mostraba en TODOS los productos, sin relación con el inventario ni con lo
+// que la pieza podía imprimirse. La reemplazaron las variantes de color, que
+// salen del producto y están atadas a stock real (src/lib/variantes.js).
 
 // Datos de contacto — TKPrints atiende consultas y pedidos por Instagram
 export const CONTACT = {
