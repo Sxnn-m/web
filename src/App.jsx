@@ -404,8 +404,11 @@ function AppInterna() {
     }
     switch(route) {
       case "home": return <HomeScreen go={go} addToCart={addToCart} products={publicProducts} categories={publicCategories}/>;
+      // La key remonta el catálogo cuando cambia el filtro pedido: initialCat e
+      // initialSub solo se leen al montar, así que sin ella navegar de una
+      // categoría a otra (o desde el breadcrumb del detalle) no cambiaba nada.
       case "catalogo":
-      case "categoria": return <CatalogoScreen go={go} addToCart={addToCart} initialCat={routeData.cat} products={publicProducts} categories={publicCategories}/>;
+      case "categoria": return <CatalogoScreen key={`${routeData.cat || "all"}-${routeData.sub || ""}`} go={go} addToCart={addToCart} initialCat={routeData.cat} initialSub={routeData.sub} products={publicProducts} categories={publicCategories}/>;
       case "buscador": return <CatalogoScreen go={go} addToCart={addToCart} products={publicProducts} categories={publicCategories}/>;
       // La key remonta la pantalla al cambiar de producto (por ejemplo desde
       // "Podría gustarte"): sin ella React reutiliza la instancia y el color,

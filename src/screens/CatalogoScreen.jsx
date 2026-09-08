@@ -2,9 +2,12 @@ import { useState, useMemo } from 'react';
 import { CATEGORIES as FALLBACK_CATEGORIES } from '../data.js';
 import { TKInput, Icon, ProductCard, fmtARS } from '../components/UI.jsx';
 
-export function CatalogoScreen({ go, addToCart, initialCat, catalogoLayout = "grid", products = [], categories = FALLBACK_CATEGORIES }) {
+export function CatalogoScreen({ go, addToCart, initialCat, initialSub, catalogoLayout = "grid", products = [], categories = FALLBACK_CATEGORIES }) {
   const [cat, setCat] = useState(initialCat || "all");
-  const [sub, setSub] = useState(null);
+  // initialSub llega desde el breadcrumb del detalle, que enlaza a UNA
+  // subcategoría. Es el nombre exacto, el mismo string que guarda product.sub
+  // y que listan los chips de acá.
+  const [sub, setSub] = useState(initialSub || null);
   const [sort, setSort] = useState("relevance");
   const [query, setQuery] = useState("");
   const [layout, setLayout] = useState(catalogoLayout);
@@ -62,7 +65,8 @@ export function CatalogoScreen({ go, addToCart, initialCat, catalogoLayout = "gr
       {currentCat && (
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 24 }}>
           <button onClick={() => setSub(null)} style={subChipStyle(!sub)}>Todas</button>
-          {currentCat.subs.map(s => (
+          {/* subs?: una categoría guardada sin el campo rompía la pantalla. */}
+          {currentCat.subs?.map(s => (
             <button key={s} onClick={() => setSub(s)} style={subChipStyle(sub === s)}>{s}</button>
           ))}
         </div>
