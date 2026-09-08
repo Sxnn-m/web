@@ -60,8 +60,19 @@ export function DetalleScreen({ go, addToCart, productId, detalleVariant = "A", 
         {" / "}
         <span style={{ cursor: "pointer" }} onClick={() => go("catalogo")}>CATÁLOGO</span>
         {" / "}
-        <span style={{ cursor: "pointer" }} onClick={() => go("catalogo", { cat: product.cat })}>{product.sub.toUpperCase()}</span>
-        {" / "}
+        {/* Este crumb dice la SUBcategoría, así que tiene que filtrar por ella:
+            antes navegaba con { cat }, y terminabas en la categoría padre
+            entera. CatalogoScreen lee "sub" con el nombre exacto, el mismo
+            valor que muestra el rótulo. */}
+        {product.sub && (
+          <>
+            <span style={{ cursor: "pointer" }}
+              onClick={() => go("catalogo", { cat: product.cat, sub: product.sub })}>
+              {product.sub.toUpperCase()}
+            </span>
+            {" / "}
+          </>
+        )}
         <span style={{ color: "var(--text)" }}>{product.name.toUpperCase()}</span>
       </div>
 
@@ -135,9 +146,8 @@ export function DetalleScreen({ go, addToCart, productId, detalleVariant = "A", 
             </div>
           )}
 
-          <p style={{ fontSize: 15, color: "var(--muted)", lineHeight: 1.6, marginBottom: 28 }}>
-            {product.desc}
-          </p>
+          {/* La descripción va en la pestaña "Descripción" de más abajo, con el
+              mensaje de producción. Acá estaba repetida. */}
 
           {/* Color: las variantes reales del producto, no una paleta fija */}
           <SelectorDeVariante
