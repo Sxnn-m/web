@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { normalizarVariantesPublicas, ordenarPorDisponibilidad } from '../lib/variantes.js';
 import {
-  normalizarGruposPublicos, seleccionInicial, precioDeSeleccion,
-  etiquetaSeleccion, claveSeleccion, opcionElegida,
+  normalizarGruposPublicos, seleccionInicial, precioDeCombinacion,
+  etiquetaSeleccion, claveSeleccion, opcionElegida, permiteManual,
 } from '../lib/variantesInsumo.js';
 import { TKButton, TKInput, TKPill, Icon, ProductCard, fmtARS, SinStockBadge, sinStock } from '../components/UI.jsx';
 import { formatTiempoProducto } from '../lib/tiempoImpresion.js';
@@ -63,10 +63,15 @@ export function DetalleScreen({ go, addToCart, productId, detalleVariant = "A", 
   const elegir = (grupoId, opcionId) =>
     setSeleccion(s => ({ ...s, [grupoId]: opcionId }));
 
-  // El precio base NO incluye ninguna opción (calcularRentabilidad solo suma
-  // los insumos fijos), así que el precio real es base + lo elegido.
-  const extra = precioDeSeleccion(grupos, seleccion);
-  const precioFinal = (Number(product.price) || 0) + extra;
+  // Una sola regla, en la lib: con un grupo y precio manual manda ese precio;
+  // si no, base + el sumando de cada grupo.
+  const base = Number(product.price) || 0;
+  const precioFinal = precioDeCombinacion(base, grupos, seleccion);
+  const extra = precioFinal - base;
+  // Con precio manual el desglose "base + extra" no describe nada: el precio
+  // no se armó sumando, se fijó a mano.
+  const esManual = permiteManual(grupos)
+    && opcionElegida(grupos[0], seleccion)?.precioManual != null;
 
   const related = products.filter(p => p.cat === product.cat && p.id !== product.id).slice(0, 4);
 
@@ -177,9 +182,9 @@ export function DetalleScreen({ go, addToCart, productId, detalleVariant = "A", 
               <div style={{ fontSize: 36, color: "var(--accent)" }}>
                 {fmtARS(precioFinal)}
               </div>
-              {extra > 0 && (
+              {extra > 0 && !esManual && (
                 <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>
-                  {fmtARS(product.price)} + {fmtARS(extra)} por lo que elegiste
+                  {fmtARS(base)} + {fmtARS(extra)} por lo que elegiste
                 </div>
               )}
             </div>
@@ -202,6 +207,7 @@ export function DetalleScreen({ go, addToCart, productId, detalleVariant = "A", 
               grupo={g}
               elegida={opcionElegida(g, seleccion)}
               onElegir={(o) => elegir(g.id, o.id)}
+              manualVigente={permiteManual(grupos)}
             />
           ))}
 
@@ -351,7 +357,7 @@ function SelectorDeVariante({ variantes, elegida, onElegir }) {
  * deshabilitadas, tachadas y al final. Cada opción muestra lo que suma al
  * precio, que es la razón de ser del grupo.
  */
-function SelectorDeGrupo({ grupo, elegida, onElegir }) {
+function SelectorDeGrupo({ grupo, elegida, onElegir, manualVigente }) {
   const conStock = grupo.opciones.filter(o => o.disponible);
   if (conStock.length === 0) return null;
   const ordenadas = [...grupo.opciones].sort(
@@ -383,11 +389,17 @@ function SelectorDeGrupo({ grupo, elegida, onElegir }) {
               }}
             >
               {o.nombre}
-              {o.precio > 0 && (
+              {/* Con precio manual la opción vale ESE total, no un extra:
+                  mostrarlo con "+" diría otra cosa. */}
+              {manualVigente && o.precioManual !== null ? (
+                <span style={{ fontSize: 11, marginLeft: 6, textDecoration: "none", display: "inline-block", opacity: 0.85 }}>
+                  {fmtARS(o.precioManual)}
+                </span>
+              ) : o.precio > 0 ? (
                 <span style={{ fontSize: 11, marginLeft: 6, textDecoration: "none", display: "inline-block", opacity: 0.85 }}>
                   +{fmtARS(o.precio)}
                 </span>
-              )}
+              ) : null}
               {!o.disponible && (
                 <span style={{ fontSize: 10, marginLeft: 6, textDecoration: "none", display: "inline-block" }}>
                   sin stock
