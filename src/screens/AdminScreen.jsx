@@ -1255,7 +1255,7 @@ function DisponibilidadDetalle({ disp, producto, filamentos = [] }) {
             background: (v.disponible ? "#4a7a52" : "#c64138") + "18",
             color: v.disponible ? "#4a7a52" : "#c64138",
           }}>
-            {v.nombre || "(sin nombre)"} — {v.disponible ? "con stock"
+            {v.nombre || "(sin nombre)"} — {v.disponible ? "en stock"
               : v.motivo === "sin-color" ? `falta el color de ${v.materialesSinColor.join(", ")}`
               : v.motivo === "sin-insumos" ? "faltan insumos"
               : "sin stock"}
@@ -1890,7 +1890,7 @@ function DisponibilidadPreview({ receta, variantes = [], filamentos, insumos = [
     <div style={{ padding: "12px 14px", background: color + "12", borderLeft: `3px solid ${color}`, fontSize: 12, lineHeight: 1.6 }}>
       <strong style={{ color }}>
         {disp.disponible
-          ? `Disponible: ${conStock} de ${disp.variantes.length} variante(s) con stock`
+          ? `Disponible: ${conStock} de ${disp.variantes.length} variante(s) en stock`
           : "No disponible: ninguna variante tiene stock"}
       </strong>
 
@@ -1898,7 +1898,7 @@ function DisponibilidadPreview({ receta, variantes = [], filamentos, insumos = [
         {disp.variantes.map(v => (
           <li key={v.id} style={{ color: v.disponible ? "#4a7a52" : "var(--muted)" }}>
             <strong>{v.nombre || "(sin nombre)"}</strong>
-            {v.disponible ? " — con stock" : v.motivo === "sin-color"
+            {v.disponible ? " — en stock" : v.motivo === "sin-color"
               ? ` — falta elegir el color de ${v.materialesSinColor.join(", ")}`
               : v.motivo === "sin-insumos" ? " — faltan insumos"
               : ` — ${v.faltantes.map(motivoFaltante).join("; ")}`}

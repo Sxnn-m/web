@@ -332,6 +332,18 @@ export function filamentosDeVariantes(receta = [], variantes = []) {
   return salida;
 }
 
+/**
+ * Ordena las variantes para mostrárselas al cliente: primero las que se
+ * pueden imprimir hoy, después las agotadas.
+ *
+ * El orden DENTRO de cada grupo se conserva (sort es estable desde ES2019),
+ * así que las disponibles siguen apareciendo en el orden en que se cargaron.
+ * No muta el array recibido.
+ */
+export function ordenarPorDisponibilidad(variantes = []) {
+  return [...variantes].sort((a, b) => (b.disponible === true) - (a.disponible === true));
+}
+
 /** ¿Ya tiene variantes cargadas? */
 export const tieneVariantes = (producto) =>
   Array.isArray(producto?.variantes) && producto.variantes.length > 0;
