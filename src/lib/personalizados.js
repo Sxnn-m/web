@@ -15,6 +15,7 @@ import {
   collection, getDocs, addDoc, updateDoc, deleteDoc, doc, serverTimestamp,
 } from 'firebase/firestore';
 import { cargarPrivados, guardarPrivado, enriquecerProductos } from './productosPrivados.js';
+import { variantesPrivadas, normalizarVariantesPublicas } from './variantes.js';
 
 export const COL_PERSONALIZADOS = "personalizados";
 
@@ -40,7 +41,9 @@ export async function cargarPersonalizadosCompletos() {
  * subcolección privada, no al documento principal.
  */
 export async function guardarPersonalizado(data) {
-  const { _id, receta, origenUrl, notas, insumos, archivos, ...publico } = data;
+  const {
+    _id, receta, origenUrl, notas, insumos, archivos, variantes, ...publico
+  } = data;
   const privado = {
     receta: receta || [],
     origenUrl: origenUrl || "",
@@ -49,7 +52,14 @@ export async function guardarPersonalizado(data) {
     // Igual que en products: guardarPrivado reemplaza el doc entero, así que
     // los archivos tienen que volver a escribirse o se pierde el índice.
     archivos: archivos || [],
+    variantes: variantesPrivadas(variantes || []),
   };
+  // Un personalizado no es de lectura pública, pero mantiene el mismo esquema
+  // partido que products: así el plan de consumo de un pedido resuelve los
+  // colores igual para los dos.
+  publico.variantes = normalizarVariantesPublicas(
+    (variantes || []).map(v => ({ ...v, disponible: false }))
+  );
 
   let id = _id;
   if (id) {

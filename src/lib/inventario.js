@@ -8,8 +8,7 @@ import {
   runTransaction, serverTimestamp, deleteField,
 } from 'firebase/firestore';
 import {
-  calcularDisponibilidad, buscarFilamento, specsDesdeReceta, lineasDeInsumo,
-  claveFilamento,
+  buscarFilamento, specsDesdeReceta, lineasDeInsumo, claveFilamento,
 } from './disponibilidad.js';
 import { COL_INSUMOS } from './insumos.js';
 import {
@@ -17,6 +16,11 @@ import {
 } from './consumoPedido.js';
 import { tiempoDeProducto, specsDeTiempo } from './tiempoImpresion.js';
 import { calcularPrecioSugerido } from './costos.js';
+import { guardarPrivado } from './productosPrivados.js';
+import {
+  calcularDisponibilidad, consumoDeVariante, variantesPublicas,
+  normalizarVariantesPublicas, migrarAVariante,
+} from './variantes.js';
 
 export const COL_FILAMENTOS = "filamentos";
 export const COL_PEDIDOS = "pedidos";
@@ -97,6 +101,68 @@ export async function asegurarFilamentosDeReceta(receta = [], filamentos = []) {
   return { creados };
 }
 
+/**
+ * Migración a variantes: por cada producto que todavía tenga los colores
+ * fijos en la receta, arma UNA variante con esos mismos colores.
+ *
+ * Es la traducción exacta del modelo viejo: el producto queda ofreciendo lo
+ * que ya ofrecía, ni más ni menos. No inventa combinaciones ni pisa nada
+ * cargado a mano.
+ *
+ * @param {boolean} soloSimular  true = no escribe, solo devuelve el detalle.
+ *   El botón lo usa para mostrar qué va a pasar ANTES de tocar datos reales.
+ * @returns {{migrados, revisados, saltados: Array<{nombre, motivo}>,
+ *            detalle: Array<{nombre, variante, colores}>}}
+ */
+export async function migrarProductosAVariantes(productos = [], soloSimular = true) {
+  const detalle = [];
+  const saltados = [];
+
+  for (const p of productos) {
+    if (!p?._id) continue;
+    const plan = migrarAVariante(p);
+    if (!plan) {
+      const motivo = (p.variantes || []).length > 0
+        ? "ya tiene variantes"
+        : (p.receta || []).length === 0
+          ? "sin receta"
+          : "la receta no tiene colores cargados";
+      saltados.push({ nombre: p.name || p._id, motivo });
+      continue;
+    }
+
+    detalle.push({
+      nombre: p.name || p._id,
+      variante: plan.variantePublica.nombre,
+      colores: Object.values(plan.variantePrivada.colores),
+    });
+
+    if (soloSimular) continue;
+
+    // Las dos mitades. El privado se reescribe entero (guardarPrivado no hace
+    // merge), así que se le pasa todo lo que ya tenía.
+    await guardarPrivado(p._id, {
+      receta: plan.receta,
+      origenUrl: p.origenUrl || "",
+      notas: p.notas || "",
+      insumos: p.insumos || [],
+      archivos: p.archivos || [],
+      variantes: [plan.variantePrivada],
+    });
+    await updateDoc(doc(db, COL_PRODUCTS, p._id), {
+      variantes: [plan.variantePublica],
+    });
+  }
+
+  return {
+    migrados: soloSimular ? 0 : detalle.length,
+    aMigrar: detalle.length,
+    revisados: productos.length,
+    saltados,
+    detalle,
+  };
+}
+
 // Los historiales (gastos y restocks) viven en src/lib/historial.js,
 // parametrizados por colección: los comparten filamentos e insumos.
 
@@ -131,6 +197,7 @@ export async function recalcularDisponibilidad(productos = [], filamentos = [], 
   let disponibilidadActualizada = 0;
   let specsActualizadas = 0;
   let preciosActualizados = 0;
+  let variantesActualizadas = 0;
   let tiemposMigrados = 0;
   const tiemposIlegibles = [];   // productos cuyo texto viejo no se pudo parsear
 
@@ -142,6 +209,14 @@ export async function recalcularDisponibilidad(productos = [], filamentos = [], 
     const patch = {};
 
     if (p.disponible !== disponible) patch.disponible = disponible;
+
+    // La mitad pública de las variantes: nombre, aclaración y si hay stock.
+    // Nunca los colores — eso se queda en el subdocumento privado.
+    const publicas = variantesPublicas(p, filamentos, insumos);
+    if (JSON.stringify(normalizarVariantesPublicas(p.variantes)) !== JSON.stringify(publicas)) {
+      patch.variantes = publicas;
+    }
+
     // Notación de punto: actualiza solo estas claves del mapa specs.
     if ((p.specs?.material || "") !== specs.material) patch["specs.material"] = specs.material;
     if ((p.specs?.peso || "") !== specs.peso) patch["specs.peso"] = specs.peso;
@@ -180,11 +255,12 @@ export async function recalcularDisponibilidad(productos = [], filamentos = [], 
     if ("disponible" in patch) disponibilidadActualizada++;
     if ("specs.material" in patch || "specs.peso" in patch) specsActualizadas++;
     if ("price" in patch) preciosActualizados++;
+    if ("variantes" in patch) variantesActualizadas++;
   }
 
   return {
     actualizados, disponibilidadActualizada, specsActualizadas,
-    preciosActualizados, tiemposMigrados, tiemposIlegibles,
+    preciosActualizados, variantesActualizadas, tiemposMigrados, tiemposIlegibles,
     total: productos.length,
   };
 }
@@ -295,19 +371,26 @@ export function planDeConsumo(pedido, productos = [], personalizados = []) {
   const plan = [];
   for (const item of pedido.items || []) {
     const producto = buscarProductoDeLinea(item, productos, personalizados);
-    const receta = producto?.receta || [];
-    for (const linea of receta) {
-      const gramos = Number(linea.gramos) || 0;
-      if (gramos <= 0) continue;
+    // El color sale de la variante que se pidió, no de la receta: la receta
+    // solo dice material y gramos. Sin variante en la línea del pedido no hay
+    // forma de saber qué rollo se usó, y descontar uno cualquiera sería
+    // descontar el equivocado en silencio.
+    const variante = (producto?.variantes || []).find(v => v.id === item.varianteId) || null;
+    for (const linea of consumoDeVariante(producto?.receta || [], variante)) {
       plan.push({
-        clave: `${item.productoId}|${linea.material}|${linea.color}`,
+        clave: `${item.productoId}|${item.varianteId || ""}|${linea.material}|${linea.color}`,
         productoId: item.productoId,
         productoNombre: item.productoNombre,
+        varianteId: item.varianteId || null,
+        varianteNombre: item.varianteNombre || "",
         material: linea.material,
         color: linea.color,
-        gramosPorUnidad: gramos,
+        // Sin variante resuelta la línea queda sin color: se marca para que
+        // el modal lo muestre como faltante en vez de descontar a ciegas.
+        sinVariante: linea.incompleta,
+        gramosPorUnidad: linea.gramos,
         cantidad: Number(item.cantidad) || 0,
-        cantidadConsumida: gramos * (Number(item.cantidad) || 0),
+        cantidadConsumida: linea.gramos * (Number(item.cantidad) || 0),
       });
     }
   }

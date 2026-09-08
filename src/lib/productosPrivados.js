@@ -15,6 +15,7 @@ import {
   deleteField, serverTimestamp,
 } from 'firebase/firestore';
 import { normalizarArchivos } from './archivosDiseno.js';
+import { normalizarReceta, normalizarVariantesPrivadas, unirVariantes } from './variantes.js';
 
 /** Id fijo del único documento de la subcolección privada. */
 export const DOC_PRIVADO = "data";
@@ -25,15 +26,19 @@ export const CAMPOS_PRIVADOS = ["receta", "origenUrl", "notas", "insumos"];
 // "archivos" (los .stl/.3mf de respaldo) también vive acá y nunca estuvo en
 // el doc público, así que no entra en CAMPOS_PRIVADOS: no hay nada que migrar.
 
-export const privadoVacio = () => ({ receta: [], origenUrl: "", notas: "", insumos: [], archivos: [] });
+export const privadoVacio = () =>
+  ({ receta: [], origenUrl: "", notas: "", insumos: [], archivos: [], variantes: [] });
 
 /** Normaliza lo que venga de Firestore a la forma esperada por la UI. */
 const normalizar = (data = {}) => ({
-  receta: Array.isArray(data.receta) ? data.receta : [],
+  receta: normalizarReceta(data.receta),
   origenUrl: data.origenUrl || "",
   notas: data.notas || "",
   insumos: Array.isArray(data.insumos) ? data.insumos : [],
   archivos: normalizarArchivos(data.archivos),
+  // Solo la asignación de colores. El nombre visible y la aclaración van en
+  // el doc público, que es el único que lee el catálogo.
+  variantes: normalizarVariantesPrivadas(data.variantes),
 });
 
 export const COL_PRODUCTS = "products";
@@ -80,15 +85,17 @@ export async function cargarPrivados(productos = [], coleccion = COL_PRODUCTS) {
 
 /** Escribe (reemplazando) los datos privados de un producto. */
 export async function guardarPrivado(
-  productId, { receta = [], origenUrl = "", notas = "", insumos = [], archivos = [] },
+  productId,
+  { receta = [], origenUrl = "", notas = "", insumos = [], archivos = [], variantes = [] },
   coleccion = COL_PRODUCTS
 ) {
   await setDoc(doc(db, coleccion, productId, "privado", DOC_PRIVADO), {
-    receta,
+    receta: normalizarReceta(receta),
     origenUrl,
     notas,
     insumos,
     archivos: normalizarArchivos(archivos),
+    variantes: normalizarVariantesPrivadas(variantes),
     updatedAt: serverTimestamp(),
   });
 }
@@ -99,7 +106,16 @@ export async function guardarPrivado(
  * esta lista enriquecida, nunca sobre el doc público pelado.
  */
 export function enriquecerProductos(productos = [], privados = {}) {
-  return productos.map(p => ({ ...p, ...privadoVacio(), ...(privados[p._id] || {}) }));
+  return productos.map(p => {
+    const privado = privados[p._id] || {};
+    return {
+      ...p, ...privadoVacio(), ...privado,
+      // Las dos mitades de cada variante se UNEN, no se pisan: el nombre
+      // visible y la aclaración están en el doc público y los colores en el
+      // privado. Un spread a secas dejaría las variantes sin nombre.
+      variantes: unirVariantes(p.variantes, privado.variantes),
+    };
+  });
 }
 
 /**

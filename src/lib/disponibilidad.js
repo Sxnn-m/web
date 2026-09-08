@@ -153,7 +153,16 @@ export function buscarFilamento(filamentos = [], material, color) {
  *   faltantesInsumos: Array<object>
  * }}
  */
-export function calcularDisponibilidad(producto, filamentos = [], insumos = []) {
+/**
+ * Cálculo por receta con color fijo: el modelo viejo, anterior a las
+ * variantes. La disponibilidad que usa la app vive ahora en
+ * variantes.js/calcularDisponibilidad — esta queda para poder comparar los
+ * dos modelos durante la migración.
+ *
+ * Está acá y no en variantes.js para no armar un ciclo de imports: variantes
+ * depende de este módulo, no al revés.
+ */
+export function calcularDisponibilidadPorReceta(producto, filamentos = [], insumos = []) {
   const receta = agruparReceta(producto?.receta || []);
 
   // Los insumos se evalúan siempre, incluso sin receta, para que el detalle
@@ -213,9 +222,6 @@ export function calcularDisponibilidad(producto, filamentos = [], insumos = []) 
   };
 }
 
-/** Atajo booleano, útil para mapear listas de productos. */
-export const esDisponible = (producto, filamentos, insumos) =>
-  calcularDisponibilidad(producto, filamentos, insumos).disponible;
 
 /** Texto corto explicando por qué un filamento de la receta no alcanza. */
 export function motivoFaltante(item) {

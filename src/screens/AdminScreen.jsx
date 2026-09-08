@@ -9,9 +9,14 @@ import { PRODUCTS as SEED_PRODUCTS, CATEGORIES } from '../data.js';
 import { InventarioTab } from './admin/InventarioTab.jsx';
 import { PedidosTab } from './admin/PedidosTab.jsx';
 import {
-  calcularDisponibilidad, motivoFaltante, motivoFaltanteInsumo,
+  motivoFaltante, motivoFaltanteInsumo,
   FACTOR_DISPONIBILIDAD, specsDesdeReceta, buscarFilamento, necesitaRestock,
 } from '../lib/disponibilidad.js';
+import {
+  calcularDisponibilidad, disponibilidadPorVariantes, normalizarReceta,
+  nombreSugerido, nuevoId, filamentosDeVariantes, variantesPublicas,
+  variantesPrivadas,
+} from '../lib/variantes.js';
 import { cargarInsumos } from '../lib/insumos.js';
 import {
   cargarPersonalizadosCompletos, guardarPersonalizado, eliminarPersonalizado,
@@ -26,7 +31,7 @@ import { ArchivosDiseno } from './admin/ArchivosDiseno.jsx';
 import { normalizarArchivos } from '../lib/archivosDiseno.js';
 import { CAT_PERSONALIZADOS } from '../lib/filtros.js';
 import {
-  cargarFilamentos, cargarPedidos, recalcularDisponibilidad,
+  cargarFilamentos, cargarPedidos, recalcularDisponibilidad, migrarProductosAVariantes,
   asegurarFilamentosDeReceta,
 } from '../lib/inventario.js';
 import { materialesUsados, coloresUsados, resolverValor } from '../lib/opcionesFilamento.js';
@@ -128,7 +133,11 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
   // ─── Personalizados: alta/edición/borrado ───────────────────
   const handleSavePersonalizado = async (data) => {
     try {
-      const { creados } = await asegurarFilamentosDeReceta(data.receta || [], filamentos);
+      // Igual que en el catálogo: los colores salen de las variantes. Un
+      // personalizado normalmente tiene una sola, la que se acordó con el
+      // cliente, pero pasa por el mismo camino.
+      const { creados } = await asegurarFilamentosDeReceta(
+        filamentosDeVariantes(data.receta, data.variantes), filamentos);
       if (creados.length > 0) await loadFilamentos();
       await guardarPersonalizado(data);
       setMsg(
@@ -228,7 +237,7 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
     const { prodsFull, films, insus } = await recargarTodo();
     const {
       disponibilidadActualizada, specsActualizadas, preciosActualizados,
-      tiemposMigrados, tiemposIlegibles,
+      variantesActualizadas, tiemposMigrados, tiemposIlegibles,
     } = await sincronizarDisponibilidad(prodsFull, films, insus, costsFrescos);
     const sinReceta = prodsFull.filter(p => (p.receta || []).length === 0).length;
     const manuales = prodsFull.filter(p => p.precioManual === true).length;
@@ -236,6 +245,7 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
       `✓ Recalculado sobre ${prodsFull.length} productos: ` +
       `${disponibilidadActualizada} con disponibilidad actualizada, ` +
       `${specsActualizadas} con material/peso actualizados, ` +
+      `${variantesActualizadas} con variantes actualizadas, ` +
       `${preciosActualizados} con precio actualizado ` +
       `(margen ×${margenDeCostos(costsFrescos)}), ` +
       `${tiemposMigrados} con tiempo de impresión migrado.` +
@@ -243,6 +253,50 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
       (sinReceta > 0 ? ` ${sinReceta} sin receta quedaron NO disponibles.` : "")
     );
     setTiemposIlegibles(tiemposIlegibles || []);
+  };
+
+  /**
+   * Migración a variantes. Primero SIMULA y muestra exactamente qué se va a
+   * crear; recién si se confirma escribe. Nunca corre sola: los datos reales
+   * no se tocan sin que alguien lea el plan.
+   */
+  const handleMigrarVariantes = async () => {
+    setMsg("Revisando qué productos hay que migrar...");
+    const { prodsFull } = await recargarTodo();
+    const previa = await migrarProductosAVariantes(prodsFull, true);
+
+    if (previa.aMigrar === 0) {
+      setMsg(
+        `No hay nada que migrar sobre ${previa.revisados} producto(s).` +
+        (previa.saltados.length > 0
+          ? ` Saltados: ${previa.saltados.slice(0, 5).map(x => `${x.nombre} (${x.motivo})`).join("; ")}` +
+            `${previa.saltados.length > 5 ? ` y ${previa.saltados.length - 5} más.` : "."}`
+          : "")
+      );
+      return;
+    }
+
+    const lista = previa.detalle.slice(0, 12)
+      .map(d => `· ${d.nombre} → "${d.variante}"`).join("\n");
+    const ok = confirm(
+      `Se va a crear UNA variante en ${previa.aMigrar} producto(s), con los colores ` +
+      `que cada receta ya tenía:\n\n${lista}` +
+      `${previa.detalle.length > 12 ? `\n· y ${previa.detalle.length - 12} más...` : ""}` +
+      `\n\nLos ${previa.saltados.length} restantes no se tocan. ¿Seguimos?`
+    );
+    if (!ok) { setMsg("Migración cancelada. No se escribió nada."); return; }
+
+    setMsg("Migrando...");
+    try {
+      const r = await migrarProductosAVariantes(prodsFull, false);
+      // El barrido recalcula la disponibilidad de las variantes recién creadas.
+      const { prodsFull: frescos, films, insus } = await recargarTodo();
+      await sincronizarDisponibilidad(frescos, films, insus);
+      onProductsChange?.();
+      setMsg(`✓ ${r.migrados} producto(s) migrados a variantes. Revisá los nombres visibles.`);
+    } catch (err) {
+      setMsg("Error al migrar: " + err.message);
+    }
   };
 
   // Renumeración de IDs: escribe el plan exacto que se revisó en el modal.
@@ -397,25 +451,36 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
       // con 0 g antes de calcular nada: así el rollo queda listado y marcado
       // para restock, y la disponibilidad se calcula contra el inventario ya
       // completo (que va a dar "no disponible", como corresponde).
-      const { creados } = await asegurarFilamentosDeReceta(data.receta || [], filamentos);
+      // Los material+color que hay que asegurar salen ahora de las VARIANTES:
+      // la receta ya no tiene color.
+      const { creados } = await asegurarFilamentosDeReceta(
+        filamentosDeVariantes(data.receta, data.variantes), filamentos);
       const films = creados.length > 0 ? await loadFilamentos() : filamentos;
 
       // El catálogo público solo lee este booleano: se recalcula al guardar,
-      // porque la receta pudo haber cambiado.
+      // porque la receta o las variantes pudieron haber cambiado.
       const disponible = calcularDisponibilidad(data, films, insumos).disponible;
 
       // El doc público NO lleva receta/origenUrl/notas/insumos: van a la
       // subcolección privada, que solo pueden leer los admins.
       // Se renombra al destructurar para no tapar el estado `insumos` (el
       // catálogo), que se usa arriba en el mismo bloque.
-      const { _id, receta, origenUrl, notas, insumos: insumosProducto, archivos, ...publico } = data;
+      const {
+        _id, receta, origenUrl, notas, insumos: insumosProducto, archivos,
+        variantes: variantesEnteras, ...publico
+      } = data;
       const privado = {
         receta: receta || [],
         origenUrl: origenUrl || "",
         notas: notas || "",
         insumos: insumosProducto || [],
         archivos: archivos || [],
+        // Solo la asignación de colores.
+        variantes: variantesPrivadas(variantesEnteras || []),
       };
+      // Y al doc público solo el nombre visible, la aclaración y el booleano.
+      publico.variantes = variantesPublicas(
+        { ...data, receta: receta || [] }, films, insumos);
 
       // Al crear, el ID visible se recalcula contra la lista fresca para que
       // dos altas seguidas no puedan quedarse con el mismo número.
@@ -581,6 +646,9 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
                   onDelete={handleDelete}
                   onNew={() => { setEditProduct(null); setShowForm(true); }}
                   onRecalcular={handleRecalcular}
+                  onMigrarVariantes={handleMigrarVariantes}
+                  pendientesDeVariantes={productosFull.filter(
+                    p => (p.variantes || []).length === 0 && (p.receta || []).length > 0).length}
                   onMigrarPrivados={handleMigrarPrivados}
                   onRenumerarIds={handleRenumerarIds}
                   tiemposIlegibles={tiemposIlegibles}
@@ -694,6 +762,7 @@ function DashboardTab({ products, users, categories, onCategoriesChange, onProdu
 function ProductsTab({
   products, costs = DEFAULT_COSTS, filamentos = [], insumos = [], categories = [], pendientesDeMigrar = 0,
   onEdit, onDelete, onNew, onToggleVisible, onRecalcular, onMigrarPrivados,
+  onMigrarVariantes, pendientesDeVariantes = 0,
   onRenumerarIds, tiemposIlegibles = [], onCerrarTiempos,
 }) {
   const [search, setSearch] = useState("");
@@ -739,6 +808,11 @@ function ProductsTab({
           >
             Renumerar IDs
           </TKButton>
+          {pendientesDeVariantes > 0 && (
+            <TKButton variant="outline" onClick={onMigrarVariantes} icon={<Icon.layers size={14}/>}>
+              Migrar a variantes ({pendientesDeVariantes})
+            </TKButton>
+          )}
           <TKButton variant="outline" onClick={onRecalcular} icon={<Icon.spark size={14}/>}>
             Recalcular desde recetas
           </TKButton>
@@ -1270,11 +1344,10 @@ function EstadoEnInventario({ linea, filamentos }) {
 export function RecetaEditor({ receta, setReceta, filamentos }) {
   // Mismas listas que el formulario de Inventario, del mismo distinct.
   const materiales = materialesUsados(filamentos);
-  const colores = coloresUsados(filamentos);
 
   const up = (i, patch) => setReceta(r => r.map((l, j) => j === i ? { ...l, ...patch } : l));
   const quitar = (i) => setReceta(r => r.filter((_, j) => j !== i));
-  const agregar = () => setReceta(r => [...r, { material: "", color: "", gramos: 0 }]);
+  const agregar = () => setReceta(r => [...r, { id: nuevoId("l"), material: "", gramos: 0 }]);
 
   const totalGramos = receta.reduce((s, l) => s + (Number(l.gramos) || 0), 0);
 
@@ -1282,15 +1355,15 @@ export function RecetaEditor({ receta, setReceta, filamentos }) {
     <div style={{ marginBottom: 16, paddingTop: 16, borderTop: "1px solid var(--line)" }}>
       <div style={{ ...labelStyle, marginBottom: 4 }}>Receta de consumo</div>
       <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 12, lineHeight: 1.5 }}>
-        Cuánto filamento consume <strong>una unidad</strong>. Un producto puede usar varios
-        materiales/colores. La disponibilidad exige tener al menos {FACTOR_DISPONIBILIDAD}× estos
-        gramos en inventario, para cada línea.
+        Qué material y <strong>cuántos gramos</strong> consume una unidad. El color no se define
+        acá: cada variante de abajo le asigna uno a cada línea. La disponibilidad exige tener al
+        menos {FACTOR_DISPONIBILIDAD}× estos gramos del color de la variante.
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         {receta.map((l, i) => (
-          <div key={i}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 110px 36px", gap: 10, alignItems: "end" }}>
+          <div key={l.id || i}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 110px 36px", gap: 10, alignItems: "end" }}>
               <SelectorConAgregar
                 value={l.material}
                 opciones={materiales}
@@ -1298,14 +1371,6 @@ export function RecetaEditor({ receta, setReceta, filamentos }) {
                 resolver={resolverValor}
                 placeholder="Nuevo material..."
                 vacio="— Material —"
-              />
-              <SelectorConAgregar
-                value={l.color}
-                opciones={colores}
-                onChange={color => up(i, { color })}
-                resolver={resolverValor}
-                placeholder="Nuevo color..."
-                vacio="— Color —"
               />
               <input
                 type="number"
@@ -1318,7 +1383,6 @@ export function RecetaEditor({ receta, setReceta, filamentos }) {
                 <Icon.trash size={14}/>
               </button>
             </div>
-            <EstadoEnInventario linea={l} filamentos={filamentos}/>
           </div>
         ))}
       </div>
@@ -1343,6 +1407,119 @@ export function RecetaEditor({ receta, setReceta, filamentos }) {
           </span>
         )}
       </div>
+    </div>
+  );
+}
+
+// ─── Variantes de color ──────────────────────────────────────────────
+// Una variante = un color por cada línea de receta, más el nombre que ve el
+// cliente. El vínculo con el filamento es interno: nunca sale al catálogo.
+
+export function VariantesEditor({ receta, variantes, setVariantes, filamentos }) {
+  const colores = coloresUsados(filamentos);
+  const lineas = receta.filter(l => String(l.material || "").trim() && (Number(l.gramos) || 0) > 0);
+
+  const up = (i, patch) => setVariantes(vs => vs.map((v, j) => j === i ? { ...v, ...patch } : v));
+  const quitar = (i) => setVariantes(vs => vs.filter((_, j) => j !== i));
+
+  const ponerColor = (i, lineaId, color) => setVariantes(vs => vs.map((v, j) => {
+    if (j !== i) return v;
+    const nueva = { ...v, colores: { ...v.colores, [lineaId]: color } };
+    // El nombre visible se autocompleta mientras no lo hayan editado a mano:
+    // escribirlo de nuevo en cada variante es puro trabajo repetido.
+    return v.nombreEditado ? nueva : { ...nueva, nombre: nombreSugerido(receta, nueva) };
+  }));
+
+  const agregar = () => setVariantes(vs => [
+    ...vs, { id: nuevoId("v"), nombre: "", aclaracion: "", colores: {}, disponible: false },
+  ]);
+
+  return (
+    <div style={{ marginBottom: 16, paddingTop: 16, borderTop: "1px solid var(--line)" }}>
+      <div style={{ ...labelStyle, marginBottom: 4 }}>Variantes de color</div>
+      <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 12, lineHeight: 1.5 }}>
+        Las combinaciones de color que puede elegir el cliente. Cada una define un color por
+        línea de receta. El cliente ve solo el nombre y la aclaración —{" "}
+        <strong>nunca qué filamento usa cada variante</strong>.
+      </div>
+
+      {lineas.length === 0 ? (
+        <div style={{ fontSize: 12, color: "#B56B3E", padding: "6px 0" }}>
+          Cargá primero la receta: sin líneas de material no hay colores que asignar.
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {variantes.map((v, i) => (
+            <div key={v.id} style={{
+              padding: 14, background: "var(--bg-alt)", border: "1px solid var(--line)",
+              borderRadius: 4,
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: "var(--muted)" }}>
+                  Variante {i + 1}
+                </span>
+                <button onClick={() => quitar(i)} style={{ ...actionBtn, color: "#c64138" }} title="Eliminar variante">
+                  <Icon.trash size={14}/>
+                </button>
+              </div>
+
+              {/* Un selector de color por línea de receta */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 12 }}>
+                {lineas.map(l => (
+                  <div key={l.id}>
+                    <SelectorConAgregar
+                      label={`${l.material} · ${l.gramos} g`}
+                      value={v.colores?.[l.id] || ""}
+                      opciones={colores}
+                      onChange={color => ponerColor(i, l.id, color)}
+                      resolver={resolverValor}
+                      placeholder="Nuevo color..."
+                      vacio="— Color —"
+                    />
+                    <EstadoEnInventario
+                      linea={{ material: l.material, color: v.colores?.[l.id] || "" }}
+                      filamentos={filamentos}
+                    />
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }} className="form-layout">
+                <TKInput
+                  label="Nombre visible"
+                  value={v.nombre}
+                  onChange={e => up(i, { nombre: e.target.value, nombreEditado: true })}
+                  placeholder="Ej: Azul / Negro"
+                  hint="Lo que ve el cliente en el selector."
+                />
+                <TKInput
+                  label="Aclaración (opcional)"
+                  value={v.aclaracion}
+                  onChange={e => up(i, { aclaracion: e.target.value })}
+                  placeholder="Ej: Color de la base"
+                  hint="Qué parte del producto varía."
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {lineas.length > 0 && variantes.length === 0 && (
+        <div style={{ fontSize: 12, color: "#c64138", padding: "6px 0" }}>
+          Sin variantes cargadas: el producto queda NO disponible en el catálogo.
+        </div>
+      )}
+
+      {lineas.length > 0 && (
+        <button onClick={agregar} style={{
+          background: "none", border: "1px dashed var(--line-strong)",
+          padding: "8px 14px", cursor: "pointer", color: "var(--muted)",
+          fontSize: 12, display: "flex", alignItems: "center", gap: 6, marginTop: 12,
+        }}>
+          <Icon.plus size={12}/> Agregar variante
+        </button>
+      )}
     </div>
   );
 }
@@ -1564,34 +1741,55 @@ function SpecCalculada({ label, valor, vacio }) {
 }
 
 // ─── Preview en vivo de la disponibilidad mientras se edita la receta ──
-function DisponibilidadPreview({ receta, filamentos, insumos = [], catalogoInsumos = [] }) {
+function DisponibilidadPreview({ receta, variantes = [], filamentos, insumos = [], catalogoInsumos = [] }) {
   const limpia = receta
-    .filter(l => l.material.trim() && l.color.trim() && (Number(l.gramos) || 0) > 0)
-    .map(l => ({ material: l.material.trim(), color: l.color.trim(), gramos: Number(l.gramos) }));
+    .filter(l => String(l.material || "").trim() && (Number(l.gramos) || 0) > 0)
+    .map(l => ({ ...l, material: l.material.trim(), gramos: Number(l.gramos) }));
+
+  const aviso = (texto, detalle) => (
+    <div style={{ padding: "12px 14px", background: "#c6413812", borderLeft: "3px solid #c64138", fontSize: 12, lineHeight: 1.6 }}>
+      <strong style={{ color: "#c64138" }}>{texto}</strong>
+      <div style={{ color: "var(--muted)", marginTop: 4 }}>{detalle}</div>
+    </div>
+  );
 
   if (limpia.length === 0) {
-    return (
-      <div style={{ padding: "12px 14px", background: "#c6413812", borderLeft: "3px solid #c64138", fontSize: 12, lineHeight: 1.6 }}>
-        <strong style={{ color: "#c64138" }}>Sin receta: el producto queda NO disponible</strong>
-        <div style={{ color: "var(--muted)", marginTop: 4 }}>
-          En el catálogo público se muestra con el badge "Sin stock" hasta que cargues al menos
-          una línea de consumo.
-        </div>
-      </div>
-    );
+    return aviso("Sin receta: el producto queda NO disponible",
+      'En el catálogo público se muestra con el badge "Sin stock" hasta que cargues al menos una línea de consumo.');
+  }
+  if (variantes.length === 0) {
+    return aviso("Sin variantes: el producto queda NO disponible",
+      "El cliente elige un color entre las variantes; sin ninguna cargada no hay nada que ofrecer.");
   }
 
-  const disp = calcularDisponibilidad({ receta: limpia, insumos }, filamentos, catalogoInsumos);
+  // Cada variante se evalúa por separado y alcanza con que una tenga stock.
+  const disp = disponibilidadPorVariantes(
+    { receta: limpia, variantes, insumos }, filamentos, catalogoInsumos);
   const color = disp.disponible ? "#4a7a52" : "#c64138";
+  const conStock = disp.variantes.filter(v => v.disponible).length;
 
   return (
     <div style={{ padding: "12px 14px", background: color + "12", borderLeft: `3px solid ${color}`, fontSize: 12, lineHeight: 1.6 }}>
       <strong style={{ color }}>
-        {disp.disponible ? "Disponible con el inventario actual" : "No disponible con el inventario actual"}
+        {disp.disponible
+          ? `Disponible: ${conStock} de ${disp.variantes.length} variante(s) con stock`
+          : "No disponible: ninguna variante tiene stock"}
       </strong>
-      {(disp.faltantes.length > 0 || disp.faltantesInsumos.length > 0) && (
+
+      <ul style={{ margin: "8px 0 0", paddingLeft: 18, color: "var(--muted)" }}>
+        {disp.variantes.map(v => (
+          <li key={v.id} style={{ color: v.disponible ? "#4a7a52" : "var(--muted)" }}>
+            <strong>{v.nombre || "(sin nombre)"}</strong>
+            {v.disponible ? " — con stock" : v.motivo === "sin-color"
+              ? ` — falta elegir el color de ${v.materialesSinColor.join(", ")}`
+              : v.motivo === "sin-insumos" ? " — faltan insumos"
+              : ` — ${v.faltantes.map(motivoFaltante).join("; ")}`}
+          </li>
+        ))}
+      </ul>
+
+      {(disp.faltantesInsumos.length > 0) && (
         <ul style={{ margin: "8px 0 0", paddingLeft: 18, color: "var(--muted)" }}>
-          {disp.faltantes.map((f, i) => <li key={`f${i}`}>{motivoFaltante(f)}</li>)}
           {disp.faltantesInsumos.map((f, i) => <li key={`i${i}`}>{motivoFaltanteInsumo(f)}</li>)}
         </ul>
       )}
@@ -1641,11 +1839,17 @@ export function ProductForm({
     notas: product?.notas || "",
   });
   const [images, setImages] = useState(initImages);
-  const [receta, setReceta] = useState(() =>
-    (product?.receta || []).map(l => ({
-      material: l.material || "",
-      color: l.color || "",
-      gramos: l.gramos ?? 0,
+  // normalizarReceta le pone id a las líneas viejas, que no lo tenían: es lo
+  // que permite que una variante le asigne un color a cada una.
+  const [receta, setReceta] = useState(() => normalizarReceta(product?.receta || []));
+  const [variantes, setVariantes] = useState(() =>
+    (product?.variantes || []).map(v => ({
+      id: v.id || nuevoId("v"),
+      nombre: v.nombre || "",
+      aclaracion: v.aclaracion || "",
+      colores: { ...(v.colores || {}) },
+      // Un nombre ya guardado no se pisa con el autogenerado al tocar colores.
+      nombreEditado: Boolean(v.nombre),
     }))
   );
   // Líneas de insumo del producto. Se conserva el snapshot (nombre/precioUnidad)
@@ -1684,12 +1888,25 @@ export function ProductForm({
 
   // Líneas de receta válidas — base de las specs derivadas y de lo que se guarda.
   const recetaLimpia = useMemo(() => receta
-    .filter(l => l.material.trim() && l.color.trim() && (Number(l.gramos) || 0) > 0)
+    .filter(l => String(l.material || "").trim() && (Number(l.gramos) || 0) > 0)
     .map(l => ({
+      id: l.id,
       material: l.material.trim(),
-      color: l.color.trim(),
       gramos: Number(l.gramos),
     })), [receta]);
+
+  // Variantes válidas: las que le asignaron color a TODAS las líneas. Una a
+  // medias no se guarda — quedaría ofreciendo algo que no se puede imprimir.
+  const variantesLimpias = useMemo(() => variantes
+    .filter(v => recetaLimpia.every(l => String(v.colores?.[l.id] || "").trim()))
+    .map(v => ({
+      id: v.id,
+      nombre: (v.nombre || "").trim() || nombreSugerido(recetaLimpia, v),
+      aclaracion: (v.aclaracion || "").trim(),
+      colores: Object.fromEntries(
+        recetaLimpia.map(l => [l.id, String(v.colores[l.id]).trim()])
+      ),
+    })), [variantes, recetaLimpia]);
 
   // Material y peso salen de la receta y se recalculan en vivo mientras se edita.
   const specsCalculadas = useMemo(() => specsDesdeReceta(recetaLimpia), [recetaLimpia]);
@@ -1756,6 +1973,9 @@ export function ProductForm({
       images: cleanImages,
       img: cleanImages[0] || "",
       receta: recetaLimpia,
+      // Enteras. Quien guarda las parte en su mitad pública (products) y su
+      // mitad privada (privado/data).
+      variantes: variantesLimpias,
       // specs.material y specs.peso salen de la receta; el tiempo, de los dos
       // campos numéricos. El texto libre "5h 30min" ya no se guarda: se genera
       // al mostrar a partir de tiempoHoras/tiempoMinutos.
@@ -1950,6 +2170,9 @@ export function ProductForm({
           {/* Receta de consumo de filamento */}
           <RecetaEditor receta={receta} setReceta={setReceta} filamentos={filamentos}/>
 
+          <VariantesEditor receta={receta} variantes={variantes} setVariantes={setVariantes}
+            filamentos={filamentos}/>
+
           {/* Insumos opcionales (imanes, tornillos, cable...) */}
           <InsumosEditor lineas={lineasInsumo} setLineas={setLineasInsumo} catalogo={catalogoInsumos}/>
 
@@ -1963,7 +2186,7 @@ export function ProductForm({
           />
 
           {/* Vista previa de disponibilidad con el inventario actual */}
-          <DisponibilidadPreview receta={receta} filamentos={filamentos}
+          <DisponibilidadPreview receta={receta} variantes={variantesLimpias} filamentos={filamentos}
             insumos={insumosLimpios} catalogoInsumos={catalogoInsumos}/>
 
           {/* ── Datos internos: nunca se muestran en el catálogo público ── */}
