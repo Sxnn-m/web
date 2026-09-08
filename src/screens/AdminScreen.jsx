@@ -19,7 +19,7 @@ import {
 } from '../lib/variantes.js';
 import {
   nuevoIdInsumo, disponibilidadDeGrupo, insumosDuplicados, gruposPublicos,
-  gruposPrivados, normalizarGruposPublicos,
+  gruposPrivados, normalizarGruposPublicos, permiteManual, manualesIgnorados,
 } from '../lib/variantesInsumo.js';
 import { cargarInsumos } from '../lib/insumos.js';
 import {
@@ -1656,7 +1656,7 @@ export function VariantesEditor({ receta, variantes, setVariantes, filamentos })
 // Monocolor o RGB). A diferencia del color, cada opción tiene su precio: el
 // del insumo que consume. Mismo acordeón que las variantes de color.
 
-export function VariantesInsumoEditor({ grupos, setGrupos, catalogo, insumosFijos = [] }) {
+export function VariantesInsumoEditor({ grupos, setGrupos, catalogo, insumosFijos = [], precioBase = 0 }) {
   const [abiertos, setAbiertos] = useState(() => new Set());
   const alternar = (id) => setAbiertos(previos => {
     const nuevos = new Set(previos);
@@ -1695,6 +1695,11 @@ export function VariantesInsumoEditor({ grupos, setGrupos, catalogo, insumosFijo
   };
 
   const duplicados = insumosDuplicados(insumosFijos, grupos, catalogo);
+  // El precio manual es el precio FINAL de la opción; el automático es un
+  // sumando. Mezclar las dos cosas entre varios grupos contaría la base de
+  // más, así que solo se habilita con UN grupo.
+  const manualHabilitado = permiteManual(grupos);
+  const inertes = manualesIgnorados(grupos);
 
   return (
     <div style={{ marginBottom: 16, paddingTop: 16, borderTop: "1px solid var(--line)" }}>
@@ -1716,6 +1721,18 @@ export function VariantesInsumoEditor({ grupos, setGrupos, catalogo, insumosFijo
           </div>
         )}
       </div>
+
+      {inertes.length > 0 && (
+        <div style={{ padding: "10px 12px", background: "#c6413812", borderLeft: "3px solid #c64138", fontSize: 11.5, lineHeight: 1.6, marginBottom: 12 }}>
+          <strong style={{ color: "#c64138" }}>
+            Hay precios manuales que hoy NO se aplican.
+          </strong>{" "}
+          El precio manual es el precio final de la opción, y con más de un grupo habría que
+          sumarlo con los sumandos de los otros: la base quedaría contada dos veces. Mientras el
+          producto tenga {grupos.length} grupos se cobra el cálculo automático en{" "}
+          {inertes.join(", ")}. Los valores quedan guardados: si dejás un solo grupo, vuelven a regir.
+        </div>
+      )}
 
       {catalogo.length === 0 && (
         <div style={{ fontSize: 12, color: "#B56B3E", padding: "6px 0" }}>
@@ -1796,10 +1813,30 @@ export function VariantesInsumoEditor({ grupos, setGrupos, catalogo, insumosFijo
                       <div style={{ fontSize: 11, marginTop: 4, lineHeight: 1.5,
                         color: !o.insumoId ? "#c64138" : evaluada?.disponible ? "var(--muted)" : "#B56B3E" }}>
                         {!o.insumoId ? "Elegí el insumo: sin él la opción no se puede ofrecer."
-                          : `Suma ${fmtARS(evaluada?.precio || 0)} al precio · ` +
-                            `${evaluada?.enCatalogo ?? 0} u. en catálogo` +
+                          : `${evaluada?.enCatalogo ?? 0} u. en catálogo` +
                             (evaluada?.disponible ? "" : " · sin stock, no se va a ofrecer")}
                       </div>
+
+                      {/* Precio de ESTA opción, con el mismo toggle que el
+                          precio general del producto. */}
+                      {o.insumoId && (
+                        <PrecioDeOpcion
+                          manual={o.manual === true}
+                          habilitado={manualHabilitado}
+                          valor={o.precioManual}
+                          automatico={precioBase + (evaluada?.precio || 0)}
+                          sumando={evaluada?.precio || 0}
+                          onToggle={(activo) => upOpcion(i, j, {
+                            manual: activo,
+                            // Al activarlo arranca desde el automático, como
+                            // hace el precio general del producto.
+                            precioManual: activo
+                              ? (o.precioManual ?? precioBase + (evaluada?.precio || 0))
+                              : null,
+                          })}
+                          onChange={(v) => upOpcion(i, j, { precioManual: v })}
+                        />
+                      )}
                     </div>
                   );
                 })}
@@ -1837,6 +1874,70 @@ export function VariantesInsumoEditor({ grupos, setGrupos, catalogo, insumosFijo
       }}>
         <Icon.plus size={12}/> Agregar grupo
       </button>
+    </div>
+  );
+}
+
+/**
+ * Precio de una opción: automático (base + costo del insumo) o fijado a mano.
+ * Mismo toggle que el precio general del producto, pero por opción.
+ */
+function PrecioDeOpcion({ manual, habilitado, valor, automatico, sumando, onToggle, onChange }) {
+  return (
+    <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px dashed var(--line)" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
+        <div style={{ ...labelStyle, marginBottom: 0 }}>Precio de esta opción</div>
+        <label style={{
+          display: "flex", alignItems: "center", gap: 6, fontSize: 11,
+          color: habilitado ? "var(--muted)" : "var(--line-strong)",
+          cursor: habilitado ? "pointer" : "not-allowed", whiteSpace: "nowrap",
+        }}>
+          <input
+            type="checkbox"
+            checked={manual}
+            disabled={!habilitado}
+            onChange={e => onToggle(e.target.checked)}
+            style={{ width: 14, height: 14, accentColor: "var(--accent)",
+              cursor: habilitado ? "pointer" : "not-allowed" }}
+          />
+          Editar precio manualmente
+        </label>
+      </div>
+
+      {manual && habilitado ? (
+        <>
+          <input
+            type="number"
+            value={valor ?? ""}
+            onChange={e => onChange(e.target.value === "" ? null : Number(e.target.value))}
+            placeholder="0"
+            style={{ ...recetaInput, borderColor: "var(--accent)" }}
+          />
+          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4, lineHeight: 1.5 }}>
+            Precio <strong>final</strong> con esta opción, no un extra: reemplaza al cálculo.
+            El automático daría {fmtARS(automatico)}.
+          </div>
+        </>
+      ) : (
+        <>
+          <div style={{
+            padding: "10px 12px", background: "var(--bg)",
+            border: "1px dashed var(--line)", borderRadius: 4,
+            fontSize: 13, fontWeight: 600, color: "var(--text)",
+          }}>
+            {fmtARS(automatico)}
+          </div>
+          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4, lineHeight: 1.5 }}>
+            Precio base + {fmtARS(sumando)} del insumo.
+            {!habilitado && manual && (
+              <span style={{ color: "#c64138" }}>
+                {" "}Hay un precio manual guardado ({fmtARS(valor || 0)}) que no se aplica con
+                más de un grupo.
+              </span>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -2246,6 +2347,8 @@ export function ProductForm({
         nombre: o.nombre || "",
         insumoId: o.insumoId || "",
         cantidad: Math.max(1, Number(o.cantidad) || 1),
+        manual: o.manual === true || (o.precioManual !== null && o.precioManual !== undefined),
+        precioManual: o.precioManual ?? null,
         nombreEditado: Boolean(o.nombre),
       })),
     }))
@@ -2330,6 +2433,11 @@ export function ProductForm({
             || catalogoInsumos.find(x => x._id === o.insumoId)?.nombre || "",
           insumoId: o.insumoId,
           cantidad: Math.max(1, Number(o.cantidad) || 1),
+          // Se guarda aunque hoy no aplique (más de un grupo): sacar el grupo
+          // extra tiene que devolverlo a la vida sin recargarlo a mano.
+          manual: o.manual === true,
+          precioManual: o.manual === true && Number.isFinite(Number(o.precioManual))
+            ? Number(o.precioManual) : null,
         })),
     }))
     .filter(g => g.nombre && g.opciones.length > 0), [gruposInsumo, catalogoInsumos]);
@@ -2604,7 +2712,8 @@ export function ProductForm({
           <InsumosEditor lineas={lineasInsumo} setLineas={setLineasInsumo} catalogo={catalogoInsumos}/>
 
           <VariantesInsumoEditor grupos={gruposInsumo} setGrupos={setGruposInsumo}
-            catalogo={catalogoInsumos} insumosFijos={insumosLimpios}/>
+            catalogo={catalogoInsumos} insumosFijos={insumosLimpios}
+            precioBase={Number(precioFinal) || 0}/>
 
           {/* Vista previa de disponibilidad con el inventario actual */}
           <DisponibilidadPreview receta={receta} variantes={variantesLimpias} filamentos={filamentos}

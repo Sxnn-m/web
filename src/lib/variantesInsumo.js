@@ -56,7 +56,13 @@ export function normalizarGruposPublicos(grupos = []) {
         .map(o => ({
           id: String(o.id),
           nombre: texto(o.nombre),
+          // Lo que la opción SUMA al precio base (su costo de insumo).
           precio: Number(o.precio) || 0,
+          // Precio FINAL fijado a mano para esta opción, base incluida. null
+          // = automático. Solo se aplica con un único grupo (ver
+          // precioDeCombinacion).
+          precioManual: Number.isFinite(Number(o.precioManual)) && o.precioManual !== null
+            && o.precioManual !== "" ? Number(o.precioManual) : null,
           disponible: o.disponible === true,
         })),
     }));
@@ -73,6 +79,8 @@ export function unirGruposInsumo(publicos = [], privados = []) {
         ...o,
         insumoId: privadas.get(o.id)?.insumoId || "",
         cantidad: privadas.get(o.id)?.cantidad ?? 1,
+        // El precio manual es un precio: vive en la mitad pública.
+        manual: o.precioManual !== null,
       })),
     };
   });
@@ -145,6 +153,8 @@ export function gruposPublicos(grupos = [], catalogo = []) {
       id: o.id,
       nombre: o.nombre || "",
       precio: o.precio,
+      precioManual: o.manual === true && Number.isFinite(Number(o.precioManual))
+        ? Number(o.precioManual) : null,
       disponible: o.disponible,
     })),
   }));
@@ -186,22 +196,79 @@ export function precioDeSeleccion(gruposPublicos = [], seleccion = {}) {
 }
 
 /**
- * El precio más barato que se puede pagar hoy: base + la opción con stock más
- * barata de cada grupo. Es lo que muestran las tarjetas del catálogo como
- * "Desde", porque el precio base solo no lo puede pagar nadie cuando el
- * producto obliga a elegir.
+ * ¿Se puede fijar un precio manual por opción?
+ *
+ * Solo con UN grupo. El precio manual es el precio FINAL de esa opción (base
+ * incluida), mientras que el automático es un SUMANDO. Con dos o más grupos
+ * habría que sumar totales con sumandos, y la base quedaría contada de más:
+ * no hay resta que arregle eso cuando se mezcla una opción manual con una
+ * automática. Antes que una regla que solo cierra en algunos casos, se
+ * restringe la función a donde es exacta.
+ */
+export const permiteManual = (grupos = []) => grupos.length === 1;
+
+/**
+ * El precio de UNA combinación concreta. Es la única regla de precio del
+ * módulo: la usan el detalle, la tarjeta del catálogo y el carrito.
+ *
+ *   un grupo con precio manual en la opción elegida → ese precio, tal cual
+ *   en cualquier otro caso                          → base + Σ sumandos
+ */
+export function precioDeCombinacion(precioBase = 0, gruposPublicos = [], seleccion = {}) {
+  const base = Number(precioBase) || 0;
+  if (permiteManual(gruposPublicos)) {
+    const o = opcionElegida(gruposPublicos[0], seleccion);
+    if (o && o.precioManual !== null && o.precioManual !== undefined) {
+      return Number(o.precioManual) || 0;
+    }
+  }
+  return base + precioDeSeleccion(gruposPublicos, seleccion);
+}
+
+/**
+ * Precios manuales que están cargados pero NO se aplican porque el producto
+ * tiene más de un grupo. Se conservan guardados —sacar el grupo extra los
+ * devuelve a la vida— pero el formulario tiene que avisar que hoy no rigen.
+ */
+export function manualesIgnorados(grupos = []) {
+  if (permiteManual(grupos) || grupos.length === 0) return [];
+  return grupos.flatMap(g => (g.opciones || [])
+    .filter(o => o.manual === true || (o.precioManual !== null && o.precioManual !== undefined))
+    .map(o => `${g.nombre || "(sin nombre)"}: ${o.nombre || "(sin nombre)"}`));
+}
+
+/**
+ * El precio más barato que se puede pagar hoy: la combinación con stock más
+ * barata. Es lo que muestran las tarjetas del catálogo como "Desde", porque el
+ * precio base solo no lo puede pagar nadie cuando el producto obliga a elegir.
+ *
+ * Con un grupo se evalúa opción por opción (una puede tener precio manual);
+ * con varios, se toma el sumando más barato de cada uno.
  */
 export function precioDesde(precioBase = 0, gruposPublicos = []) {
+  const base = Number(precioBase) || 0;
+
+  if (permiteManual(gruposPublicos)) {
+    const conStock = gruposPublicos[0].opciones.filter(o => o.disponible);
+    if (conStock.length === 0) return base;
+    return Math.min(...conStock.map(o =>
+      precioDeCombinacion(base, gruposPublicos, { [gruposPublicos[0].id]: o.id })));
+  }
+
   return gruposPublicos.reduce((total, g) => {
     const conStock = g.opciones.filter(o => o.disponible);
     if (conStock.length === 0) return total;
     return total + Math.min(...conStock.map(o => Number(o.precio) || 0));
-  }, Number(precioBase) || 0);
+  }, base);
 }
 
-/** ¿Hay que mostrar "Desde"? Solo si alguna opción suma algo. */
+/**
+ * ¿Hay que mostrar "Desde"? Si alguna opción suma algo, o si hay precios
+ * manuales (que por definición cambian el total según lo que se elija).
+ */
 export const tieneOpcionesConPrecio = (gruposPublicos = []) =>
-  gruposPublicos.some(g => g.opciones.some(o => (Number(o.precio) || 0) > 0));
+  gruposPublicos.some(g => g.opciones.some(o =>
+    (Number(o.precio) || 0) > 0 || (o.precioManual !== null && o.precioManual !== undefined)));
 
 /**
  * Los insumos que consume la selección, para descontar del catálogo al
