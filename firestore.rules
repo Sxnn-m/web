@@ -115,15 +115,36 @@ service cloud.firestore {
     // Imanes, tornillos, LEDs: precios de costo y stock interno. Igual que
     // filamentos, sin lectura ni escritura pública, con los mismos dos
     // historiales en subcolecciones (que NO heredan la regla del padre).
+    //
+    // Cada insumo tiene uno o más TIPOS, y el precio y el stock viven en el
+    // tipo. Los tipos son un array del propio documento, así que el documento
+    // insumos/{id}/tipos/{tipoId} no existe: esa ruta es solo el espacio de
+    // nombres bajo el que cuelga el historial de cada tipo. Como las reglas no
+    // se heredan hacia abajo, ese nivel necesita su propio match aunque el
+    // documento intermedio esté vacío.
     match /insumos/{insumoId} {
       allow read, write: if esAdmin();
 
+      // Historiales anteriores a los tipos: siguen colgando del insumo y el
+      // detalle del tipo base los muestra unidos a los suyos.
       match /gastos/{gastoId} {
         allow read, write: if esAdmin();
       }
 
       match /restocks/{restockId} {
         allow read, write: if esAdmin();
+      }
+
+      match /tipos/{tipoId} {
+        allow read, write: if esAdmin();
+
+        match /gastos/{gastoId} {
+          allow read, write: if esAdmin();
+        }
+
+        match /restocks/{restockId} {
+          allow read, write: if esAdmin();
+        }
       }
     }
 

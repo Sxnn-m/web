@@ -11,6 +11,7 @@ import {
 } from '../../lib/consumoPedido.js';
 import { buscarFilamento } from '../../lib/disponibilidad.js';
 import { etiquetaSeleccion } from '../../lib/variantesInsumo.js';
+import { tiposDe, claveTipo } from '../../lib/tiposInsumo.js';
 
 const actionBtn = {
   background: "none", border: "1px solid var(--line)", padding: "6px 8px",
@@ -675,8 +676,11 @@ function ModalImpresion({ pedido, productos, personalizados = [], filamentos, in
         return encontrado ? { id: encontrado._id, disponible: Number(encontrado.cantidadGramos) || 0 } : null;
       },
       (i) => {
-        const encontrado = insumos.find(x => x._id === i.insumoId);
-        return encontrado ? { id: encontrado._id, disponible: Number(encontrado.cantidadDisponible) || 0 } : null;
+        // El stock que cuenta es el del TIPO, y la misma lectura que hace la
+        // transacción: el plan ya trae el tipoId resuelto.
+        const insumo = insumos.find(x => x._id === i.insumoId);
+        const tipo = insumo ? tiposDe(insumo).find(t => t.tipoId === i.tipoId) : null;
+        return tipo ? { id: i.clave, disponible: Number(tipo.cantidadDisponible) || 0 } : null;
       }
     );
   }, [plan, desperdicios, planInsumos, filamentos, insumos]);
@@ -745,8 +749,14 @@ function ModalImpresion({ pedido, productos, personalizados = [], filamentos, in
               Se descuentan del catálogo automáticamente. No llevan desperdicio.
             </div>
             {planInsumos.map(l => {
-              const enCatalogo = insumos.find(i => i._id === l.insumoId);
-              const alcanza = enCatalogo && (Number(enCatalogo.cantidadDisponible) || 0) >= l.unidadesConsumidas;
+              // El semáforo de la línea sale de la validación AGRUPADA por
+              // tipo: si el mismo tipo lo comprometen dos líneas (una fija y
+              // una de variante), lo que decide es el total combinado, no lo
+              // que consume esta línea sola.
+              const agrupado = validacion.insumos.find(
+                i => i.clave === claveTipo(l.insumoId, l.tipoId));
+              const existe = Boolean(agrupado?.existe);
+              const alcanza = Boolean(agrupado?.alcanza);
               return (
                 <div key={l.clave} style={{
                   display: "grid", gridTemplateColumns: "1.6fr 1fr 110px",
@@ -756,12 +766,17 @@ function ModalImpresion({ pedido, productos, personalizados = [], filamentos, in
                   <div style={{ fontWeight: 600 }}>{l.nombre}</div>
                   <div style={{ color: "var(--muted)" }}>
                     {l.productoNombre} — {l.cantidadPorUnidad} × {l.cantidad} u.
+                    {l.opcionNombre && ` · ${l.grupoNombre}: ${l.opcionNombre}`}
                   </div>
                   <div style={{ fontWeight: 700, color: alcanza ? "var(--text)" : "#c64138" }}>
                     −{l.unidadesConsumidas} u.
                     {!alcanza && (
                       <div style={{ fontSize: 10, fontWeight: 400 }}>
-                        {enCatalogo ? "queda negativo" : "no está en el catálogo"}
+                        {existe
+                          ? (agrupado.total > l.unidadesConsumidas
+                              ? `queda negativo (${agrupado.total} u. en total del pedido)`
+                              : "queda negativo")
+                          : "ese tipo no está en el catálogo"}
                       </div>
                     )}
                   </div>

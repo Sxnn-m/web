@@ -6,6 +6,7 @@
 //      contra las cantidades leídas dentro de la propia transacción.
 
 import { claveFilamento } from './disponibilidad.js';
+import { claveTipo } from './tiposInsumo.js';
 
 /**
  * Agrupa el consumo total del pedido.
@@ -44,13 +45,23 @@ export function agruparConsumo(plan = [], desperdicios = {}, planInsumos = []) {
     }
   }
 
+  // Los insumos se agrupan por insumo + TIPO. Dos líneas del mismo pedido
+  // pueden comprometer el mismo tipo por caminos distintos —una porque el
+  // producto lo lleva fijo, otra porque el cliente eligió esa opción— y el
+  // stock que descuentan es el mismo: hay que validar el total combinado, o
+  // cada una pasaría el chequeo por su cuenta y entre las dos lo dejarían en
+  // negativo. Dos tipos distintos del mismo insumo, en cambio, son stocks
+  // separados y no se mezclan.
   const insumos = new Map();
   for (const linea of planInsumos) {
-    const previo = insumos.get(linea.insumoId);
+    const clave = claveTipo(linea.insumoId, linea.tipoId);
+    const previo = insumos.get(clave);
     const total = Number(linea.unidadesConsumidas) || 0;
     if (previo) previo.total += total;
-    else insumos.set(linea.insumoId, {
+    else insumos.set(clave, {
+      clave,
       insumoId: linea.insumoId,
+      tipoId: linea.tipoId || "",
       etiqueta: linea.nombre,
       total,
       unidad: "u.",

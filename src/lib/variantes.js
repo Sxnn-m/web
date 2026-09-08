@@ -19,7 +19,7 @@
 
 import {
   claveFilamento, buscarFilamento, FACTOR_DISPONIBILIDAD,
-  lineasDeInsumo, buscarInsumo, FACTOR_DISPONIBILIDAD_INSUMO,
+  lineasDeInsumo, detalleDeLineaInsumo,
 } from './disponibilidad.js';
 import { disponibilidadDeGrupos, gruposArmables } from './variantesInsumo.js';
 
@@ -172,20 +172,8 @@ export function disponibilidadPorVariantes(producto, filamentos = [], insumos = 
   const receta = producto?.receta || [];
   const variantes = Array.isArray(producto?.variantes) ? producto.variantes : [];
 
-  const detalleInsumos = lineasDeInsumo(producto).map(linea => {
-    const insumo = buscarInsumo(insumos, linea.insumoId);
-    const enCatalogo = insumo ? Number(insumo.cantidadDisponible) || 0 : 0;
-    const requerido = linea.cantidad * FACTOR_DISPONIBILIDAD_INSUMO;
-    return {
-      insumoId: linea.insumoId,
-      nombre: insumo?.nombre || linea.nombre,
-      cantidadPorUnidad: linea.cantidad,
-      requerido,
-      enCatalogo,
-      existe: Boolean(insumo),
-      ok: Boolean(insumo) && enCatalogo >= requerido,
-    };
-  });
+  const detalleInsumos = lineasDeInsumo(producto)
+    .map(linea => detalleDeLineaInsumo(linea, insumos));
   const faltantesInsumos = detalleInsumos.filter(d => !d.ok);
   const insumosOk = faltantesInsumos.length === 0;
 

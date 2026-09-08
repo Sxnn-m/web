@@ -39,6 +39,8 @@ const cardStyle = {
  *
  * @param {string} coleccion       "filamentos" | "insumos"
  * @param {object} item            documento (necesita _id)
+ * @param {string} [tipoId]        en insumos, el tipo cuyo historial se ve:
+ *   cada tipo tiene el suyo en insumos/{id}/tipos/{tipoId}/…
  * @param {string} titulo          encabezado principal
  * @param {string} subtitulo       migaja de pan ("Inventario / Filamento")
  * @param {number} cantidad        stock actual
@@ -47,7 +49,7 @@ const cardStyle = {
  * @param {boolean} conDesperdicio si los gastos tienen cantidadDesperdiciada
  */
 export function DetalleHistorial({
-  coleccion, item, titulo, subtitulo, cantidad, unidad,
+  coleccion, item, tipoId = null, titulo, subtitulo, cantidad, unidad,
   alerta, conDesperdicio = false, onBack, onChanged, setMsg,
 }) {
   const [gastos, setGastos] = useState([]);
@@ -59,8 +61,8 @@ export function DetalleHistorial({
   const cargarHistoriales = async () => {
     try {
       const [g, r] = await Promise.all([
-        cargarGastosDe(coleccion, item._id),
-        cargarRestocksDe(coleccion, item._id),
+        cargarGastosDe(coleccion, item._id, tipoId),
+        cargarRestocksDe(coleccion, item._id, tipoId),
       ]);
       setGastos(g);
       setRestocks(r);
@@ -71,13 +73,13 @@ export function DetalleHistorial({
     setLoading(false);
   };
 
-  useEffect(() => { cargarHistoriales(); /* eslint-disable-next-line */ }, [coleccion, item._id]);
+  useEffect(() => { cargarHistoriales(); /* eslint-disable-next-line */ }, [coleccion, item._id, tipoId]);
 
   const guardarRestock = async () => {
     const n = Number(restockForm.cantidadAgregada);
     if (!n || n <= 0) return alert("Ingresá una cantidad mayor a 0.");
     try {
-      await registrarRestockEn(coleccion, item._id, n, restockForm.nota);
+      await registrarRestockEn(coleccion, item._id, n, restockForm.nota, tipoId);
       setRestockForm({ cantidadAgregada: "", nota: "" });
       setShowRestock(false);
       setMsg(`✓ Restock de ${n} ${unidad} registrado.`);
