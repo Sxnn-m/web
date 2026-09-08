@@ -22,7 +22,7 @@ import {
   normalizarVariantesPublicas, migrarAVariante,
 } from './variantes.js';
 import {
-  insumosDeSeleccion, gruposPublicos, normalizarGruposPublicos,
+  insumosDeSeleccion, gruposPublicos, normalizarGruposPublicos, opcionPedida,
 } from './variantesInsumo.js';
 import {
   tiposDe, tipoIdEfectivo, etiquetaDeReferencia, ID_TIPO_BASE,
@@ -368,6 +368,25 @@ export function buscarProductoDeLinea(item, productos = [], personalizados = [])
 }
 
 /**
+ * La variante de color que corresponde a una línea de pedido.
+ *
+ * El caso normal es directo: la línea guarda el varianteId elegido. Los otros
+ * dos son pedidos anteriores a las variantes, que no guardaron ninguno:
+ *
+ *   - si el producto tiene UNA sola variante, es esa y no hay ambigüedad;
+ *   - si tiene varias, no se adivina: se devuelve null y consumoDeVariante cae
+ *     al color de la propia receta, que es lo que ese pedido usaba cuando se
+ *     cargó. Recién si tampoco hay color ahí la línea queda incompleta.
+ */
+export function varianteDeLinea(item, producto) {
+  const variantes = producto?.variantes || [];
+  const pedida = variantes.find(v => v.id === item?.varianteId);
+  if (pedida) return pedida;
+  if (!item?.varianteId && variantes.length === 1) return variantes[0];
+  return null;
+}
+
+/**
  * Devuelve, para un pedido, las líneas de consumo que habrá que descontar:
  * una por cada material/color de la receta de cada producto del pedido.
  * Es lo que alimenta el modal de "gramos desperdiciados".
@@ -384,18 +403,16 @@ export function planDeConsumo(pedido, productos = [], personalizados = []) {
   const plan = [];
   for (const item of pedido.items || []) {
     const producto = buscarProductoDeLinea(item, productos, personalizados);
-    // El color sale de la variante que se pidió, no de la receta: la receta
-    // solo dice material y gramos. Sin variante en la línea del pedido no hay
-    // forma de saber qué rollo se usó, y descontar uno cualquiera sería
-    // descontar el equivocado en silencio.
-    const variante = (producto?.variantes || []).find(v => v.id === item.varianteId) || null;
+    const variante = varianteDeLinea(item, producto);
     for (const linea of consumoDeVariante(producto?.receta || [], variante)) {
       plan.push({
-        clave: `${item.productoId}|${item.varianteId || ""}|${linea.material}|${linea.color}`,
+        clave: `${item.productoId}|${variante?.id || ""}|${linea.material}|${linea.color}`,
         productoId: item.productoId,
         productoNombre: item.productoNombre,
-        varianteId: item.varianteId || null,
-        varianteNombre: item.varianteNombre || "",
+        varianteId: variante?.id || item.varianteId || null,
+        // El nombre guardado en el pedido manda; los pedidos viejos no lo
+        // tienen y se resuelve contra el producto.
+        varianteNombre: item.varianteNombre || variante?.nombre || "",
         material: linea.material,
         color: linea.color,
         // Sin variante resuelta la línea queda sin color: se marca para que
@@ -461,6 +478,34 @@ export function planDeInsumos(pedido, productos = [], personalizados = [], catal
     }
   }
   return plan;
+}
+
+/**
+ * Grupos de variante de insumo que el pedido NO resolvió: el producto los
+ * tiene, pero la línea no dice qué opción se vendió.
+ *
+ * Pasa con los pedidos anteriores a las variantes de insumo. No se puede
+ * adivinar cuál era —cada opción consume un insumo distinto— así que esas
+ * unidades no se descuentan. Antes eso ocurría en silencio; ahora el modal de
+ * impresión las nombra, para que se descuenten a mano si hace falta.
+ */
+export function opcionesFaltantes(pedido, productos = [], personalizados = []) {
+  const faltantes = [];
+  for (const item of pedido?.items || []) {
+    const producto = buscarProductoDeLinea(item, productos, personalizados);
+    for (const grupo of producto?.variantesInsumo || []) {
+      // Misma regla que usa el descuento: la opción pedida, o la única del
+      // grupo. Si eso resuelve algo, no falta nada.
+      if (opcionPedida(grupo, item.opcionesInsumo || {})) continue;
+      faltantes.push({
+        productoId: item.productoId,
+        productoNombre: item.productoNombre || producto?.name || "",
+        grupoId: grupo.id,
+        grupoNombre: grupo.nombre || "(sin nombre)",
+      });
+    }
+  }
+  return faltantes;
 }
 
 /**

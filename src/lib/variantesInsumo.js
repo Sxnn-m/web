@@ -191,11 +191,20 @@ export function seleccionInicial(gruposPublicos = []) {
   return salida;
 }
 
-/** La opción elegida de un grupo, o la primera con stock si la elegida no sirve. */
-export function opcionElegida(grupo, seleccion = {}) {
+/**
+ * La opción elegida de un grupo, o la primera con stock si la elegida no sirve.
+ *
+ * @param {boolean} [opciones.exigirStock=true] En el catálogo público sí: una
+ *   opción agotada no se puede comprar, y si el stock cambió después de cargar
+ *   la página hay que caer en una que sí se pueda. En el backoffice NO: el
+ *   pedido registra lo que se vendió, y una opción sin stock se elige a
+ *   propósito (se imprime cuando llegue). Ahí caer en otra opción cobraría un
+ *   precio que no es el de lo que se pidió.
+ */
+export function opcionElegida(grupo, seleccion = {}, { exigirStock = true } = {}) {
   const opciones = grupo?.opciones || [];
   const pedida = opciones.find(o => o.id === seleccion[grupo?.id]);
-  if (pedida?.disponible) return pedida;
+  if (pedida && (!exigirStock || pedida.disponible)) return pedida;
   return opciones.find(o => o.disponible) || null;
 }
 
@@ -203,9 +212,9 @@ export function opcionElegida(grupo, seleccion = {}) {
  * Cuánto suman al precio las opciones elegidas. Es lo que se agrega al precio
  * base del producto, que no incluye ninguna.
  */
-export function precioDeSeleccion(gruposPublicos = [], seleccion = {}) {
+export function precioDeSeleccion(gruposPublicos = [], seleccion = {}, opts) {
   return gruposPublicos.reduce((total, g) => {
-    const o = opcionElegida(g, seleccion);
+    const o = opcionElegida(g, seleccion, opts);
     return total + (o ? Number(o.precio) || 0 : 0);
   }, 0);
 }
@@ -229,15 +238,15 @@ export const permiteManual = (grupos = []) => grupos.length === 1;
  *   un grupo con precio manual en la opción elegida → ese precio, tal cual
  *   en cualquier otro caso                          → base + Σ sumandos
  */
-export function precioDeCombinacion(precioBase = 0, gruposPublicos = [], seleccion = {}) {
+export function precioDeCombinacion(precioBase = 0, gruposPublicos = [], seleccion = {}, opts) {
   const base = Number(precioBase) || 0;
   if (permiteManual(gruposPublicos)) {
-    const o = opcionElegida(gruposPublicos[0], seleccion);
+    const o = opcionElegida(gruposPublicos[0], seleccion, opts);
     if (o && o.precioManual !== null && o.precioManual !== undefined) {
       return Number(o.precioManual) || 0;
     }
   }
-  return base + precioDeSeleccion(gruposPublicos, seleccion);
+  return base + precioDeSeleccion(gruposPublicos, seleccion, opts);
 }
 
 /**
@@ -286,13 +295,29 @@ export const tieneOpcionesConPrecio = (gruposPublicos = []) =>
     (Number(o.precio) || 0) > 0 || (o.precioManual !== null && o.precioManual !== undefined)));
 
 /**
+ * La opción que se vendió en un grupo, para descontar stock.
+ *
+ * A diferencia de opcionElegida() —que es la del catálogo público y cae en la
+ * primera con stock— acá NO se sustituye por otra: descontar un insumo que no
+ * es el que se pidió sería peor que no descontar nada. Lo único que se
+ * resuelve solo es el grupo de una sola opción: no hay ambigüedad posible, y
+ * es lo que hace falta para los pedidos anteriores a las variantes de insumo.
+ */
+export function opcionPedida(grupo, seleccion = {}) {
+  const opciones = grupo?.opciones || [];
+  const pedida = opciones.find(o => o.id === seleccion?.[grupo?.id]);
+  if (pedida) return pedida;
+  return opciones.length === 1 ? opciones[0] : null;
+}
+
+/**
  * Los insumos que consume la selección, para descontar del catálogo al
  * imprimir el pedido. Devuelve el mismo shape que lineasDeInsumo().
  */
 export function insumosDeSeleccion(grupos = [], seleccion = {}, catalogo = []) {
   const salida = [];
   for (const grupo of disponibilidadDeGrupos(grupos, catalogo)) {
-    const pedida = (grupo.opciones || []).find(o => o.id === seleccion[grupo.id]);
+    const pedida = opcionPedida(grupo, seleccion);
     if (!pedida || !pedida.insumoId) continue;
     salida.push({
       insumoId: pedida.insumoId,
@@ -344,10 +369,10 @@ export function insumosDuplicados(insumosFijos = [], grupos = [], catalogo = [])
 }
 
 /** Etiqueta legible de la selección, para el carrito y el pedido. */
-export function etiquetaSeleccion(gruposPublicos = [], seleccion = {}) {
+export function etiquetaSeleccion(gruposPublicos = [], seleccion = {}, opts) {
   return gruposPublicos
     .map(g => {
-      const o = opcionElegida(g, seleccion);
+      const o = opcionElegida(g, seleccion, opts);
       return o ? `${g.nombre}: ${o.nombre}` : null;
     })
     .filter(Boolean)
