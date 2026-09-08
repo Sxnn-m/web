@@ -15,7 +15,7 @@ import {
 import {
   calcularDisponibilidad, disponibilidadPorVariantes, normalizarReceta,
   nombreSugerido, nuevoId, filamentosDeVariantes, variantesPublicas,
-  variantesPrivadas, filasDeInventario,
+  variantesPrivadas, filasDeInventario, filasDeInsumos,
 } from '../lib/variantes.js';
 import {
   nuevoIdInsumo, disponibilidadDeGrupo, insumosDuplicados, gruposPublicos,
@@ -998,7 +998,7 @@ export function ProductsTab({
                   </div>
                 </div>
 
-                {abierto && <DisponibilidadDetalle disp={disp} producto={p} filamentos={filamentos}/>}
+                {abierto && <DisponibilidadDetalle disp={disp} producto={p} filamentos={filamentos} insumos={insumos}/>}
               </div>
             );
           })}
@@ -1131,7 +1131,7 @@ function PersonalizadosTab({
                   </div>
                 </div>
 
-                {abierto && <DisponibilidadDetalle disp={disp} producto={p} filamentos={filamentos}/>}
+                {abierto && <DisponibilidadDetalle disp={disp} producto={p} filamentos={filamentos} insumos={insumos}/>}
               </div>
             );
           })}
@@ -1234,7 +1234,9 @@ function ModalRenumeracion({ plan, onClose, onConfirm }) {
 // ─── Detalle expandible de disponibilidad (solo backoffice) ───────────
 // Material | Color | Variante(s) | Por unidad | Necesario | En inventario | Estado
 const COL_INVENTARIO = "1.2fr 1fr 1.4fr 90px 110px 110px 80px";
-function DisponibilidadDetalle({ disp, producto, filamentos = [] }) {
+// Insumo | Origen (fijo o grupo) | Por unidad | Necesario | En catálogo | Estado
+const COL_INSUMOS = "2fr 1.4fr 100px 110px 130px 90px";
+function DisponibilidadDetalle({ disp, producto, filamentos = [], insumos = [] }) {
   if (disp.sinReceta) {
     return (
       <div style={{ padding: "12px 16px 16px 34px", background: "var(--bg-alt)", fontSize: 12, color: "#c64138", lineHeight: 1.6 }}>
@@ -1250,6 +1252,8 @@ function DisponibilidadDetalle({ disp, producto, filamentos = [] }) {
   // TODAS las combinaciones de TODAS las variantes, no solo las de la que se
   // está ofreciendo: si no, una variante sin stock queda invisible acá.
   const filasInventario = filasDeInventario(producto, filamentos);
+  // Los fijos y las opciones de cada grupo, en una sola tabla.
+  const filasInsumos = filasDeInsumos(producto, insumos);
   const faltantesTodos = filasInventario.filter(d => !d.ok);
 
   return (
@@ -1306,37 +1310,77 @@ function DisponibilidadDetalle({ disp, producto, filamentos = [] }) {
         </ul>
       )}
 
-      {/* Insumos: mismo criterio pero a 1x, no el doble */}
-      {(disp.detalleInsumos || []).length > 0 && (
+      {/* Insumos: mismo criterio pero a 1x, no el doble. Van los FIJOS y
+          también cada opción de cada grupo de variante de insumo, igual que
+          arriba se listan todas las variantes de color y no solo una. */}
+      {filasInsumos.length > 0 && (
         <>
           <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 1.2, color: "var(--muted)", fontWeight: 700, margin: "18px 0 8px" }}>
             Insumos vs. catálogo — alcanza con tener lo que consume una unidad
           </div>
+          <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 8, lineHeight: 1.5 }}>
+            Los <strong>fijos</strong> van siempre en la pieza; de cada <strong>grupo</strong> se
+            consume una sola opción, así que al grupo le alcanza con tener una con stock.
+          </div>
+          {/* Estado de cada grupo, como el de cada variante de color arriba. */}
+          {(disp.gruposInsumo || []).length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+              {disp.gruposInsumo.map(g => (
+                <span key={g.id} style={{
+                  padding: "3px 9px", borderRadius: 2, fontSize: 11, fontWeight: 600,
+                  background: (g.disponible ? "#4a7a52" : "#c64138") + "18",
+                  color: g.disponible ? "#4a7a52" : "#c64138",
+                }}>
+                  {g.nombre || "(sin nombre)"} — {g.disponible
+                    ? `${g.opciones.filter(o => o.disponible).length} de ${g.opciones.length} en stock`
+                    : "ninguna opción con stock"}
+                </span>
+              ))}
+            </div>
+          )}
           <div style={{
-            display: "grid", gridTemplateColumns: "2.4fr 110px 120px 120px 90px",
+            display: "grid", gridTemplateColumns: COL_INSUMOS,
             gap: 10, padding: "8px 0", fontSize: 10, textTransform: "uppercase",
             letterSpacing: 1.2, color: "var(--muted)", fontWeight: 700,
           }}>
-            <div>Insumo</div><div>Por unidad</div><div>Necesario</div><div>En catálogo</div><div>Estado</div>
+            <div>Insumo</div><div>Origen</div><div>Por unidad</div><div>Necesario</div><div>En catálogo</div><div>Estado</div>
           </div>
-          {disp.detalleInsumos.map((d, i) => (
+          {filasInsumos.map((d, i) => (
             <div key={i} style={{
-              display: "grid", gridTemplateColumns: "2.4fr 110px 120px 120px 90px",
+              display: "grid", gridTemplateColumns: COL_INSUMOS,
               gap: 10, padding: "8px 0", fontSize: 12, borderTop: "1px solid var(--line)",
               alignItems: "center",
             }}>
               <div style={{ fontWeight: 600 }}>{d.nombre || "(sin nombre)"}</div>
+              <div style={{ fontSize: 11, color: "var(--muted)" }}>
+                {d.origen}
+                {!d.esFijo && d.opcionNombre && (
+                  <span style={{ display: "block" }}>opción "{d.opcionNombre}"</span>
+                )}
+              </div>
               <div>{d.cantidadPorUnidad} u.</div>
               <div style={{ fontWeight: 600 }}>{d.requerido} u.</div>
               <div style={{ color: d.ok ? "var(--text)" : "#c64138", fontWeight: d.ok ? 400 : 700 }}>
                 {d.existe ? `${d.enCatalogo} u.` : "no está en el catálogo"}
               </div>
-              <div style={{ color: d.ok ? "#4a7a52" : "#c64138", fontWeight: 700 }}>{d.ok ? "OK" : "Falta"}</div>
+              {/* Una opción sin stock no es un faltante del producto: solo deja
+                  de ofrecerse mientras otra del grupo sí esté. */}
+              <div style={{
+                color: d.ok ? "#4a7a52" : d.opcional ? "#B56B3E" : "#c64138", fontWeight: 700,
+              }}>
+                {d.ok ? "OK" : d.opcional ? "Sin stock" : "Falta"}
+              </div>
             </div>
           ))}
-          {disp.faltantesInsumos.length > 0 && (
+          {(disp.faltantesInsumos.length > 0 || (disp.gruposSinOpciones || []).length > 0) && (
             <ul style={{ margin: "12px 0 0", paddingLeft: 18, fontSize: 12, color: "#c64138", lineHeight: 1.7 }}>
-              {disp.faltantesInsumos.map((f, i) => <li key={i}>{motivoFaltanteInsumo(f)}</li>)}
+              {disp.faltantesInsumos.map((f, i) => <li key={`f${i}`}>{motivoFaltanteInsumo(f)}</li>)}
+              {(disp.gruposSinOpciones || []).map((g, i) => (
+                <li key={`g${i}`}>
+                  {g.nombre || "(sin nombre)"}: ninguna de sus {g.opciones.length} opciones
+                  tiene stock, así que el producto no se puede armar.
+                </li>
+              ))}
             </ul>
           )}
         </>

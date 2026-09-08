@@ -88,9 +88,17 @@ export function unirVariantes(publicas = [], privadas = []) {
   }));
 }
 
-/** El color que esta variante le asigna a esta línea. */
-export const colorDeLinea = (variante, lineaId) =>
-  String(variante?.colores?.[lineaId] || "").trim();
+/**
+ * El color que esta variante le asigna a esta línea.
+ *
+ * Sin variante —o con una variante que no le asignó color a esta línea, porque
+ * se agregó a la receta después— cae al color que la propia línea trae del
+ * modelo viejo, anterior a las variantes. Es el color con el que ese producto
+ * se estuvo imprimiendo, así que descontarlo es lo correcto; inventar uno o
+ * dejarlo vacío haría que un pedido viejo no se pueda cerrar nunca.
+ */
+export const colorDeLinea = (variante, lineaId, linea = null) =>
+  String(variante?.colores?.[lineaId] || linea?.color || "").trim();
 
 /**
  * Las líneas de consumo reales de una variante: material + color + gramos.
@@ -103,7 +111,7 @@ export const colorDeLinea = (variante, lineaId) =>
 export function consumoDeVariante(receta = [], variante) {
   const mapa = new Map();
   for (const linea of lineasUtiles(receta)) {
-    const color = colorDeLinea(variante, linea.id);
+    const color = colorDeLinea(variante, linea.id, linea);
     const clave = claveFilamento(linea.material, color);
     const previo = mapa.get(clave);
     if (previo) previo.gramos += linea.gramos;
@@ -282,6 +290,56 @@ export function filasDeInventario(producto, filamentos = []) {
     (a.ok - b.ok) ||
     a.material.localeCompare(b.material, "es") ||
     a.color.localeCompare(b.color, "es")
+  );
+}
+
+/**
+ * Todo lo que el producto puede consumir del catálogo de insumos, en una sola
+ * tabla: los insumos FIJOS y, además, cada opción de cada grupo de variante de
+ * insumo, con su tipo, lo que pide y lo que hay.
+ *
+ * Mismo criterio que filasDeInventario con las variantes de color: no se
+ * muestra solo lo que consume la combinación que se está ofreciendo, se
+ * muestran todas, porque una opción sin stock tiene que verse.
+ *
+ * La diferencia con los fijos es qué significa que falte: un fijo faltante
+ * bloquea el producto entero, mientras que de cada grupo se consume UNA sola
+ * opción, así que el grupo alcanza con que tenga una con stock. Por eso cada
+ * fila lleva `opcional` y `origen`.
+ *
+ * @returns {Array<{origen, esFijo, opcional, nombre, tipoNombre, opcionNombre,
+ *                  cantidadPorUnidad, requerido, enCatalogo, existe, ok}>}
+ */
+export function filasDeInsumos(producto, insumos = []) {
+  const fijas = lineasDeInsumo(producto)
+    .map(l => detalleDeLineaInsumo(l, insumos))
+    .map(d => ({ ...d, origen: "Fijo", esFijo: true, opcional: false, opcionNombre: "" }));
+
+  const deGrupos = disponibilidadDeGrupos(producto?.variantesInsumo || [], insumos)
+    .flatMap(g => (g.opciones || []).map(o => ({
+      insumoId: o.insumoId,
+      tipoId: o.tipoId || "",
+      nombre: o.insumoNombre || o.nombre || "(sin insumo)",
+      tipoNombre: o.tipoNombre || "",
+      opcionNombre: o.nombre || "(sin nombre)",
+      origen: g.nombre || "(grupo sin nombre)",
+      esFijo: false,
+      // De un grupo se consume una sola opción: que esta no tenga stock no
+      // rompe nada mientras otra sí lo tenga.
+      opcional: true,
+      cantidadPorUnidad: Math.max(1, Number(o.cantidad) || 1),
+      requerido: o.requerido,
+      enCatalogo: o.enCatalogo,
+      existe: o.existe,
+      ok: o.disponible,
+    })));
+
+  // Los faltantes arriba, y dentro de cada bloque primero los fijos: son los
+  // que efectivamente bloquean el producto.
+  return [...fijas, ...deGrupos].sort((a, b) =>
+    (a.ok - b.ok) || (b.esFijo - a.esFijo) ||
+    String(a.origen).localeCompare(String(b.origen), "es") ||
+    String(a.nombre).localeCompare(String(b.nombre), "es")
   );
 }
 

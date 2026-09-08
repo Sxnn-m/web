@@ -353,6 +353,13 @@ function AppInterna() {
       color: config.color,
       texto: config.custom ?? config.texto ?? "",
       cantidad: config.qty ?? config.cantidad ?? 1,
+      // El precio de la combinación elegida y qué se eligió en cada grupo de
+      // variante de insumo. Sin esto la línea se guardaba con el precio base
+      // del producto —no el que decía la pantalla— y sin rastro de la opción.
+      // Las tarjetas del catálogo no los mandan: ahí no hay nada elegido
+      // todavía y agregarLinea cae al precio del producto.
+      precioUnitario: config.precioUnitario ?? null,
+      opciones: config.opciones ?? null,
     });
     const toast = document.createElement("div");
     toast.textContent = "Agregado al carrito";

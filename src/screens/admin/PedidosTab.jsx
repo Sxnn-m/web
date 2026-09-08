@@ -4,13 +4,15 @@ import { fmtFecha } from './InventarioTab.jsx';
 import {
   cargarPedidos, siguienteNumeroOrden, crearPedido, eliminarPedido,
   marcarEntregado, marcarPagado, estaPagado, marcarPedidoImpreso, planDeConsumo, planDeInsumos,
-  buscarProductoDeLinea,
+  buscarProductoDeLinea, opcionesFaltantes,
 } from '../../lib/inventario.js';
 import {
   agruparConsumo, validarStock, textoFaltante,
 } from '../../lib/consumoPedido.js';
 import { buscarFilamento } from '../../lib/disponibilidad.js';
-import { etiquetaSeleccion } from '../../lib/variantesInsumo.js';
+import {
+  etiquetaSeleccion, precioDeCombinacion, gruposPublicos,
+} from '../../lib/variantesInsumo.js';
 import { tiposDe, claveTipo } from '../../lib/tiposInsumo.js';
 
 const actionBtn = {
@@ -32,7 +34,7 @@ const labelStyle = {
 
 const lineaVacia = () =>
   ({ tipo: "catalogo", productoId: "", varianteId: "", opcionesInsumo: {},
-     cantidad: 1, precioUnitario: 0 });
+     cantidad: 1, precioUnitario: 0, precioEditado: false });
 
 /**
  * Código visible de una línea de pedido. Prioriza el snapshot guardado al
@@ -236,9 +238,12 @@ export function PedidosTab({ pedidos, productos, personalizados = [], filamentos
       detalle: p.id || "",
       price: p.price,
       variantes: p.variantes || [],
-      gruposInsumo: p.variantesInsumo || [],
+      // Los grupos se evalúan contra el catálogo de insumos de AHORA, no
+      // contra el booleano que quedó guardado en el producto: así el selector
+      // marca bien qué opción tiene stock y el precio sale del tipo vigente.
+      gruposInsumo: gruposPublicos(p.variantesInsumo || [], insumos),
       busqueda: `${p.name || ""} ${p.id || ""}`.toLowerCase(),
-    })), [productos]);
+    })), [productos, insumos]);
 
   const opcionesPersonalizado = useMemo(() => [...personalizados]
     .sort((a, b) => (a.clienteNombre || "").localeCompare(b.clienteNombre || ""))
@@ -250,9 +255,9 @@ export function PedidosTab({ pedidos, productos, personalizados = [], filamentos
       detalle: p.clienteNombre ? `Cliente: ${p.clienteNombre}` : "",
       price: p.price,
       variantes: p.variantes || [],
-      gruposInsumo: p.variantesInsumo || [],
+      gruposInsumo: gruposPublicos(p.variantesInsumo || [], insumos),
       busqueda: `${p.name || ""} ${p.clienteNombre || ""}`.toLowerCase(),
-    })), [personalizados]);
+    })), [personalizados, insumos]);
 
   const opcionesDe = (tipo) => tipo === "personalizado" ? opcionesPersonalizado : opcionesCatalogo;
 
@@ -261,27 +266,58 @@ export function PedidosTab({ pedidos, productos, personalizados = [], filamentos
 
   const upLinea = (i, patch) => setLineas(ls => ls.map((l, j) => j === i ? { ...l, ...patch } : l));
 
+  /**
+   * El precio de la línea, con la MISMA función que usa el detalle público
+   * (precioDeCombinacion): precio base + lo que suma la opción elegida en cada
+   * grupo, o el precio manual de la opción cuando lo tiene.
+   *
+   * exigirStock: false porque en un pedido se puede elegir a propósito una
+   * opción agotada —se imprime cuando llegue el insumo— y ahí el precio tiene
+   * que ser el de ESA opción, no el de la primera que quede en stock.
+   */
+  const precioDeLinea = (o, opcionesInsumo) =>
+    precioDeCombinacion(o?.price ?? 0, o?.gruposInsumo || [], opcionesInsumo || {},
+      { exigirStock: false });
+
   const elegirProducto = (i, tipo, productoId) => {
     const o = opcionesDe(tipo).find(x => x._id === productoId);
     const variantes = o?.variantes || [];
+    // Ídem cada grupo de insumo con una sola opción: se preselecciona.
+    const opcionesInsumo = Object.fromEntries(
+      (o?.gruposInsumo || [])
+        .filter(g => (g.opciones || []).length === 1)
+        .map(g => [g.id, g.opciones[0].id]));
     upLinea(i, {
       productoId,
-      precioUnitario: o?.price ?? 0,
+      opcionesInsumo,
+      precioUnitario: precioDeLinea(o, opcionesInsumo),
+      // El precio vuelve a ser automático al cambiar de producto: lo que se
+      // hubiera escrito a mano era para otra pieza.
+      precioEditado: false,
       // Con una sola variante no hay nada que elegir: se preselecciona para
       // no obligar a un clic que siempre daría lo mismo.
       varianteId: variantes.length === 1 ? variantes[0].id : "",
-      // Ídem cada grupo de insumo con una sola opción.
-      opcionesInsumo: Object.fromEntries(
-        (o?.gruposInsumo || [])
-          .filter(g => (g.opciones || []).length === 1)
-          .map(g => [g.id, g.opciones[0].id])),
+    });
+  };
+
+  /**
+   * Cambiar la opción de un grupo cambia el precio: es todo el sentido de las
+   * variantes de insumo. Solo se pisa el precio si no lo escribieron a mano.
+   */
+  const elegirOpcion = (i, linea, grupoId, opcionId) => {
+    const o = opcionesDe(linea.tipo).find(x => x._id === linea.productoId);
+    const opcionesInsumo = { ...(linea.opcionesInsumo || {}), [grupoId]: opcionId };
+    upLinea(i, {
+      opcionesInsumo,
+      ...(linea.precioEditado ? {} : { precioUnitario: precioDeLinea(o, opcionesInsumo) }),
     });
   };
 
   // Cambiar de tipo limpia la selección: el producto elegido es de la otra
   // colección y no tiene sentido conservarlo.
   const cambiarTipo = (i, tipo) =>
-    upLinea(i, { tipo, productoId: "", varianteId: "", opcionesInsumo: {}, precioUnitario: 0 });
+    upLinea(i, { tipo, productoId: "", varianteId: "", opcionesInsumo: {},
+      precioUnitario: 0, precioEditado: false });
 
   const resetForm = () => {
     setCliente("");
@@ -340,7 +376,8 @@ export function PedidosTab({ pedidos, productos, personalizados = [], filamentos
             // sabe qué insumo tocar, y el detalle del pedido no muestra la
             // combinación que se vendió.
             opcionesInsumo: { ...(l.opcionesInsumo || {}) },
-            opcionesTexto: etiquetaSeleccion(o?.gruposInsumo || [], l.opcionesInsumo || {}),
+            opcionesTexto: etiquetaSeleccion(o?.gruposInsumo || [], l.opcionesInsumo || {},
+              { exigirStock: false }),
             cantidad: Number(l.cantidad) || 0,
             precioUnitario: Number(l.precioUnitario) || 0,
           };
@@ -445,8 +482,7 @@ export function PedidosTab({ pedidos, productos, personalizados = [], filamentos
                   <OpcionesInsumoSelect
                     grupos={(opcionesDe(l.tipo).find(x => x._id === l.productoId) || {}).gruposInsumo || []}
                     valores={l.opcionesInsumo || {}}
-                    onChange={(grupoId, opcionId) =>
-                      upLinea(i, { opcionesInsumo: { ...(l.opcionesInsumo || {}), [grupoId]: opcionId } })}
+                    onChange={(grupoId, opcionId) => elegirOpcion(i, l, grupoId, opcionId)}
                     deshabilitado={!l.productoId}
                   />
                 </div>
@@ -456,7 +492,37 @@ export function PedidosTab({ pedidos, productos, personalizados = [], filamentos
                 </div>
                 <div>
                   {i === 0 && <div style={labelStyle}>Precio unitario</div>}
-                  <TKInput type="number" value={l.precioUnitario} onChange={e => upLinea(i, { precioUnitario: e.target.value })} />
+                  <TKInput type="number" value={l.precioUnitario}
+                    onChange={e => upLinea(i, {
+                      precioUnitario: e.target.value,
+                      // Tocarlo a mano corta el recálculo automático: si no,
+                      // elegir otra opción pisaría el precio acordado.
+                      precioEditado: true,
+                    })} />
+                  {l.productoId && (
+                    l.precioEditado ? (
+                      <button
+                        onClick={() => {
+                          const o = opcionesDe(l.tipo).find(x => x._id === l.productoId);
+                          upLinea(i, {
+                            precioUnitario: precioDeLinea(o, l.opcionesInsumo),
+                            precioEditado: false,
+                          });
+                        }}
+                        style={{
+                          background: "none", border: "none", padding: 0, marginTop: 4,
+                          fontSize: 10, color: "var(--accent)", cursor: "pointer",
+                          textDecoration: "underline",
+                        }}
+                      >
+                        fijado a mano · volver al automático
+                      </button>
+                    ) : (
+                      <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 4 }}>
+                        sale de la opción elegida
+                      </div>
+                    )
+                  )}
                 </div>
                 <div>
                   {i === 0 && <div style={labelStyle}>Subtotal</div>}
@@ -661,6 +727,11 @@ function ModalImpresion({ pedido, productos, personalizados = [], filamentos, in
   const planInsumos = useMemo(
     () => planDeInsumos(pedido, productos, personalizados, insumos),
     [pedido, productos, personalizados, insumos]);
+  // Grupos de insumo que este pedido no resolvió (pedidos anteriores a las
+  // variantes): no se pueden descontar solos, pero tampoco se ocultan.
+  const faltanOpciones = useMemo(
+    () => opcionesFaltantes(pedido, productos, personalizados),
+    [pedido, productos, personalizados]);
   const [desperdicios, setDesperdicios] = useState({});
   const [guardando, setGuardando] = useState(false);
   const [errorStock, setErrorStock] = useState("");   // faltante detectado por la transacción
@@ -739,6 +810,33 @@ function ModalImpresion({ pedido, productos, personalizados = [], filamentos, in
           Al confirmar se descuenta del inventario el consumo de receta más el desperdicio, y se
           registra el gasto en el historial de cada filamento.
         </p>
+
+        {plan.some(l => l.sinVariante) && (
+          <div style={{
+            padding: "12px 14px", background: "#B56B3E15", borderLeft: "3px solid #B56B3E",
+            fontSize: 12.5, lineHeight: 1.6, marginBottom: 20,
+          }}>
+            Este pedido no dice en qué color se imprimió{" "}
+            <strong>{[...new Set(plan.filter(l => l.sinVariante)
+              .map(l => `${l.productoNombre} (${l.material})`))].join(", ")}</strong>,
+            y la receta tampoco lo trae. Es de antes de las variantes de color. Como no se puede
+            saber de qué rollo salió, <strong>esos gramos no se descuentan</strong>: ajustalos a
+            mano desde el tab Inventario.
+          </div>
+        )}
+
+        {faltanOpciones.length > 0 && (
+          <div style={{
+            padding: "12px 14px", background: "#B56B3E15", borderLeft: "3px solid #B56B3E",
+            fontSize: 12.5, lineHeight: 1.6, marginBottom: 20,
+          }}>
+            Este pedido no dice qué opción se vendió en{" "}
+            <strong>{faltanOpciones.map(f => `${f.productoNombre} · ${f.grupoNombre}`).join(", ")}</strong>.
+            Es de antes de que el producto tuviera variantes de insumo. Como cada opción consume un
+            insumo distinto, <strong>esas unidades no se descuentan</strong>: si hace falta, ajustalas
+            a mano desde el tab Insumos.
+          </div>
+        )}
 
         {planInsumos.length > 0 && (
           <div style={{ marginBottom: 20 }}>

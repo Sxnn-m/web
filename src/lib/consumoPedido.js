@@ -23,6 +23,12 @@ import { claveTipo } from './tiposInsumo.js';
 export function agruparConsumo(plan = [], desperdicios = {}, planInsumos = []) {
   const filamentos = new Map();
   for (const linea of plan) {
+    // Línea sin color resuelto: el pedido es anterior a las variantes y ni la
+    // receta trae color. No se puede saber de qué rollo salió, y descontar de
+    // uno cualquiera sería vaciar el equivocado en silencio. Se deja afuera
+    // del consumo —el modal la muestra aparte, para ajustarla a mano— en vez
+    // de bloquear para siempre un pedido que ya se imprimió.
+    if (linea.sinVariante) continue;
     const clave = claveFilamento(linea.material, linea.color);
     const desperdiciada = Number(desperdicios[linea.clave]) || 0;
     const total = (Number(linea.cantidadConsumida) || 0) + desperdiciada;

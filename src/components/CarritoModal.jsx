@@ -97,6 +97,15 @@ export function CarritoModal() {
                   {l.colorNombre || "Sin color elegido"}
                 </div>
 
+                {/* Qué se eligió en cada grupo de variante de insumo: es lo
+                    que explica por qué esta línea sale distinto que otra del
+                    mismo producto. */}
+                {l.opcionesTexto && (
+                  <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>
+                    {l.opcionesTexto}
+                  </div>
+                )}
+
                 {l.texto && (
                   <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>
                     Texto: <strong style={{ color: "var(--text)" }}>"{l.texto}"</strong>
