@@ -14,6 +14,7 @@ import {
   etiquetaSeleccion, precioDeCombinacion, gruposPublicos,
 } from '../../lib/variantesInsumo.js';
 import { tiposDe, claveTipo } from '../../lib/tiposInsumo.js';
+import { ListaDesplegable } from '../../components/ListaDesplegable.jsx';
 
 const actionBtn = {
   background: "none", border: "1px solid var(--line)", padding: "6px 8px",
@@ -21,15 +22,12 @@ const actionBtn = {
   borderRadius: 4,
 };
 
-const selectStyle = {
-  width: "100%", padding: "12px 14px", background: "var(--bg)",
-  border: "1px solid var(--line)",
-  fontSize: 14, color: "var(--text)", borderRadius: 4, outline: "none",
-};
-
 const labelStyle = {
   fontSize: 11, fontWeight: 600, letterSpacing: 0.8,
   textTransform: "uppercase", color: "var(--muted)", marginBottom: 6,
+  // Un rótulo en dos líneas baja su campo respecto de los demás: la fila se
+  // alinea arriba, así que todos los rótulos tienen que medir lo mismo.
+  whiteSpace: "nowrap",
 };
 
 const lineaVacia = () =>
@@ -66,11 +64,6 @@ function BadgeTipo({ tipo }) {
 }
 
 /**
- * Buscador con autocompletado: filtra en vivo por nombre o por código y
- * muestra las coincidencias para elegir con un clic. Misma UI para catálogo
- * y personalizados; solo cambia la fuente y qué campos entran en la búsqueda.
- */
-/**
  * Elige la variante del producto de la línea. Es lo que decide de qué rollo
  * se descuenta al marcar el pedido como impreso, así que se listan TODAS las
  * variantes: acá manda lo que se imprimió, no lo que hay en stock. Las que no
@@ -92,23 +85,18 @@ function VarianteSelect({ variantes = [], valor, onChange, deshabilitado }) {
     );
   }
   return (
-    <select
-      value={valor || ""}
-      onChange={e => onChange(e.target.value)}
-      style={{
-        width: "100%", padding: "12px 10px", background: "var(--bg)",
-        border: `1px solid ${valor ? "var(--line)" : "#c64138"}`, borderRadius: 4,
-        fontSize: 13, color: "var(--text)", outline: "none", boxSizing: "border-box",
-        fontFamily: "'DM Sans', system-ui, sans-serif",
-      }}
-    >
-      <option value="">— Elegir —</option>
-      {variantes.map(v => (
-        <option key={v.id} value={v.id}>
-          {v.nombre || "(sin nombre)"}{v.disponible ? "" : " · sin stock"}
-        </option>
-      ))}
-    </select>
+    <ListaDesplegable
+      opciones={variantes.map(v => ({
+        id: v.id,
+        nombre: v.nombre || "(sin nombre)",
+        nota: v.disponible ? "" : "· sin stock",
+      }))}
+      valor={valor || ""}
+      onElegir={onChange}
+      vacio="— Elegir —"
+      invalido={!valor}
+      titulo="Variante de color"
+    />
   );
 }
 
@@ -127,92 +115,49 @@ function OpcionesInsumoSelect({ grupos = [], valores = {}, onChange, deshabilita
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
       {grupos.map(g => (
-        <select
+        <ListaDesplegable
           key={g.id}
-          value={valores[g.id] || ""}
-          onChange={e => onChange(g.id, e.target.value)}
-          title={g.nombre}
-          style={{
-            width: "100%", padding: "9px 8px", background: "var(--bg)",
-            border: `1px solid ${valores[g.id] ? "var(--line)" : "#c64138"}`,
-            borderRadius: 4, fontSize: 12, color: "var(--text)", outline: "none",
-            boxSizing: "border-box", fontFamily: "'DM Sans', system-ui, sans-serif",
-          }}
-        >
-          <option value="">{g.nombre || "Grupo"}: elegir</option>
-          {(g.opciones || []).map(o => (
-            <option key={o.id} value={o.id}>
-              {o.nombre}{o.disponible ? "" : " · sin stock"}
-            </option>
-          ))}
-        </select>
+          opciones={(g.opciones || []).map(o => ({
+            id: o.id,
+            nombre: o.nombre,
+            nota: o.disponible ? "" : "· sin stock",
+          }))}
+          valor={valores[g.id] || ""}
+          onElegir={(opcionId) => onChange(g.id, opcionId)}
+          vacio={`${g.nombre || "Grupo"}: elegir`}
+          invalido={!valores[g.id]}
+          titulo={g.nombre}
+        />
       ))}
     </div>
   );
 }
 
+/**
+ * Buscador con autocompletado: filtra en vivo por nombre o por código y
+ * muestra las coincidencias para elegir con un clic. Misma UI para catálogo
+ * y personalizados; solo cambia la fuente y qué campos entran en la búsqueda.
+ */
 function BuscadorProducto({ opciones, valorId, onSelect, placeholder }) {
-  const [texto, setTexto] = useState("");
-  const [abierto, setAbierto] = useState(false);
-
-  const elegida = opciones.find(o => o._id === valorId) || null;
-  const q = texto.trim().toLowerCase();
-  const coincidencias = q
-    ? opciones.filter(o => o.busqueda.includes(q))
-    : opciones;
-
-  const elegir = (o) => {
-    onSelect(o._id);
-    setTexto("");
-    setAbierto(false);
-  };
-
   return (
-    <div style={{ position: "relative" }}>
-      <input
-        value={abierto ? texto : (elegida ? elegida.etiqueta : texto)}
-        onChange={e => { setTexto(e.target.value); setAbierto(true); }}
-        onFocus={() => { setTexto(""); setAbierto(true); }}
-        // El blur se demora para que el clic en una opción llegue primero.
-        onBlur={() => setTimeout(() => setAbierto(false), 150)}
-        placeholder={placeholder}
-        style={{
-          ...selectStyle,
-          borderColor: elegida ? "var(--accent)" : "var(--line)",
-        }}
-      />
-
-      {abierto && (
-        <div style={{
-          position: "absolute", top: "100%", left: 0, right: 0, zIndex: 20,
-          background: "var(--bg)", border: "1px solid var(--line-strong)",
-          maxHeight: 240, overflowY: "auto", boxShadow: "0 8px 24px rgba(0,0,0,.15)",
-        }}>
-          {coincidencias.length === 0 ? (
-            <div style={{ padding: "12px 14px", fontSize: 13, color: "var(--muted)" }}>
-              No se encontraron productos
-            </div>
-          ) : coincidencias.map(o => (
-            <div
-              key={o._id}
-              onMouseDown={() => elegir(o)}
-              style={{
-                padding: "10px 14px", cursor: "pointer", fontSize: 13,
-                borderBottom: "1px solid var(--line)",
-                background: o._id === valorId ? "var(--bg-alt)" : "transparent",
-              }}
-              onMouseEnter={e => (e.currentTarget.style.background = "var(--bg-alt)")}
-              onMouseLeave={e => (e.currentTarget.style.background = o._id === valorId ? "var(--bg-alt)" : "transparent")}
-            >
-              <div style={{ fontWeight: 600 }}>{o.nombre}</div>
-              {o.detalle && (
-                <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>{o.detalle}</div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
+    <ListaDesplegable
+      opciones={opciones.map(o => ({
+        id: o._id,
+        nombre: o.etiqueta || o.nombre,
+        detalle: o.detalle,
+        busqueda: o.busqueda,
+      }))}
+      valor={valorId || ""}
+      onElegir={onSelect}
+      vacio={placeholder}
+      conBuscador
+      placeholder={placeholder}
+      // El campo de búsqueda mira el mismo texto que ya armaba cada opción
+      // (nombre + código, o nombre + cliente en personalizados).
+      coincide={(o, q) => (o.busqueda || o.nombre || "").toLowerCase().includes(q)}
+      invalido={!valorId}
+      titulo="Producto"
+    />
   );
 }
 
@@ -437,7 +382,7 @@ export function PedidosTab({ pedidos, productos, personalizados = [], filamentos
           <div style={{ ...labelStyle, marginBottom: 10 }}>Productos del pedido</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 12 }}>
             {lineas.map((l, i) => (
-              <div key={i} style={{ display: "grid", gridTemplateColumns: "120px 1fr 130px 150px 70px 110px 90px 36px", gap: 10, alignItems: "end" }}>
+              <div key={i} style={{ display: "grid", gridTemplateColumns: "120px 1fr 130px 150px 70px 130px 90px 36px", gap: 10, alignItems: "start" }}>
                 <div>
                   {i === 0 && <div style={labelStyle}>Tipo</div>}
                   <div style={{ display: "flex", border: "1px solid var(--line)", borderRadius: 4, overflow: "hidden" }}>
@@ -526,15 +471,23 @@ export function PedidosTab({ pedidos, productos, personalizados = [], filamentos
                 </div>
                 <div>
                   {i === 0 && <div style={labelStyle}>Subtotal</div>}
-                  <div style={{ padding: "12px 0", fontWeight: 700 }}>{fmtARS(totales[i] || 0)}</div>
+                  <div style={{ padding: "13px 0", fontWeight: 700, lineHeight: "18px" }}>
+                    {fmtARS(totales[i] || 0)}
+                  </div>
                 </div>
-                <button
-                  onClick={() => setLineas(ls => ls.length > 1 ? ls.filter((_, j) => j !== i) : ls)}
-                  style={{ ...actionBtn, color: "#c64138", justifyContent: "center", height: 42 }}
-                  title="Quitar línea"
-                >
-                  <Icon.trash size={14}/>
-                </button>
+                <div>
+                  {/* Espaciador del alto del rótulo: sin él el botón queda más
+                      arriba que los campos de la primera fila. */}
+                  {i === 0 && <div style={{ ...labelStyle, visibility: "hidden" }}>·</div>}
+                  <button
+                    onClick={() => setLineas(ls => ls.length > 1 ? ls.filter((_, j) => j !== i) : ls)}
+                    style={{ ...actionBtn, color: "#c64138", justifyContent: "center",
+                      height: 44, width: "100%" }}
+                    title="Quitar línea"
+                  >
+                    <Icon.trash size={14}/>
+                  </button>
+                </div>
               </div>
             ))}
           </div>

@@ -44,24 +44,27 @@ export async function cargarFilamentos() {
     );
 }
 
-// "marca" es descriptiva: identifica el rollo, pero NO entra en el matcheo
-// de recetas, que empareja por material + color (ver src/lib/opcionesFilamento.js).
-export async function crearFilamento({ material, color, marca = "", cantidadGramos = 0 }) {
+// "marca" y "owner" son descriptivos: identifican el rollo y de quién es, pero
+// NO entran en el matcheo de recetas, que empareja por material + color (ver
+// src/lib/opcionesFilamento.js). Los dos son opcionales.
+export async function crearFilamento({ material, color, marca = "", owner = "", cantidadGramos = 0 }) {
   const ref = await addDoc(collection(db, COL_FILAMENTOS), {
     material: String(material).trim(),
     color: String(color).trim(),
     marca: String(marca).trim(),
+    owner: String(owner).trim(),
     cantidadGramos: Number(cantidadGramos) || 0,
     updatedAt: serverTimestamp(),
   });
   return ref.id;
 }
 
-export async function actualizarFilamento(id, { material, color, marca, cantidadGramos }) {
+export async function actualizarFilamento(id, { material, color, marca, owner, cantidadGramos }) {
   const data = { updatedAt: serverTimestamp() };
   if (material !== undefined) data.material = String(material).trim();
   if (color !== undefined) data.color = String(color).trim();
   if (marca !== undefined) data.marca = String(marca).trim();
+  if (owner !== undefined) data.owner = String(owner).trim();
   if (cantidadGramos !== undefined) data.cantidadGramos = Number(cantidadGramos) || 0;
   await updateDoc(doc(db, COL_FILAMENTOS, id), data);
 }

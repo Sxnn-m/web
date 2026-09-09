@@ -1,11 +1,11 @@
 // ─── Opciones ocultas de los combobox de filamento ───────────────────
-// Material, color y marca NO tienen catálogo propio: sus opciones son un
+// Material, color, marca y owner NO tienen catálogo propio: sus opciones son un
 // distinct sobre los filamentos cargados. Por eso "eliminar una opción" no
 // puede ser borrar un elemento de una lista — el valor volvería a aparecer
 // en el próximo render, porque el filamento que lo usa sigue existiendo.
 //
 // Acá se guarda qué valores dejaron de ofrecerse. Los filamentos que ya los
-// usaban NO se tocan: conservan su material/color/marca y se siguen viendo
+// usaban NO se tocan: conservan su valor y se siguen viendo
 // en el listado de Inventario; simplemente no se sugieren para los nuevos.
 
 import { db } from '../firebase.js';
@@ -13,9 +13,9 @@ import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 
 export const DOC_OCULTAS = "opcionesOcultas";
 
-export const CAMPOS = ["material", "color", "marca"];
+export const CAMPOS = ["material", "color", "marca", "owner"];
 
-const vacio = () => ({ material: [], color: [], marca: [] });
+const vacio = () => ({ material: [], color: [], marca: [], owner: [] });
 
 /** Normaliza lo que venga guardado a la forma esperada. */
 export function normalizarOcultas(data = {}) {
