@@ -27,7 +27,27 @@ export function nuevoIdInsumo(prefijo = "g") {
 }
 
 const texto = (v) => String(v || "").trim();
-const cantidadDe = (v) => Math.max(1, Number(v) || 1);
+
+/**
+ * Cuántas unidades consume una opción. A diferencia de los insumos fijos, acá
+ * el 0 es un valor válido: es como se ofrece un "Sin cargador" al lado de un
+ * "Con cargador". Una opción en 0 no consume nada, no cuesta nada y no
+ * depende de ningún stock.
+ */
+const cantidadDe = (v) => Math.max(0, Math.round(Number(v) || 0));
+
+/** Las unidades que consume una opción, ya saneadas. La usa el formulario. */
+export const cantidadDeOpcion = (opcion) => cantidadDe(opcion?.cantidad);
+
+/**
+ * ¿Esta opción compromete stock del catálogo?
+ *
+ * No lo hace si no lleva unidades, ni si no apunta a ningún insumo: las dos
+ * cosas describen lo mismo —una opción que existe pero no consume— y se
+ * tratan igual en todo el flujo (precio, disponibilidad, descuento, gasto).
+ */
+export const opcionSinConsumo = (opcion) =>
+  !texto(opcion?.insumoId) || cantidadDe(opcion?.cantidad) === 0;
 
 /** Normaliza la mitad privada: a qué insumo apunta cada opción y cuánto lleva. */
 export function normalizarGruposPrivados(grupos = []) {
@@ -103,8 +123,13 @@ export const referenciaDeOpcion = (catalogo = [], opcion) =>
  * Lo que suma esa opción al precio: cantidad × precio unitario del TIPO
  * elegido. Si el insumo ya no está, cae al snapshot guardado en la opción —
  * igual que hacen los insumos fijos.
+ *
+ * Una opción que no consume nada suma 0, aunque tenga un snapshot viejo: no
+ * hay unidades que cobrar. Su precio manual, si lo tiene, es otra cosa y sigue
+ * mandando (ver precioDeCombinacion).
  */
 export function precioDeOpcion(opcion, catalogo = []) {
+  if (opcionSinConsumo(opcion)) return 0;
   const { tipo } = referenciaDeOpcion(catalogo, opcion);
   const unitario = tipo
     ? Number(tipo.precioUnidad) || 0
@@ -125,8 +150,28 @@ export function disponibilidadDeGrupo(grupo, catalogo = []) {
     // habilita la opción RGB.
     const enCatalogo = tipo ? Number(tipo.cantidadDisponible) || 0 : 0;
     const requerido = cantidadDe(o.cantidad) * FACTOR_DISPONIBILIDAD_INSUMO;
+
+    // Una opción que no consume nada ("Sin cargador") no depende de ningún
+    // stock: no hay nada que reponer para poder ofrecerla, así que está
+    // disponible siempre y no necesita insumo vinculado.
+    if (opcionSinConsumo(o)) {
+      return {
+        ...o,
+        sinConsumo: true,
+        insumoNombre: insumo ? etiquetaInsumoTipo(insumo, tipo) : "",
+        tipoNombre: tipo?.nombre || "",
+        tipoId: tipo?.tipoId || o.tipoId || "",
+        precio: 0,
+        requerido: 0,
+        enCatalogo: 0,
+        existe: true,
+        disponible: true,
+      };
+    }
+
     return {
       ...o,
+      sinConsumo: false,
       // El nombre del catálogo manda; el de la opción es lo que ve el cliente.
       insumoNombre: insumo ? etiquetaInsumoTipo(insumo, tipo) : "",
       tipoNombre: tipo?.nombre || "",
@@ -318,7 +363,9 @@ export function insumosDeSeleccion(grupos = [], seleccion = {}, catalogo = []) {
   const salida = [];
   for (const grupo of disponibilidadDeGrupos(grupos, catalogo)) {
     const pedida = opcionPedida(grupo, seleccion);
-    if (!pedida || !pedida.insumoId) continue;
+    // Sin línea no hay descuento, ni gasto, ni nada que validar: es como se
+    // resuelve solo el caso de una opción que no consume ("Sin cargador").
+    if (!pedida || pedida.sinConsumo || !pedida.insumoId) continue;
     salida.push({
       insumoId: pedida.insumoId,
       tipoId: pedida.tipoId || "",
@@ -356,7 +403,8 @@ export function insumosDuplicados(insumosFijos = [], grupos = [], catalogo = [])
   const repetidos = new Map();
   for (const g of grupos || []) {
     for (const o of g?.opciones || []) {
-      if (!o?.insumoId) continue;
+      // Una opción que no consume nada no cobra dos veces nada.
+      if (!o?.insumoId || opcionSinConsumo(o)) continue;
       const clave = claveDe(o.insumoId, o.tipoId);
       if (!fijos.has(clave)) continue;
       const { insumo, tipo } = resolverInsumoTipo(catalogo, o.insumoId, o.tipoId);
