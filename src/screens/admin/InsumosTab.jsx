@@ -60,17 +60,13 @@ export function InsumosTab({ insumos, onChanged, setMsg }) {
 
   const openNuevo = () => {
     setEditando(null);
-    setForm({ nombre: "", tipo: "", tipos: [filaTipo({ nombre: NOMBRE_TIPO_BASE })] });
+    setForm({ nombre: "", tipos: [filaTipo({ nombre: NOMBRE_TIPO_BASE })] });
     setShowForm(true);
   };
 
   const openEditar = (i) => {
     setEditando(i);
-    setForm({
-      nombre: i.nombre || "",
-      tipo: i.tipo || "",
-      tipos: tiposDe(i).map(filaTipo),
-    });
+    setForm({ nombre: i.nombre || "", tipos: tiposDe(i).map(filaTipo) });
     setShowForm(true);
   };
 
@@ -168,8 +164,8 @@ export function InsumosTab({ insumos, onChanged, setMsg }) {
 
   const tiposEnAlerta = insumos.reduce(
     (n, i) => n + tiposDe(i).filter(necesitaRestockInsumo).length, 0);
-  // Nombre | Agrupador | Precio | Disponible | Alerta | Acciones
-  const COL = "2fr 120px 120px 120px 130px 120px";
+  // Nombre | Precio unidad | Disponible | Alerta | Acciones
+  const COL = "2fr 150px 130px 180px 120px";
 
   return (
     <>
@@ -183,14 +179,10 @@ export function InsumosTab({ insumos, onChanged, setMsg }) {
           <div style={{ fontSize: 18, marginBottom: 16 }}>
             {editando ? "Editar insumo" : "Nuevo insumo"}
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "2fr 200px", gap: 16, marginBottom: 16 }} className="form-layout">
+          <div style={{ marginBottom: 16 }}>
             <TKInput label="Nombre" value={form.nombre}
               onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))}
               placeholder="Imán neodimio 10mm" />
-            <TKInput label="Agrupador (opcional)" value={form.tipo}
-              onChange={e => setForm(f => ({ ...f, tipo: e.target.value }))}
-              placeholder="Ej: Luz"
-              hint="Agrupa insumos intercambiables." />
           </div>
 
           <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: "var(--muted)", marginBottom: 6 }}>
@@ -242,8 +234,6 @@ export function InsumosTab({ insumos, onChanged, setMsg }) {
           </button>
 
           <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 12, lineHeight: 1.5 }}>
-            El <strong>agrupador</strong> es opcional y solo sirve para reconocer insumos
-            intercambiables entre sí al armar las variantes de un producto: no afecta stock ni costos.
             Para sumar unidades usá "Registrar restock" en el detalle de cada tipo: queda asentado
             en su historial. El precio se copia al producto cuando lo agregás a su receta.
             Cambiarlo acá <strong>no</strong> recalcula los productos ya guardados: cada producto
@@ -271,7 +261,7 @@ export function InsumosTab({ insumos, onChanged, setMsg }) {
             fontSize: 10, textTransform: "uppercase", letterSpacing: 1.5,
             color: "var(--muted)", fontWeight: 700,
           }}>
-            <div>Nombre</div><div>Agrupador</div><div>Precio unidad</div>
+            <div>Nombre</div><div>Precio unidad</div>
             <div>Disponible</div><div>Alerta</div><div>Acciones</div>
           </div>
 
@@ -317,16 +307,16 @@ export function InsumosTab({ insumos, onChanged, setMsg }) {
                       {i.nombre}
                     </span>
                   </div>
-                  <div style={{ color: i.tipo ? "var(--text)" : "var(--muted)", fontSize: 12 }}>
-                    {i.tipo || "—"}
-                  </div>
                   {multi ? (
-                    <div style={{ gridColumn: "span 3", color: "var(--muted)", fontSize: 12 }}>
-                      {tipos.length} tipos · desde {fmtARS(Math.min(...tipos.map(t => Number(t.precioUnidad) || 0)))}
-                      {alerta && <> · <span style={{ color: "#c64138", fontWeight: 700 }}>
-                        {tipos.filter(necesitaRestockInsumo).length} para reponer
-                      </span></>}
-                    </div>
+                    // Con varios tipos, cada uno tiene su precio y su stock:
+                    // un precio suelto acá sería el de cuál. Los números van
+                    // en las filas de abajo; acá solo cuántos son.
+                    <>
+                      <div style={{ color: "var(--muted)", fontSize: 12 }}>
+                        {tipos.length} tipos
+                      </div>
+                      <div/>
+                    </>
                   ) : (
                     <>
                       <div>{fmtARS(unico.precioUnidad || 0)}</div>
@@ -336,9 +326,17 @@ export function InsumosTab({ insumos, onChanged, setMsg }) {
                           <div style={{ fontSize: 10, fontWeight: 400 }}>faltan unidades</div>
                         )}
                       </div>
-                      <div>{alerta ? <RestockBadge/> : <span style={{ color: "var(--muted)", fontSize: 12 }}>OK</span>}</div>
                     </>
                   )}
+                  {/* La alerta es la misma para los dos casos: con varios
+                      tipos dice además cuántos hay que reponer. */}
+                  <div>
+                    {alerta
+                      ? <RestockBadge detalle={multi
+                          ? `${tipos.filter(necesitaRestockInsumo).length} de ${tipos.length}`
+                          : ""}/>
+                      : <span style={{ color: "var(--muted)", fontSize: 12 }}>OK</span>}
+                  </div>
                   <div style={{ display: "flex", gap: 4 }}>
                     {!multi && (
                       <button onClick={() => setAbierto({ insumoId: i._id, tipoId: unico.tipoId })}
@@ -403,9 +401,6 @@ export function InsumosTab({ insumos, onChanged, setMsg }) {
                       >
                         {t.nombre}
                       </div>
-                      {/* El agrupador es del insumo, no del tipo: la celda va
-                          vacía en vez de repetirlo o poner un guion. */}
-                      <div/>
                       <div>{fmtARS(t.precioUnidad || 0)}</div>
                       <div style={{ fontWeight: 700, color: alertaTipo ? "#c64138" : "var(--text)" }}>
                         {Number(t.cantidadDisponible || 0)} u.

@@ -13,7 +13,11 @@ export function fmtFecha(valor) {
   });
 }
 
-export function RestockBadge() {
+/**
+ * @param {string} [detalle] Aclaración entre paréntesis, para los insumos con
+ *   varios tipos: "1 de 3" dice cuántos de ellos hay que reponer.
+ */
+export function RestockBadge({ detalle = "" }) {
   return (
     <span style={{
       display: "inline-block", padding: "4px 10px",
@@ -22,7 +26,7 @@ export function RestockBadge() {
       fontSize: 10, fontWeight: 700, letterSpacing: 1,
       textTransform: "uppercase", borderRadius: 2, whiteSpace: "nowrap",
     }}>
-      Hacer restock
+      Hacer restock{detalle ? ` (${detalle})` : ""}
     </span>
   );
 }

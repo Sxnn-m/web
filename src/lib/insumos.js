@@ -80,23 +80,21 @@ export function tiposParaGuardar(tipos = []) {
   return [normalizarTipo({ nombre: NOMBRE_TIPO_BASE }, 0)];
 }
 
-// "tipo" (singular) agrupa insumos relacionados al armar las variantes de un
-// producto. Es descriptivo y NO tiene nada que ver con "tipos" (plural), que
-// es donde viven el precio y el stock.
-export async function crearInsumo({ nombre, tipo = "", tipos = [] }) {
+// El "tipo" (singular) que agrupaba insumos intercambiables quedó obsoleto con
+// el modelo de tipos por insumo: cada tipo ya tiene su propio nombre. No se
+// escribe más, y se borra del documento al guardar.
+export async function crearInsumo({ nombre, tipos = [] }) {
   const ref = await addDoc(collection(db, COL_INSUMOS), {
     nombre: String(nombre).trim(),
-    tipo: String(tipo).trim(),
     tipos: tiposParaGuardar(tipos),
     updatedAt: serverTimestamp(),
   });
   return ref.id;
 }
 
-export async function actualizarInsumo(id, { nombre, tipo, tipos }) {
-  const data = { updatedAt: serverTimestamp() };
+export async function actualizarInsumo(id, { nombre, tipos }) {
+  const data = { updatedAt: serverTimestamp(), tipo: deleteField() };
   if (nombre !== undefined) data.nombre = String(nombre).trim();
-  if (tipo !== undefined) data.tipo = String(tipo).trim();
   if (tipos !== undefined) {
     data.tipos = tiposParaGuardar(tipos);
     // Un insumo que se guarda ya no puede quedar con los campos planos: si no,
