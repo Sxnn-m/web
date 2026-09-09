@@ -296,6 +296,22 @@ export function siguienteNumeroOrden(pedidos = []) {
   return `ORD-${String(maximo + 1).padStart(4, "0")}`;
 }
 
+/**
+ * El mapa grupoId → opcionId de una línea, saneado: solo pares de strings.
+ * Firestore rechaza undefined, y un valor raro acá dejaría la línea sin poder
+ * resolver qué insumo se vendió.
+ */
+export function normalizarOpcionesInsumo(opciones) {
+  if (!opciones || typeof opciones !== "object") return {};
+  const salida = {};
+  for (const [grupoId, opcionId] of Object.entries(opciones)) {
+    const g = String(grupoId || "").trim();
+    const o = String(opcionId || "").trim();
+    if (g && o) salida[g] = o;
+  }
+  return salida;
+}
+
 export async function crearPedido({ numeroOrden, clienteNombre, items }) {
   const lineas = items.map(i => ({
     productoId: i.productoId,
@@ -307,6 +323,14 @@ export async function crearPedido({ numeroOrden, clienteNombre, items }) {
     // renumere o se borre del catálogo.
     productoCodigo: i.productoCodigo || "",
     productoNombre: i.productoNombre,
+    // Qué se vendió en cada eje. Sin esto la línea queda igual que un pedido
+    // anterior a las variantes: al marcarlo impreso no hay forma de saber de
+    // qué rollo descontar el filamento ni qué insumo lleva cada grupo, y solo
+    // se descuentan los insumos fijos.
+    varianteId: i.varianteId || "",
+    varianteNombre: i.varianteNombre || "",
+    opcionesInsumo: normalizarOpcionesInsumo(i.opcionesInsumo),
+    opcionesTexto: i.opcionesTexto || "",
     cantidad: Number(i.cantidad) || 0,
     precioUnitario: Number(i.precioUnitario) || 0,
     subtotal: (Number(i.cantidad) || 0) * (Number(i.precioUnitario) || 0),

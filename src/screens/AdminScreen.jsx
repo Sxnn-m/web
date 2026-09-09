@@ -1322,10 +1322,22 @@ function DisponibilidadDetalle({ disp, producto, filamentos = [], insumos = [] }
             Los <strong>fijos</strong> van siempre en la pieza; de cada <strong>grupo</strong> se
             consume una sola opción, así que al grupo le alcanza con tener una con stock.
           </div>
-          {/* Estado de cada grupo, como el de cada variante de color arriba. */}
-          {(disp.gruposInsumo || []).length > 0 && (
+          {/* Estado de cada insumo fijo y de cada grupo, como el de cada
+              variante de color arriba: la tabla de abajo sola no responde de
+              un vistazo "¿esto se puede armar hoy?". */}
+          {(filasInsumos.length > 0) && (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
-              {disp.gruposInsumo.map(g => (
+              {filasInsumos.filter(f => f.esFijo).map((f, i) => (
+                <span key={`fijo${i}`} style={{
+                  padding: "3px 9px", borderRadius: 2, fontSize: 11, fontWeight: 600,
+                  background: (f.ok ? "#4a7a52" : "#c64138") + "18",
+                  color: f.ok ? "#4a7a52" : "#c64138",
+                }}>
+                  {f.nombre || "(sin nombre)"} — {f.ok ? "en stock"
+                    : f.existe ? "sin stock" : "no está en el catálogo"}
+                </span>
+              ))}
+              {(disp.gruposInsumo || []).map(g => (
                 <span key={g.id} style={{
                   padding: "3px 9px", borderRadius: 2, fontSize: 11, fontWeight: 600,
                   background: (g.disponible ? "#4a7a52" : "#c64138") + "18",
@@ -1846,7 +1858,7 @@ export function VariantesInsumoEditor({ grupos, setGrupos, catalogo, insumosFijo
                             <option value="">Seleccionar insumo...</option>
                             {catalogo.map(x => (
                               <option key={x._id} value={x._id}>
-                                {x.tipo ? `[${x.tipo}] ` : ""}{x.nombre}
+                                {x.nombre}
                                 {esMultiTipo(x)
                                   ? ` — ${tiposDe(x).length} tipos`
                                   : ` — ${fmtARS(tiposDe(x)[0]?.precioUnidad || 0)}/u`}
