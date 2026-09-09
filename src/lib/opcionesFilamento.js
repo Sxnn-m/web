@@ -7,8 +7,8 @@
 // IMPORTANTE sobre el matcheo con las recetas: material y color SÍ arman la
 // clave con la que un producto encuentra su filamento (claveFilamento en
 // disponibilidad.js), que compara con normalizar() — trim + minúsculas. La
-// marca es descriptiva y no participa: si entrara, toda receta ya cargada
-// dejaría de encontrar su filamento.
+// marca y el owner son descriptivos y no participan: si entraran, toda receta
+// ya cargada dejaría de encontrar su filamento.
 
 import { normalizar } from './disponibilidad.js';
 
@@ -20,7 +20,7 @@ import { normalizar } from './disponibilidad.js';
  * aparece: si el inventario ya arrastra "Eryone" y "ERYONE", el desplegable
  * muestra una sola opción en vez de ofrecer las dos y perpetuar la variante.
  *
- * @param {string} campo  "material" | "color" | "marca"
+ * @param {string} campo  "material" | "color" | "marca" | "owner"
  * @returns {string[]}
  */
 export function valoresUsados(filamentos = [], campo) {
@@ -37,6 +37,9 @@ export function valoresUsados(filamentos = [], campo) {
 export const materialesUsados = (filamentos) => valoresUsados(filamentos, "material");
 export const coloresUsados = (filamentos) => valoresUsados(filamentos, "color");
 export const marcasUsadas = (filamentos) => valoresUsados(filamentos, "marca");
+// "owner": quién del equipo cargó o posee el rollo. Descriptivo como la marca,
+// no participa del matcheo con las recetas.
+export const ownersUsados = (filamentos) => valoresUsados(filamentos, "owner");
 
 /**
  * Resuelve lo que se escribió a mano contra los valores que ya existen.

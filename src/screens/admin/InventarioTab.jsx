@@ -3,7 +3,7 @@ import { TKButton, TKInput, Icon } from '../../components/UI.jsx';
 import { UMBRAL_RESTOCK, necesitaRestock } from '../../lib/disponibilidad.js';
 import { crearFilamento, actualizarFilamento, eliminarFilamento } from '../../lib/inventario.js';
 import {
-  materialesUsados, coloresUsados, marcasUsadas, resolverValor,
+  materialesUsados, coloresUsados, marcasUsadas, ownersUsados, resolverValor,
 } from '../../lib/opcionesFilamento.js';
 import { SelectorConAgregar } from '../../components/SelectorConAgregar.jsx';
 import { cargarOcultas, ocultarOpcion, filtrarVisibles } from '../../lib/opcionesOcultas.js';
@@ -28,7 +28,8 @@ export function InventarioTab({ filamentos, onChanged, setMsg }) {
   const [seleccionado, setSeleccionado] = useState(null); // _id del filamento abierto
   const [showForm, setShowForm] = useState(false);
   const [editando, setEditando] = useState(null);
-  const [form, setForm] = useState({ material: "", color: "", marca: "", cantidadGramos: 0 });
+  const [form, setForm] = useState(
+    { material: "", color: "", marca: "", owner: "", cantidadGramos: 0 });
 
   const abierto = filamentos.find(f => f._id === seleccionado) || null;
 
@@ -37,12 +38,13 @@ export function InventarioTab({ filamentos, onChanged, setMsg }) {
   // una opción" no puede borrar nada: se guarda en settings/opcionesOcultas
   // qué valores dejan de sugerirse. Los filamentos que ya los usan quedan
   // intactos y se siguen viendo en el listado de abajo.
-  const [ocultas, setOcultas] = useState({ material: [], color: [], marca: [] });
+  const [ocultas, setOcultas] = useState({ material: [], color: [], marca: [], owner: [] });
   useEffect(() => { cargarOcultas().then(setOcultas); }, []);
 
   const materiales = filtrarVisibles(materialesUsados(filamentos), ocultas.material);
   const colores = filtrarVisibles(coloresUsados(filamentos), ocultas.color);
   const marcas = filtrarVisibles(marcasUsadas(filamentos), ocultas.marca);
+  const owners = filtrarVisibles(ownersUsados(filamentos), ocultas.owner);
 
   /**
    * Saca un valor de las sugerencias. Se avisa cuántos filamentos lo usan y
@@ -69,15 +71,15 @@ export function InventarioTab({ filamentos, onChanged, setMsg }) {
 
   const openNuevo = () => {
     setEditando(null);
-    setForm({ material: "", color: "", marca: "", cantidadGramos: 0 });
+    setForm({ material: "", color: "", marca: "", owner: "", cantidadGramos: 0 });
     setShowForm(true);
   };
 
   const openEditar = (f) => {
     setEditando(f);
     setForm({
-      material: f.material || "", color: f.color || "",
-      marca: f.marca || "", cantidadGramos: f.cantidadGramos || 0,
+      material: f.material || "", color: f.color || "", marca: f.marca || "",
+      owner: f.owner || "", cantidadGramos: f.cantidadGramos || 0,
     });
     setShowForm(true);
   };
@@ -115,7 +117,8 @@ export function InventarioTab({ filamentos, onChanged, setMsg }) {
         coleccion="filamentos"
         item={abierto}
         titulo={`${abierto.material} · ${abierto.color}`}
-        subtitulo={abierto.marca ? `Inventario / Filamento · ${abierto.marca}` : "Inventario / Filamento"}
+        subtitulo={["Inventario / Filamento", abierto.marca, abierto.owner]
+          .filter(Boolean).join(" · ")}
         cantidad={abierto.cantidadGramos}
         unidad="g"
         alerta={necesitaRestock(abierto)}
@@ -128,7 +131,7 @@ export function InventarioTab({ filamentos, onChanged, setMsg }) {
   }
 
   const enAlerta = filamentos.filter(necesitaRestock).length;
-  const COL = "1.2fr 1fr 1fr 120px 140px 90px";
+  const COL = "1.1fr 1fr 1fr 1fr 110px 140px 90px";
 
   return (
     <>
@@ -142,8 +145,8 @@ export function InventarioTab({ filamentos, onChanged, setMsg }) {
           <div style={{ fontSize: 18, marginBottom: 16 }}>
             {editando ? "Editar filamento" : "Nuevo filamento"}
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 160px", gap: 16, marginBottom: 16 }} className="form-layout">
-            {/* Los tres campos usan el mismo combobox. Material y color
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 140px", gap: 16, marginBottom: 16 }} className="form-layout">
+            {/* Los cuatro campos usan el mismo combobox. Material y color
                 arman la clave con la que las recetas encuentran el filamento,
                 así que elegirlos de una lista evita que un typo deje un rollo
                 huérfano; resolverValor además pega lo tipeado a la grafía
@@ -178,6 +181,18 @@ export function InventarioTab({ filamentos, onChanged, setMsg }) {
               placeholder="Nueva marca..."
               hint="Elegí una de la lista o agregá una nueva."
             />
+            {/* Owner: de quién es el rollo. Opcional y descriptivo, como la
+                marca: no participa del matcheo con las recetas. */}
+            <SelectorConAgregar
+              label="Owner"
+              value={form.owner}
+              opciones={owners}
+              onChange={owner => setForm(f => ({ ...f, owner }))}
+              resolver={resolverValor}
+              onEliminarOpcion={(v, info) => eliminarOpcion("owner", v, info)}
+              placeholder="Nuevo owner..."
+              hint="Opcional. Quién del equipo lo tiene."
+            />
             <TKInput label="Cantidad (g)" type="number" value={form.cantidadGramos} onChange={e => setForm(f => ({ ...f, cantidadGramos: e.target.value }))} />
           </div>
           {editando && (
@@ -198,14 +213,15 @@ export function InventarioTab({ filamentos, onChanged, setMsg }) {
       </div>
 
       <div style={{ overflowX: "auto", margin: "0 -16px", padding: "0 16px" }}>
-        <div style={{ minWidth: 700 }}>
+        <div style={{ minWidth: 820 }}>
           <div style={{
             display: "grid", gridTemplateColumns: COL,
             gap: 12, padding: "10px 12px", background: "var(--bg-alt)",
             fontSize: 10, textTransform: "uppercase", letterSpacing: 1.5,
             color: "var(--muted)", fontWeight: 700,
           }}>
-            <div>Material</div><div>Color</div><div>Marca</div><div>Cantidad</div><div>Alerta</div><div>Acciones</div>
+            <div>Material</div><div>Color</div><div>Marca</div><div>Owner</div>
+            <div>Cantidad</div><div>Alerta</div><div>Acciones</div>
           </div>
 
           {filamentos.map(f => {
@@ -226,6 +242,7 @@ export function InventarioTab({ filamentos, onChanged, setMsg }) {
                 </div>
                 <div onClick={() => setSeleccionado(f._id)} style={{ cursor: "pointer" }}>{f.color}</div>
                 <div style={{ color: f.marca ? "var(--text)" : "var(--muted)" }}>{f.marca || "—"}</div>
+                <div style={{ color: f.owner ? "var(--text)" : "var(--muted)" }}>{f.owner || "—"}</div>
                 <div style={{ fontWeight: 700, color: alerta ? "#c64138" : "var(--text)" }}>
                   {Number(f.cantidadGramos || 0).toLocaleString("es-AR")} g
                 </div>
