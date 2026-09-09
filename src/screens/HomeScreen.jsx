@@ -234,11 +234,17 @@ function BestSellersCarousel({ featured, go, addToCart }) {
                   <TKButton onClick={() => go("detalle", { id: p.id })}>
                     Ver producto <Icon.arrow/>
                   </TKButton>
-                  {!sinStock(p) && (
-                    <TKButton variant="outline" onClick={() => addToCart(p)}>
-                      <Icon.ig size={14}/> Consultar por Instagram
-                    </TKButton>
-                  )}
+                  {/* Sin selectores acá: addToCart arma la línea con la
+                      primera variante y la primera opción con stock, igual que
+                      si abrieras el producto. Agotado, el botón queda a la
+                      vista pero deshabilitado. */}
+                  <TKButton
+                    variant="outline"
+                    disabled={sinStock(p)}
+                    onClick={() => addToCart(p)}
+                  >
+                    <Icon.cart size={14}/> Agregar al carrito
+                  </TKButton>
                 </div>
               </div>
             </div>

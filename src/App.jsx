@@ -11,6 +11,7 @@ import { AdminScreen } from './screens/AdminScreen.jsx';
 import { MobileHome, MobileCatalogoHub, MobileCategoria, MobileBuscador, MobileTabBar, MobileHeader } from './screens/mobile/MobileScreens.jsx';
 import { CarritoProvider, useCarrito } from './context/CarritoContext.jsx';
 import { CarritoModal } from './components/CarritoModal.jsx';
+import { configuracionInicial } from './lib/carrito.js';
 import { nombreVisible, mostrarEmail } from './lib/usuario.js';
 import { auth, db } from './firebase.js';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
@@ -349,8 +350,14 @@ function AppInterna() {
   // final, dentro del carrito, en vez de uno por producto.
   const addToCart = (product, config = {}) => {
     if (sinStock(product)) return;   // un producto no disponible no se agrega
+    // Los botones de agregar rápido —las tarjetas del catálogo, el carrusel de
+    // la home— no tienen selectores, así que la línea se arma con la misma
+    // combinación con la que abriría el detalle: primera variante con stock y
+    // primera opción con stock de cada grupo. El detalle manda lo suyo y esto
+    // no lo pisa.
+    const porDefecto = configuracionInicial(product);
     agregarAlCarrito(product, {
-      color: config.color,
+      color: config.color ?? porDefecto.color,
       texto: config.custom ?? config.texto ?? "",
       cantidad: config.qty ?? config.cantidad ?? 1,
       // El precio de la combinación elegida y qué se eligió en cada grupo de
@@ -358,8 +365,8 @@ function AppInterna() {
       // del producto —no el que decía la pantalla— y sin rastro de la opción.
       // Las tarjetas del catálogo no los mandan: ahí no hay nada elegido
       // todavía y agregarLinea cae al precio del producto.
-      precioUnitario: config.precioUnitario ?? null,
-      opciones: config.opciones ?? null,
+      precioUnitario: config.precioUnitario ?? porDefecto.precioUnitario,
+      opciones: config.opciones ?? porDefecto.opciones,
     });
     const toast = document.createElement("div");
     toast.textContent = "Agregado al carrito";
