@@ -21,7 +21,7 @@ export function Nav({ route, go, user, isAdmin, onLogout }) {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <nav style={{
+      <nav className="nav-header" style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
         padding: "18px 0", borderBottom: "1px solid var(--line)",
         position: "sticky", top: 0, background: "var(--bg)", zIndex: 50,

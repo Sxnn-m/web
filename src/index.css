@@ -39,6 +39,30 @@ button { font-family: inherit; }
 input, select, textarea { font-family: inherit; color: var(--text); }
 ::selection { background: var(--accent); color: #fff; }
 
+/* ─── Header público: el fondo llega a los dos bordes ────────────────
+   La barra vive dentro de .app-wrap (max-width 1240 + padding 24), así que
+   su caja —y con ella su fondo— termina antes que la ventana. Como es
+   sticky, lo que scrollea por debajo se veía asomar en esos huecos.
+
+   El fondo se derrama con la sombra de un pseudo-elemento y no con
+   width:100vw: vw incluye el ancho de la barra de scroll y aparecería un
+   scroll horizontal, mientras que una sombra nunca genera desbordamiento.
+   El clip-path va en el PSEUDO y no en el nav, para no recortar el menú
+   desplegable del perfil, y deja la sombra solo a los costados.
+
+   La línea beige de abajo es el border-bottom del nav: no la toca ninguna
+   de estas reglas, así que sigue midiendo y estando donde estaba. */
+.nav-header::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--bg);
+  box-shadow: 0 0 0 100vmax var(--bg);
+  clip-path: inset(0 -100vmax);
+  z-index: -1;
+  pointer-events: none;
+}
+
 @keyframes tk-ticker {
   from { transform: translateX(0); }
   to { transform: translateX(-50%); }
