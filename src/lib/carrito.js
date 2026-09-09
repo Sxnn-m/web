@@ -4,7 +4,46 @@
 // con el módulo de Pedidos del backoffice, que se sigue cargando a mano
 // después de hablar por Instagram.
 
+import { normalizarVariantesPublicas } from './variantes.js';
+import {
+  normalizarGruposPublicos, seleccionInicial, precioDeCombinacion,
+  etiquetaSeleccion, claveSeleccion,
+} from './variantesInsumo.js';
+
 export const MAX_CANTIDAD = 99;
+
+/**
+ * La combinación por defecto de un producto: la primera variante de color CON
+ * stock y la primera opción con stock de cada grupo de insumo, con el precio
+ * que le corresponde.
+ *
+ * Es exactamente con lo que abre el detalle del producto, y es lo que usan los
+ * botones de "Agregar" que no tienen selectores —las tarjetas del catálogo y
+ * el carrusel de la home—: así agregar desde ahí da la misma línea que abrir
+ * el producto y agregarlo sin tocar nada. Sin esto la línea salía sin color y
+ * al precio base, que con grupos de insumo no lo paga nadie.
+ *
+ * @returns {{color, opciones, precioUnitario}} listo para agregarLinea()
+ */
+export function configuracionInicial(producto) {
+  const variantes = normalizarVariantesPublicas(producto?.variantes);
+  const variante = variantes.find(v => v.disponible) || null;
+
+  const grupos = normalizarGruposPublicos(producto?.variantesInsumo);
+  const seleccion = seleccionInicial(grupos);
+
+  return {
+    color: variante ? { id: variante.id, name: variante.nombre } : null,
+    opciones: grupos.length > 0
+      ? {
+          seleccion,
+          etiqueta: etiquetaSeleccion(grupos, seleccion),
+          clave: claveSeleccion(seleccion),
+        }
+      : null,
+    precioUnitario: precioDeCombinacion(Number(producto?.price) || 0, grupos, seleccion),
+  };
+}
 
 /**
  * Identidad de una línea: el mismo producto con el mismo color, el mismo texto
