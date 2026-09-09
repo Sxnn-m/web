@@ -313,7 +313,8 @@ export function filasDeInventario(producto, filamentos = []) {
 export function filasDeInsumos(producto, insumos = []) {
   const fijas = lineasDeInsumo(producto)
     .map(l => detalleDeLineaInsumo(l, insumos))
-    .map(d => ({ ...d, origen: "Fijo", esFijo: true, opcional: false, opcionNombre: "" }));
+    .map(d => ({ ...d, origen: "Fijo", esFijo: true, opcional: false,
+                 sinConsumo: false, opcionNombre: "" }));
 
   const deGrupos = disponibilidadDeGrupos(producto?.variantesInsumo || [], insumos)
     .flatMap(g => (g.opciones || []).map(o => ({
@@ -327,7 +328,11 @@ export function filasDeInsumos(producto, insumos = []) {
       // De un grupo se consume una sola opción: que esta no tenga stock no
       // rompe nada mientras otra sí lo tenga.
       opcional: true,
-      cantidadPorUnidad: Math.max(1, Number(o.cantidad) || 1),
+      // "Sin cargador": la opción existe y se puede vender, pero no consume
+      // nada. Se muestra igual —esconderla la haría invisible en la auditoría—
+      // pero sin números de stock, que no significarían nada.
+      sinConsumo: o.sinConsumo === true,
+      cantidadPorUnidad: Math.max(0, Number(o.cantidad) || 0),
       requerido: o.requerido,
       enCatalogo: o.enCatalogo,
       existe: o.existe,
@@ -337,7 +342,7 @@ export function filasDeInsumos(producto, insumos = []) {
   // Los faltantes arriba, y dentro de cada bloque primero los fijos: son los
   // que efectivamente bloquean el producto.
   return [...fijas, ...deGrupos].sort((a, b) =>
-    (a.ok - b.ok) || (b.esFijo - a.esFijo) ||
+    (a.sinConsumo - b.sinConsumo) || (a.ok - b.ok) || (b.esFijo - a.esFijo) ||
     String(a.origen).localeCompare(String(b.origen), "es") ||
     String(a.nombre).localeCompare(String(b.nombre), "es")
   );

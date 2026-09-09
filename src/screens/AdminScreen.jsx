@@ -20,6 +20,7 @@ import {
 import {
   nuevoIdInsumo, disponibilidadDeGrupo, insumosDuplicados, gruposPublicos,
   gruposPrivados, normalizarGruposPublicos, permiteManual, manualesIgnorados,
+  cantidadDeOpcion,
 } from '../lib/variantesInsumo.js';
 import { cargarInsumos } from '../lib/insumos.js';
 import {
@@ -1363,24 +1364,39 @@ function DisponibilidadDetalle({ disp, producto, filamentos = [], insumos = [] }
               gap: 10, padding: "8px 0", fontSize: 12, borderTop: "1px solid var(--line)",
               alignItems: "center",
             }}>
-              <div style={{ fontWeight: 600 }}>{d.nombre || "(sin nombre)"}</div>
+              <div style={{ fontWeight: 600,
+                color: d.sinConsumo ? "var(--muted)" : "var(--text)" }}>
+                {d.nombre || (d.sinConsumo ? "Sin insumo" : "(sin nombre)")}
+              </div>
               <div style={{ fontSize: 11, color: "var(--muted)" }}>
                 {d.origen}
                 {!d.esFijo && d.opcionNombre && (
                   <span style={{ display: "block" }}>opción "{d.opcionNombre}"</span>
                 )}
               </div>
-              <div>{d.cantidadPorUnidad} u.</div>
-              <div style={{ fontWeight: 600 }}>{d.requerido} u.</div>
-              <div style={{ color: d.ok ? "var(--text)" : "#c64138", fontWeight: d.ok ? 400 : 700 }}>
-                {d.existe ? `${d.enCatalogo} u.` : "no está en el catálogo"}
+              {/* La opción que no consume nada se muestra igual —existe y se
+                  puede vender— pero sin números: no hay stock que mirar. */}
+              <div style={{ color: d.sinConsumo ? "var(--muted)" : "var(--text)" }}>
+                {d.sinConsumo ? "—" : `${d.cantidadPorUnidad} u.`}
+              </div>
+              <div style={{ fontWeight: d.sinConsumo ? 400 : 600,
+                color: d.sinConsumo ? "var(--muted)" : "var(--text)" }}>
+                {d.sinConsumo ? "—" : `${d.requerido} u.`}
+              </div>
+              <div style={{
+                color: d.sinConsumo ? "var(--muted)" : d.ok ? "var(--text)" : "#c64138",
+                fontWeight: d.sinConsumo ? 400 : d.ok ? 400 : 700,
+              }}>
+                {d.sinConsumo ? "—" : d.existe ? `${d.enCatalogo} u.` : "no está en el catálogo"}
               </div>
               {/* Una opción sin stock no es un faltante del producto: solo deja
                   de ofrecerse mientras otra del grupo sí esté. */}
               <div style={{
-                color: d.ok ? "#4a7a52" : d.opcional ? "#B56B3E" : "#c64138", fontWeight: 700,
+                color: d.sinConsumo ? "var(--muted)"
+                  : d.ok ? "#4a7a52" : d.opcional ? "#B56B3E" : "#c64138",
+                fontWeight: d.sinConsumo ? 400 : 700,
               }}>
-                {d.ok ? "OK" : d.opcional ? "Sin stock" : "Falta"}
+                {d.sinConsumo ? "No requiere stock" : d.ok ? "OK" : d.opcional ? "Sin stock" : "Falta"}
               </div>
             </div>
           ))}
@@ -1813,7 +1829,9 @@ export function VariantesInsumoEditor({ grupos, setGrupos, catalogo, insumosFijo
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         {grupos.map((g, i) => {
           const evaluado = disponibilidadDeGrupo(g, catalogo);
-          const sinOpciones = g.opciones.filter(o => !o.insumoId).length;
+          // Las que no consumen nada no están "sin insumo": no lo necesitan.
+          const sinOpciones = g.opciones.filter(
+            o => !o.insumoId && cantidadDeOpcion(o) > 0).length;
           return (
             <GrupoInsumoCard
               key={g.id}
@@ -1841,6 +1859,12 @@ export function VariantesInsumoEditor({ grupos, setGrupos, catalogo, insumosFijo
                   const tipos = tiposDe(insumo);
                   const eligeTipo = tipos.length > 1;
                   const tipoElegido = insumo ? buscarTipo(insumo, o.tipoId) : null;
+                  // En 0 la opción no consume nada, y el formulario deja de
+                  // pedir el insumo. Se mira la CANTIDAD y no
+                  // opcionSinConsumo(), que también da true cuando falta el
+                  // insumo: una opción a medio cargar tiene que seguir
+                  // marcándose en rojo, no pasar por un "sin cargador".
+                  const sinConsumo = cantidadDeOpcion(o) === 0;
                   return (
                     <div key={o.id}>
                       <div style={{
@@ -1853,9 +1877,12 @@ export function VariantesInsumoEditor({ grupos, setGrupos, catalogo, insumosFijo
                           <select
                             value={o.insumoId}
                             onChange={e => upOpcion(i, j, { insumoId: e.target.value })}
-                            style={{ ...selectStyle, borderColor: o.insumoId ? "var(--line)" : "#c64138" }}
+                            style={{ ...selectStyle,
+                              borderColor: (o.insumoId || sinConsumo) ? "var(--line)" : "#c64138" }}
                           >
-                            <option value="">Seleccionar insumo...</option>
+                            <option value="">
+                              {sinConsumo ? "Ninguno" : "Seleccionar insumo..."}
+                            </option>
                             {catalogo.map(x => (
                               <option key={x._id} value={x._id}>
                                 {x.nombre}
@@ -1893,8 +1920,11 @@ export function VariantesInsumoEditor({ grupos, setGrupos, catalogo, insumosFijo
                         </div>
                         <div>
                           {j === 0 && <div style={{ ...labelStyle, marginBottom: 4 }}>Cantidad</div>}
+                          {/* 0 es válido acá: es como se ofrece un "Sin
+                              cargador" al lado de un "Con cargador". Los
+                              insumos fijos siguen exigiendo al menos 1. */}
                           <input
-                            type="number" min="1"
+                            type="number" min="0"
                             value={o.cantidad}
                             onChange={e => upOpcion(i, j, { cantidad: e.target.value })}
                             style={recetaInput}
@@ -1907,18 +1937,26 @@ export function VariantesInsumoEditor({ grupos, setGrupos, catalogo, insumosFijo
                         </button>
                       </div>
                       <div style={{ fontSize: 11, marginTop: 4, lineHeight: 1.5,
-                        color: !o.insumoId ? "#c64138" : evaluada?.disponible ? "var(--muted)" : "#B56B3E" }}>
-                        {!o.insumoId ? "Elegí el insumo: sin él la opción no se puede ofrecer."
+                        color: sinConsumo ? "var(--muted)"
+                          : !o.insumoId ? "#c64138"
+                          : evaluada?.disponible ? "var(--muted)" : "#B56B3E" }}>
+                        {sinConsumo
+                          ? "En 0 no consume nada del catálogo: se puede ofrecer siempre, " +
+                            "y no hace falta elegir insumo."
+                          : !o.insumoId ? "Elegí el insumo: sin él la opción no se puede ofrecer."
                           : `${evaluada?.enCatalogo ?? 0} u. en catálogo` +
                             (eligeTipo && tipoElegido ? ` de "${tipoElegido.nombre}"` : "") +
                             (evaluada?.disponible ? "" : " · sin stock, no se va a ofrecer")}
                       </div>
 
                       {/* Precio de ESTA opción, con el mismo toggle que el
-                          precio general del producto. */}
-                      {o.insumoId && (
+                          precio general del producto. La que no consume nada
+                          también lo tiene: "Sin cargador" puede valer menos
+                          que el precio base, no necesariamente lo mismo. */}
+                      {(o.insumoId || sinConsumo) && (
                         <PrecioDeOpcion
                           manual={o.manual === true}
+                          sinConsumo={sinConsumo}
                           habilitado={manualHabilitado}
                           valor={o.precioManual}
                           automatico={precioBase + (evaluada?.precio || 0)}
@@ -1979,7 +2017,7 @@ export function VariantesInsumoEditor({ grupos, setGrupos, catalogo, insumosFijo
  * Precio de una opción: automático (base + costo del insumo) o fijado a mano.
  * Mismo toggle que el precio general del producto, pero por opción.
  */
-function PrecioDeOpcion({ manual, habilitado, valor, automatico, sumando, onToggle, onChange }) {
+function PrecioDeOpcion({ manual, habilitado, valor, automatico, sumando, sinConsumo = false, onToggle, onChange }) {
   return (
     <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px dashed var(--line)" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
@@ -2025,7 +2063,9 @@ function PrecioDeOpcion({ manual, habilitado, valor, automatico, sumando, onTogg
             {fmtARS(automatico)}
           </div>
           <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4, lineHeight: 1.5 }}>
-            Precio base + {fmtARS(sumando)} del insumo.
+            {sinConsumo
+              ? "El precio base, sin recargo: esta opción no consume ningún insumo."
+              : <>Precio base + {fmtARS(sumando)} del insumo.</>}
             {!habilitado && manual && (
               <span style={{ color: "#c64138" }}>
                 {" "}Hay un precio manual guardado ({fmtARS(valor || 0)}) que no se aplica con
@@ -2575,16 +2615,20 @@ export function ProductForm({
       id: g.id,
       nombre: (g.nombre || "").trim(),
       opciones: g.opciones
-        .filter(o => o.insumoId)
+        // Se guarda la que apunta a un insumo y también la que no consume
+        // nada: sin esto, "Sin cargador" desaparecía al guardar.
+        .filter(o => o.insumoId || cantidadDeOpcion(o) === 0)
         .map(o => ({
           id: o.id,
           nombre: (o.nombre || "").trim()
             || etiquetaDeReferencia(catalogoInsumos, o.insumoId, o.tipoId) || "",
           insumoId: o.insumoId,
           // El tipo se resuelve al guardar: una opción vieja sin tipoId queda
-          // anclada explícitamente al tipo que ya estaba usando.
-          tipoId: tipoIdEfectivo(catalogoInsumos, o.insumoId, o.tipoId),
-          cantidad: Math.max(1, Number(o.cantidad) || 1),
+          // anclada explícitamente al tipo que ya estaba usando. Sin insumo no
+          // hay tipo que anclar.
+          tipoId: o.insumoId ? tipoIdEfectivo(catalogoInsumos, o.insumoId, o.tipoId) : "",
+          // Sin mínimo: el 0 es lo que hace que la opción no consuma nada.
+          cantidad: cantidadDeOpcion(o),
           // Se guarda aunque hoy no aplique (más de un grupo): sacar el grupo
           // extra tiene que devolverlo a la vida sin recargarlo a mano.
           manual: o.manual === true,
