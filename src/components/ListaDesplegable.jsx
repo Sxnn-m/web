@@ -22,9 +22,13 @@ const cajaStyle = {
 };
 
 /**
- * @param {Array} opciones  [{ id, nombre, detalle?, nota?, deshabilitada? }]
+ * @param {Array} opciones  [{ id, nombre, etiqueta?, detalle?, nota?, deshabilitada? }]
  *   - detalle: segunda línea en gris dentro de la fila
  *   - nota: se muestra al lado del nombre (ej. "· sin stock")
+ *   - etiqueta: qué mostrar en la caja YA elegida, si no alcanza con el
+ *     nombre. En la fila el nombre y el detalle se ven juntos, pero cerrada
+ *     queda una sola línea y puede hacer falta más (ej. el código del producto,
+ *     que en la lista vive en el detalle)
  * @param {string}  valor          id elegido ("" = ninguno)
  * @param {Function} onElegir      recibe el id
  * @param {string}  [vacio]        qué mostrar sin nada elegido
@@ -104,7 +108,7 @@ export function ListaDesplegable({
             overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
             color: elegida ? "var(--text)" : "var(--muted)",
           }}>
-            {elegida ? elegida.nombre : vacio}
+            {elegida ? (elegida.etiqueta || elegida.nombre) : vacio}
           </span>
           <span style={{ color: "var(--muted)", flexShrink: 0, fontSize: 9 }}>▼</span>
         </button>

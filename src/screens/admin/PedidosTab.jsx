@@ -143,8 +143,12 @@ function BuscadorProducto({ opciones, valorId, onSelect, placeholder }) {
     <ListaDesplegable
       opciones={opciones.map(o => ({
         id: o._id,
-        nombre: o.etiqueta || o.nombre,
+        // En la fila, solo el nombre: el código ya va abajo en gris, y
+        // repetirlo en las dos líneas era leerlo dos veces.
+        nombre: o.nombre,
         detalle: o.detalle,
+        // Cerrado hay una sola línea, así que ahí sí se muestran los dos.
+        etiqueta: o.etiqueta || o.nombre,
         busqueda: o.busqueda,
       }))}
       valor={valorId || ""}
