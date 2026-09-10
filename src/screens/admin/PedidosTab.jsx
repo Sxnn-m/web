@@ -898,6 +898,12 @@ function ModalImpresion({ pedido, productos, personalizados = [], filamentos, in
           </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 24 }}>
+            {/* Mismo encabezado que "Insumos a descontar": son dos secciones
+                distintas y sin título los bloques de material parecían la
+                continuación de la lista de insumos. */}
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.2, textTransform: "uppercase", color: "var(--muted)" }}>
+              Material a descontar
+            </div>
             {plan.map(l => {
               // El selector va SIEMPRE, aunque haya un solo owner posible: de
               // quién sale cada impresión se confirma a mano, no se adivina.
@@ -953,8 +959,14 @@ function ModalImpresion({ pedido, productos, personalizados = [], filamentos, in
                         titulo={`De quién se descuenta el ${l.material} ${l.color}`}
                       />
                     </div>
+                    {/* La cantidad va SIEMPRE en su propia línea, no cuando no
+                        entra: con el ancho justo el número caía solo a veces y
+                        el corte quedaba distinto en cada bloque. */}
                     <div style={{ fontSize: 12, color: "var(--muted)", paddingTop: 16 }}>
-                      Total a descontar: <strong style={{ color: "var(--text)" }}>{totalPorLinea(l)} g</strong>
+                      <div>Total a descontar:</div>
+                      <div style={{ color: "var(--text)", fontWeight: 700, marginTop: 2 }}>
+                        {totalPorLinea(l)} g
+                      </div>
                     </div>
                   </div>
                   {pendiente && !sinStock && (
