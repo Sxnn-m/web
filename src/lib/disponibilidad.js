@@ -179,6 +179,23 @@ export function filamentosDe(filamentos = [], material, color) {
 }
 
 /**
+ * El rollo individual MÁS GRANDE de ese material+color.
+ *
+ * Es lo que decide la disponibilidad: el stock de dos owners no se suma, cada
+ * documento se evalúa por su cuenta. Un producto se puede imprimir si hay
+ * alguien que solo con lo suyo llega al doble del consumo; que entre dos
+ * junten esa cantidad no sirve, porque una impresión sale de un rollo.
+ *
+ * Mirar el más grande equivale a preguntar "¿alguno alcanza?" y además deja
+ * un número con sentido para mostrar: el mejor caso disponible.
+ */
+export function mejorFilamento(filamentos = [], material, color) {
+  return filamentosDe(filamentos, material, color).reduce((mejor, f) =>
+    !mejor || (Number(f.cantidadGramos) || 0) > (Number(mejor.cantidadGramos) || 0) ? f : mejor,
+    null);
+}
+
+/**
  * Los owners que REALMENTE tienen ese material+color, con sus gramos.
  * Es lo que alimenta el selector "Descontar de" del modal de impresión: si un
  * owner no tiene ese rollo cargado, no aparece como opción.
@@ -188,11 +205,15 @@ export function filamentosDe(filamentos = [], material, color) {
  * siempre sale de UN documento.
  */
 export function opcionesDeOwner(filamentos = [], material, color) {
-  return filamentosDe(filamentos, material, color).map(f => ({
-    id: f._id,
-    owner: f.owner || "",
-    disponible: Number(f.cantidadGramos) || 0,
-  }));
+  return filamentosDe(filamentos, material, color)
+    .map(f => ({
+      id: f._id,
+      owner: f.owner || "",
+      disponible: Number(f.cantidadGramos) || 0,
+    }))
+    // De mayor a menor: el primero es el que decide si el material alcanza
+    // (el mismo que devuelve mejorFilamento), así el desglose se lee de una.
+    .sort((a, b) => b.disponible - a.disponible);
 }
 
 /**
@@ -249,10 +270,14 @@ export function calcularDisponibilidadPorReceta(producto, filamentos = [], insum
   }
 
   const detalle = receta.map(item => {
-    const filamento = buscarFilamento(filamentos, item.material, item.color);
+    // El rollo más grande, no el primero: cada owner se evalúa por separado.
+    const filamento = mejorFilamento(filamentos, item.material, item.color);
     const enInventario = filamento ? Number(filamento.cantidadGramos) || 0 : 0;
     const requerido = item.gramos * FACTOR_DISPONIBILIDAD;
+    const owners = opcionesDeOwner(filamentos, item.material, item.color)
+      .map(o => ({ ...o, ok: o.disponible >= requerido }));
     return {
+      owners,
       material: item.material,
       color: item.color,
       gramosPorUnidad: item.gramos,
@@ -260,6 +285,7 @@ export function calcularDisponibilidadPorReceta(producto, filamentos = [], insum
       enInventario,
       existe: Boolean(filamento),
       filamentoId: filamento?._id || null,
+      owner: filamento?.owner || "",
       ok: Boolean(filamento) && enInventario >= requerido,
     };
   });
@@ -283,8 +309,17 @@ export function motivoFaltante(item) {
   if (!item.existe) {
     return `${etiqueta}: no está cargado en inventario (necesita ${item.requerido} g)`;
   }
-  return `${etiqueta}: ${item.enInventario} g disponibles vs. ${item.requerido} g necesarios ` +
+  const cuantos = Array.isArray(item.owners) ? item.owners.length : 0;
+  const quien = item.owner || "el rollo sin owner";
+  const cuenta = `${item.enInventario} g disponibles vs. ${item.requerido} g necesarios ` +
     `(${item.gramosPorUnidad} g × ${FACTOR_DISPONIBILIDAD})`;
+  // Con varios owners el número es el del rollo más grande, no un total: hay
+  // que decir de quién es, o parece que el material entero está corto.
+  if (cuantos > 1) {
+    return `${etiqueta}: ${cuenta} — es lo que tiene ${quien}, el que más cargado ` +
+      `tiene de los ${cuantos}; el stock no se suma entre owners`;
+  }
+  return `${etiqueta}${item.owner ? ` de ${item.owner}` : ""}: ${cuenta}`;
 }
 
 /** Texto corto explicando por qué un insumo de la receta no alcanza. */
