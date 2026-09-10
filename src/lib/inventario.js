@@ -12,7 +12,7 @@ import {
 } from './disponibilidad.js';
 import { COL_INSUMOS } from './insumos.js';
 import {
-  agruparConsumo, validarStock, StockInsuficienteError,
+  agruparConsumo, validarStock, StockInsuficienteError, claveConsumoFilamento,
 } from './consumoPedido.js';
 import { tiempoDeProducto, specsDeTiempo } from './tiempoImpresion.js';
 import { calcularPrecioSugerido } from './costos.js';
@@ -552,16 +552,22 @@ export function opcionesFaltantes(pedido, productos = [], personalizados = []) {
  * documento (una transacción no puede hacer queries); las cantidades siempre
  * salen de la lectura transaccional.
  *
+ * @param {object} asignaciones de qué rollo sale cada línea del plan, cuando
+ *   hay más de un owner con el mismo material+color. Ver agruparConsumo().
  * @throws {StockInsuficienteError} cuando algún recurso no alcanza
  * @returns {{advertencias: string[]}}
  */
 export async function marcarPedidoImpreso(
-  pedido, plan, desperdicios = {}, filamentos = [], planInsumos = [], insumos = []
+  pedido, plan, desperdicios = {}, filamentos = [], planInsumos = [],
+  insumos = [], asignaciones = {}
 ) {
-  const consumo = agruparConsumo(plan, desperdicios, planInsumos);
+  const consumo = agruparConsumo(plan, desperdicios, planInsumos, asignaciones);
 
-  // IDs de documento a partir de los catálogos ya cargados.
+  // IDs de documento a partir de los catálogos ya cargados. El owner elegido
+  // manda: solo cuando no hay ninguno (un único rollo sin asignar, o un pedido
+  // procesado desde otro lado) se cae a la búsqueda por material+color.
   const idFilamento = (item) => {
+    if (item.filamentoId) return { id: item.filamentoId };
     const f = buscarFilamento(filamentos, item.material, item.color);
     return f ? { id: f._id } : null;
   };
@@ -648,9 +654,11 @@ export async function marcarPedidoImpreso(
       });
     }
 
-    // Los gastos van por línea de pedido, para no perder qué producto consumió qué.
+    // Los gastos van por línea de pedido, para no perder qué producto consumió
+    // qué. La clave es la MISMA que usó el agrupado, owner incluido: el gasto
+    // tiene que quedar en el historial del rollo del que se descontó.
     for (const linea of plan) {
-      const ref = refsFilamento.get(claveFilamento(linea.material, linea.color));
+      const ref = refsFilamento.get(claveConsumoFilamento(linea, asignaciones));
       if (!ref) continue;
       tx.set(doc(collection(ref, "gastos")), {
         producto: linea.productoNombre,

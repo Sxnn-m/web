@@ -9,7 +9,7 @@ import {
 import {
   agruparConsumo, validarStock, textoFaltante,
 } from '../../lib/consumoPedido.js';
-import { buscarFilamento } from '../../lib/disponibilidad.js';
+import { buscarFilamento, opcionesDeOwner } from '../../lib/disponibilidad.js';
 import {
   etiquetaSeleccion, precioDeCombinacion, gruposPublicos,
 } from '../../lib/variantesInsumo.js';
@@ -690,17 +690,51 @@ function ModalImpresion({ pedido, productos, personalizados = [], filamentos, in
     () => opcionesFaltantes(pedido, productos, personalizados),
     [pedido, productos, personalizados]);
   const [desperdicios, setDesperdicios] = useState({});
+  // De qué rollo se descuenta cada línea, cuando hay más de un owner con el
+  // mismo material+color: clave de la línea del plan → id del filamento.
+  const [elegido, setElegido] = useState({});
   const [guardando, setGuardando] = useState(false);
   const [errorStock, setErrorStock] = useState("");   // faltante detectado por la transacción
 
+  // Los rollos que existen para cada línea. Puede haber dos personas con el
+  // mismo PLA Negro cargado: son documentos distintos y stocks distintos.
+  const candidatos = useMemo(() => {
+    const mapa = {};
+    for (const l of plan) {
+      if (l.sinVariante) continue;
+      mapa[l.clave] = opcionesDeOwner(filamentos, l.material, l.color);
+    }
+    return mapa;
+  }, [plan, filamentos]);
+
+  // Con un solo rollo no hay nada que preguntar y se asigna solo; con varios
+  // NO se elige por nosotros: la línea queda pendiente hasta que lo digan.
+  const asignaciones = useMemo(() => {
+    const mapa = {};
+    for (const l of plan) {
+      const opciones = candidatos[l.clave] || [];
+      if (opciones.length === 0) continue;
+      const elegida = opciones.find(o => o.id === elegido[l.clave]);
+      if (elegida) mapa[l.clave] = { id: elegida.id, owner: elegida.owner };
+      else if (opciones.length === 1) mapa[l.clave] = { id: opciones[0].id, owner: opciones[0].owner };
+      else mapa[l.clave] = { pendiente: true };
+    }
+    return mapa;
+  }, [plan, candidatos, elegido]);
+
+  const lineasPendientes = plan.filter(l => asignaciones[l.clave]?.pendiente);
+
   // Validación en vivo, con la MISMA lógica que corre dentro de la transacción:
-  // se recalcula con cada cambio de desperdicio.
+  // se recalcula con cada cambio de desperdicio o de owner.
   const validacion = useMemo(() => {
-    const consumo = agruparConsumo(plan, desperdicios, planInsumos);
+    const consumo = agruparConsumo(plan, desperdicios, planInsumos, asignaciones);
     return validarStock(
       consumo,
       (f) => {
-        const encontrado = buscarFilamento(filamentos, f.material, f.color);
+        // El rollo elegido manda; sin owner asignado, la búsqueda de siempre.
+        const encontrado = f.filamentoId
+          ? filamentos.find(x => x._id === f.filamentoId)
+          : buscarFilamento(filamentos, f.material, f.color);
         return encontrado ? { id: encontrado._id, disponible: Number(encontrado.cantidadGramos) || 0 } : null;
       },
       (i) => {
@@ -711,17 +745,18 @@ function ModalImpresion({ pedido, productos, personalizados = [], filamentos, in
         return tipo ? { id: i.clave, disponible: Number(tipo.cantidadDisponible) || 0 } : null;
       }
     );
-  }, [plan, desperdicios, planInsumos, filamentos, insumos]);
+  }, [plan, desperdicios, planInsumos, asignaciones, filamentos, insumos]);
 
   const totalPorLinea = (l) => l.cantidadConsumida + (Number(desperdicios[l.clave]) || 0);
+  const puedeConfirmar = validacion.ok && lineasPendientes.length === 0;
 
   const confirmar = async () => {
-    if (!validacion.ok) return;   // el botón ya está deshabilitado, pero por las dudas
+    if (!puedeConfirmar) return;   // el botón ya está deshabilitado, pero por las dudas
     setGuardando(true);
     setErrorStock("");
     try {
       const { advertencias } = await marcarPedidoImpreso(
-        pedido, plan, desperdicios, filamentos, planInsumos, insumos
+        pedido, plan, desperdicios, filamentos, planInsumos, insumos, asignaciones
       );
       const base = `✓ Pedido ${pedido.numeroOrden} marcado como impreso e inventario descontado.`;
       await onDone(advertencias.length ? `${base} Atención: ${advertencias.join(" ")}` : base);
@@ -847,26 +882,83 @@ function ModalImpresion({ pedido, productos, personalizados = [], filamentos, in
           </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 24 }}>
-            {plan.map(l => (
-              <div key={l.clave} style={{ padding: 14, background: "var(--bg-alt)", border: "1px solid var(--line)" }}>
-                <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 2 }}>{l.productoNombre}</div>
-                <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 10 }}>
-                  {l.material} · {l.color} — {l.gramosPorUnidad} g × {l.cantidad} u ={" "}
-                  <strong style={{ color: "var(--text)" }}>{l.cantidadConsumida} g</strong>
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "170px 1fr", gap: 14, alignItems: "center" }}>
-                  <TKInput
-                    label="Desperdicio (g)"
-                    type="number"
-                    value={desperdicios[l.clave] ?? 0}
-                    onChange={e => setDesperdicios(d => ({ ...d, [l.clave]: e.target.value }))}
-                  />
-                  <div style={{ fontSize: 12, color: "var(--muted)", paddingTop: 16 }}>
-                    Total a descontar: <strong style={{ color: "var(--text)" }}>{totalPorLinea(l)} g</strong>
+            {plan.map(l => {
+              // El selector de owner solo aparece cuando hay de dónde elegir:
+              // con un rollo (o ninguno) no hay ambigüedad que resolver.
+              const opciones = candidatos[l.clave] || [];
+              const variosOwners = opciones.length > 1;
+              const pendiente = Boolean(asignaciones[l.clave]?.pendiente);
+              return (
+                <div key={l.clave} style={{ padding: 14, background: "var(--bg-alt)", border: "1px solid var(--line)" }}>
+                  <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 2 }}>{l.productoNombre}</div>
+                  <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 10 }}>
+                    {l.material} · {l.color} — {l.gramosPorUnidad} g × {l.cantidad} u ={" "}
+                    <strong style={{ color: "var(--text)" }}>{l.cantidadConsumida} g</strong>
                   </div>
+                  <div style={{
+                    display: "grid",
+                    gridTemplateColumns: variosOwners ? "170px 210px 1fr" : "170px 1fr",
+                    gap: 14, alignItems: "start",
+                  }}>
+                    <TKInput
+                      label="Desperdicio (g)"
+                      type="number"
+                      value={desperdicios[l.clave] ?? 0}
+                      onChange={e => setDesperdicios(d => ({ ...d, [l.clave]: e.target.value }))}
+                    />
+                    {variosOwners && (
+                      <div>
+                        {/* Mismo encabezado que el label de TKInput, para que
+                            los dos campos de la fila se lean parejos. */}
+                        <label style={{
+                          display: "block", fontSize: 11, fontWeight: 600, letterSpacing: 0.8,
+                          textTransform: "uppercase", color: "var(--muted)", marginBottom: 6,
+                        }}>
+                          Descontar de
+                        </label>
+                        <ListaDesplegable
+                          opciones={opciones.map(o => ({
+                            id: o.id,
+                            nombre: `${o.owner || "Sin owner"} — ${o.disponible} g`,
+                            nota: o.disponible < totalPorLinea(l) ? "· no alcanza" : "",
+                          }))}
+                          valor={elegido[l.clave] || ""}
+                          onElegir={id => setElegido(e => ({ ...e, [l.clave]: id }))}
+                          vacio="— Elegir owner —"
+                          invalido={pendiente}
+                          titulo={`De quién se descuenta el ${l.material} ${l.color}`}
+                        />
+                      </div>
+                    )}
+                    <div style={{ fontSize: 12, color: "var(--muted)", paddingTop: 16 }}>
+                      Total a descontar: <strong style={{ color: "var(--text)" }}>{totalPorLinea(l)} g</strong>
+                    </div>
+                  </div>
+                  {pendiente && (
+                    <div style={{ fontSize: 11.5, color: "#c64138", marginTop: 8 }}>
+                      Hay {opciones.length} owners con {l.material} {l.color}: elegí de cuál se descuenta.
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
+          </div>
+        )}
+
+        {lineasPendientes.length > 0 && (
+          <div style={{
+            padding: "14px 16px", background: "#c6413812",
+            borderLeft: "3px solid #c64138", marginBottom: 20,
+            fontSize: 13, lineHeight: 1.6,
+          }}>
+            <strong style={{ color: "#c64138" }}>
+              Elegí de qué owner se descuenta cada filamento.
+            </strong>
+            <ul style={{ margin: "8px 0 0", paddingLeft: 18, color: "var(--muted)" }}>
+              {[...new Set(lineasPendientes.map(l => `${l.material} ${l.color}`.trim()))].map(t => (
+                <li key={t}>{t} está cargado por más de una persona</li>
+              ))}
+            </ul>
           </div>
         )}
 
@@ -902,8 +994,9 @@ function ModalImpresion({ pedido, productos, personalizados = [], filamentos, in
 
         <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
           <TKButton variant="outline" onClick={onClose}>Cancelar</TKButton>
-          <TKButton onClick={confirmar} disabled={guardando || !validacion.ok}>
+          <TKButton onClick={confirmar} disabled={guardando || !puedeConfirmar}>
             {guardando ? "Procesando..."
+              : lineasPendientes.length > 0 ? "Falta elegir owner"
               : !validacion.ok ? "Falta stock"
               : "Confirmar impresión"}
           </TKButton>
