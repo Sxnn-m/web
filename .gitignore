@@ -28,3 +28,6 @@ bootstrap-admin.mjs
 Thumbs.db
 .vscode/
 .idea/
+
+# Hoja comparativa del favicon: se regenera con generar-favicon.py --preview
+favicon-muestra.png
