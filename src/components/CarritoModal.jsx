@@ -191,7 +191,7 @@ export function CarritoModal() {
 
             <p style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.5, margin: "12px 0 0" }}>
               El pedido se cierra por Instagram. Todavía no es una compra:
-              coordinamos color, plazo y envío por chat.
+              coordinamos plazo y entrega por chat.
             </p>
           </footer>
         )}
