@@ -4,7 +4,7 @@ import { fmtFecha } from './InventarioTab.jsx';
 import {
   cargarPedidos, siguienteNumeroOrden, crearPedido, eliminarPedido,
   marcarEntregado, marcarPagado, estaPagado, marcarPedidoImpreso, planDeConsumo, planDeInsumos,
-  buscarProductoDeLinea, opcionesFaltantes,
+  buscarProductoDeLinea, opcionesFaltantes, agruparPorPieza,
 } from '../../lib/inventario.js';
 import {
   agruparConsumo, validarStock, textoFaltante,
@@ -679,6 +679,22 @@ export function PedidosTab({ pedidos, productos, personalizados = [], filamentos
   );
 }
 
+/**
+ * El encabezado de una pieza del pedido: el producto y, debajo, qué se eligió.
+ * Mismo formato que la fila del pedido en el listado.
+ */
+function EncabezadoPieza({ pieza }) {
+  const elegido = [pieza.varianteNombre, pieza.opcionesTexto].filter(Boolean).join(" · ");
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <div style={{ fontWeight: 700, fontSize: 14 }}>{pieza.productoNombre}</div>
+      {elegido && (
+        <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 2 }}>{elegido}</div>
+      )}
+    </div>
+  );
+}
+
 // ─── Modal: marcar como impreso + gramos desperdiciados ──────────────
 function ModalImpresion({ pedido, productos, personalizados = [], filamentos, insumos = [], onClose, onDone }) {
   const plan = useMemo(() => planDeConsumo(pedido, productos, personalizados), [pedido, productos, personalizados]);
@@ -690,6 +706,11 @@ function ModalImpresion({ pedido, productos, personalizados = [], filamentos, in
   const faltanOpciones = useMemo(
     () => opcionesFaltantes(pedido, productos, personalizados),
     [pedido, productos, personalizados]);
+  // Las dos listas del modal, agrupadas por pieza: una receta de dos
+  // materiales es UN bloque con dos filas, no dos bloques.
+  const piezasDeMaterial = useMemo(() => agruparPorPieza(plan), [plan]);
+  const piezasDeInsumo = useMemo(() => agruparPorPieza(planInsumos), [planInsumos]);
+
   const [desperdicios, setDesperdicios] = useState({});
   // De qué rollo se descuenta cada línea, cuando hay más de un owner con el
   // mismo material+color: clave de la línea del plan → id del filamento.
@@ -854,41 +875,49 @@ function ModalImpresion({ pedido, productos, personalizados = [], filamentos, in
             <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 10, lineHeight: 1.5 }}>
               Se descuentan del catálogo automáticamente. No llevan desperdicio.
             </div>
-            {planInsumos.map(l => {
-              // El semáforo de la línea sale de la validación AGRUPADA por
-              // tipo: si el mismo tipo lo comprometen dos líneas (una fija y
-              // una de variante), lo que decide es el total combinado, no lo
-              // que consume esta línea sola.
-              const agrupado = validacion.insumos.find(
-                i => i.clave === claveTipo(l.insumoId, l.tipoId));
-              const existe = Boolean(agrupado?.existe);
-              const alcanza = Boolean(agrupado?.alcanza);
-              return (
-                <div key={l.clave} style={{
-                  display: "grid", gridTemplateColumns: "1.6fr 1fr 110px",
-                  gap: 10, padding: "8px 0", fontSize: 12, borderTop: "1px solid var(--line)",
-                  alignItems: "center",
-                }}>
-                  <div style={{ fontWeight: 600 }}>{l.nombre}</div>
-                  <div style={{ color: "var(--muted)" }}>
-                    {l.productoNombre} — {l.cantidadPorUnidad} × {l.cantidad} u.
-                    {l.opcionNombre && ` · ${l.grupoNombre}: ${l.opcionNombre}`}
-                  </div>
-                  <div style={{ fontWeight: 700, color: alcanza ? "var(--text)" : "#c64138" }}>
-                    −{l.unidadesConsumidas} u.
-                    {!alcanza && (
-                      <div style={{ fontSize: 10, fontWeight: 400 }}>
-                        {existe
-                          ? (agrupado.total > l.unidadesConsumidas
-                              ? `queda negativo (${agrupado.total} u. en total del pedido)`
-                              : "queda negativo")
-                          : "ese tipo no está en el catálogo"}
+            {/* Mismo criterio que abajo: las filas se agrupan por pieza, con
+                el producto una sola vez en el encabezado en vez de repetido
+                en cada fila. */}
+            {piezasDeInsumo.map(pieza => (
+              <div key={pieza.indice} style={{ marginTop: 12 }}>
+                <EncabezadoPieza pieza={pieza}/>
+                {pieza.lineas.map(l => {
+                  // El semáforo de la línea sale de la validación AGRUPADA por
+                  // tipo: si el mismo tipo lo comprometen dos líneas (una fija y
+                  // una de variante), lo que decide es el total combinado, no lo
+                  // que consume esta línea sola.
+                  const agrupado = validacion.insumos.find(
+                    i => i.clave === claveTipo(l.insumoId, l.tipoId));
+                  const existe = Boolean(agrupado?.existe);
+                  const alcanza = Boolean(agrupado?.alcanza);
+                  return (
+                    <div key={l.clave} style={{
+                      display: "grid", gridTemplateColumns: "1.6fr 1fr 110px",
+                      gap: 10, padding: "8px 0", fontSize: 12, borderTop: "1px solid var(--line)",
+                      alignItems: "center",
+                    }}>
+                      <div style={{ fontWeight: 600 }}>{l.nombre}</div>
+                      <div style={{ color: "var(--muted)" }}>
+                        {l.cantidadPorUnidad} × {l.cantidad} u.
+                        {l.opcionNombre && ` · ${l.grupoNombre}: ${l.opcionNombre}`}
                       </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+                      <div style={{ fontWeight: 700, color: alcanza ? "var(--text)" : "#c64138" }}>
+                        −{l.unidadesConsumidas} u.
+                        {!alcanza && (
+                          <div style={{ fontSize: 10, fontWeight: 400 }}>
+                            {existe
+                              ? (agrupado.total > l.unidadesConsumidas
+                                  ? `queda negativo (${agrupado.total} u. en total del pedido)`
+                                  : "queda negativo")
+                              : "ese tipo no está en el catálogo"}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
           </div>
         )}
 
@@ -904,85 +933,99 @@ function ModalImpresion({ pedido, productos, personalizados = [], filamentos, in
             <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.2, textTransform: "uppercase", color: "var(--muted)" }}>
               Material a descontar
             </div>
-            {plan.map(l => {
-              // El selector va SIEMPRE, aunque haya un solo owner posible: de
-              // quién sale cada impresión se confirma a mano, no se adivina.
-              const opciones = candidatos[l.clave] || [];
-              const asignada = asignaciones[l.clave];
-              const pendiente = Boolean(asignada?.pendiente);
-              const sinStock = Boolean(asignada?.sinStock);
-              return (
-                <div key={l.clave} style={{ padding: 14, background: "var(--bg-alt)", border: "1px solid var(--line)" }}>
-                  <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 2 }}>{l.productoNombre}</div>
-                  <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 10 }}>
-                    {l.material} · {l.color} — {l.gramosPorUnidad} g × {l.cantidad} u ={" "}
-                    <strong style={{ color: "var(--text)" }}>{l.cantidadConsumida} g</strong>
-                  </div>
-                  <div style={{
-                    display: "grid", gridTemplateColumns: "150px 250px 1fr",
-                    gap: 14, alignItems: "start",
-                  }}>
-                    <TKInput
-                      label="Desperdicio (g)"
-                      type="number"
-                      value={desperdicios[l.clave] ?? 0}
-                      onChange={e => setDesperdicios(d => ({ ...d, [l.clave]: e.target.value }))}
-                    />
-                    <div>
-                      {/* Mismo encabezado que el label de TKInput, para que
-                          los dos campos de la fila se lean parejos. */}
-                      <label style={{
-                        display: "block", fontSize: 11, fontWeight: 600, letterSpacing: 0.8,
-                        textTransform: "uppercase", color: "var(--muted)", marginBottom: 6,
+            {/* Un bloque por PIEZA, no por material: una receta de dos
+                materiales es una sola pieza y repetir su encabezado dos veces
+                la hacía parecer dos productos distintos. */}
+            {piezasDeMaterial.map(pieza => (
+              <div key={pieza.indice} style={{ padding: 14, background: "var(--bg-alt)", border: "1px solid var(--line)" }}>
+                <EncabezadoPieza pieza={pieza}/>
+                <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                  {pieza.lineas.map((l, i) => {
+                    // El selector va SIEMPRE, aunque haya un solo owner posible:
+                    // de quién sale cada impresión se confirma a mano.
+                    const opciones = candidatos[l.clave] || [];
+                    const asignada = asignaciones[l.clave];
+                    const pendiente = Boolean(asignada?.pendiente);
+                    const sinStock = Boolean(asignada?.sinStock);
+                    return (
+                      <div key={l.clave} style={{
+                        // Cada material de la pieza se separa del anterior con
+                        // una línea fina, no con otra tarjeta.
+                        borderTop: i > 0 ? "1px solid var(--line)" : "none",
+                        paddingTop: i > 0 ? 14 : 0,
                       }}>
-                        Descontar de
-                      </label>
-                      <ListaDesplegable
-                        // Los que no sirven se listan igual, deshabilitados y
-                        // con el motivo: saber que Ana no tiene ese filamento
-                        // es parte de la respuesta.
-                        opciones={opciones.map(o => ({
-                          id: o.id,
-                          nombre: o.tiene
-                            ? `${o.owner || "Sin owner"} — ${o.disponible} g`
-                            : `${o.owner} — sin cargar`,
-                          nota: o.alcanza ? ""
-                            : o.tiene ? `· insuficiente, necesita ${totalPorLinea(l)} g`
-                            : "· no tiene este filamento",
-                          deshabilitada: !o.alcanza,
-                        }))}
-                        valor={asignada?.id || ""}
-                        onElegir={id => setElegido(e => ({ ...e, [l.clave]: id }))}
-                        vacio={opciones.length === 0 ? "— Nadie lo tiene cargado —" : "— Elegir owner —"}
-                        invalido={pendiente}
-                        deshabilitado={opciones.length === 0}
-                        titulo={`De quién se descuenta el ${l.material} ${l.color}`}
-                      />
-                    </div>
-                    {/* La cantidad va SIEMPRE en su propia línea, no cuando no
-                        entra: con el ancho justo el número caía solo a veces y
-                        el corte quedaba distinto en cada bloque. */}
-                    <div style={{ fontSize: 12, color: "var(--muted)", paddingTop: 16 }}>
-                      <div>Total a descontar:</div>
-                      <div style={{ color: "var(--text)", fontWeight: 700, marginTop: 2 }}>
-                        {totalPorLinea(l)} g
+                        <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 10 }}>
+                          {l.material} · {l.color} — {l.gramosPorUnidad} g × {l.cantidad} u ={" "}
+                          <strong style={{ color: "var(--text)" }}>{l.cantidadConsumida} g</strong>
+                        </div>
+                        <div style={{
+                          display: "grid", gridTemplateColumns: "150px 250px 1fr",
+                          gap: 14, alignItems: "start",
+                        }}>
+                          <TKInput
+                            label="Desperdicio (g)"
+                            type="number"
+                            value={desperdicios[l.clave] ?? 0}
+                            onChange={e => setDesperdicios(d => ({ ...d, [l.clave]: e.target.value }))}
+                          />
+                          <div>
+                            {/* Mismo encabezado que el label de TKInput, para
+                                que los dos campos se lean parejos. */}
+                            <label style={{
+                              display: "block", fontSize: 11, fontWeight: 600, letterSpacing: 0.8,
+                              textTransform: "uppercase", color: "var(--muted)", marginBottom: 6,
+                            }}>
+                              Descontar de
+                            </label>
+                            <ListaDesplegable
+                              // Los que no sirven se listan igual, deshabilitados
+                              // y con el motivo: saber que Ana no tiene ese
+                              // filamento es parte de la respuesta.
+                              opciones={opciones.map(o => ({
+                                id: o.id,
+                                nombre: o.tiene
+                                  ? `${o.owner || "Sin owner"} — ${o.disponible} g`
+                                  : `${o.owner} — sin cargar`,
+                                nota: o.alcanza ? ""
+                                  : o.tiene ? `· insuficiente, necesita ${totalPorLinea(l)} g`
+                                  : "· no tiene este filamento",
+                                deshabilitada: !o.alcanza,
+                              }))}
+                              valor={asignada?.id || ""}
+                              onElegir={id => setElegido(e => ({ ...e, [l.clave]: id }))}
+                              vacio={opciones.length === 0 ? "— Nadie lo tiene cargado —" : "— Elegir owner —"}
+                              invalido={pendiente}
+                              deshabilitado={opciones.length === 0}
+                              titulo={`De quién se descuenta el ${l.material} ${l.color}`}
+                            />
+                          </div>
+                          {/* La cantidad va SIEMPRE en su propia línea, no
+                              cuando no entra: con el ancho justo el número caía
+                              solo a veces y el corte quedaba distinto. */}
+                          <div style={{ fontSize: 12, color: "var(--muted)", paddingTop: 16 }}>
+                            <div>Total a descontar:</div>
+                            <div style={{ color: "var(--text)", fontWeight: 700, marginTop: 2 }}>
+                              {totalPorLinea(l)} g
+                            </div>
+                          </div>
+                        </div>
+                        {pendiente && !sinStock && (
+                          <div style={{ fontSize: 11.5, color: "#c64138", marginTop: 8 }}>
+                            Hay {opciones.filter(o => o.alcanza).length} owners que pueden imprimir{" "}
+                            {l.material} {l.color}: elegí de cuál se descuenta.
+                          </div>
+                        )}
+                        {sinStock && (
+                          <div style={{ fontSize: 11.5, color: "#c64138", marginTop: 8 }}>
+                            Ningún owner llega solo a los {totalPorLinea(l)} g de esta línea.
+                          </div>
+                        )}
                       </div>
-                    </div>
-                  </div>
-                  {pendiente && !sinStock && (
-                    <div style={{ fontSize: 11.5, color: "#c64138", marginTop: 8 }}>
-                      Hay {opciones.filter(o => o.alcanza).length} owners que pueden imprimir{" "}
-                      {l.material} {l.color}: elegí de cuál se descuenta.
-                    </div>
-                  )}
-                  {sinStock && (
-                    <div style={{ fontSize: 11.5, color: "#c64138", marginTop: 8 }}>
-                      Ningún owner llega solo a los {totalPorLinea(l)} g de esta línea.
-                    </div>
-                  )}
+                    );
+                  })}
                 </div>
-              );
-            })}
+              </div>
+            ))}
           </div>
         )}
 
