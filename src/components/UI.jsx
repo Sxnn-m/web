@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import logoFull from '../assets/logo-full.jpg';
+import logoFull from '../assets/logo-full.png';
 import { normalizarGruposPublicos, precioDesde, tieneOpcionesConPrecio } from '../lib/variantesInsumo.js';
 
 export const fmtARS = (n) => "$ " + Math.round(n).toLocaleString("es-AR");
