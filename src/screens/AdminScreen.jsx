@@ -10,7 +10,7 @@ import { InventarioTab } from './admin/InventarioTab.jsx';
 import { PedidosTab } from './admin/PedidosTab.jsx';
 import {
   motivoFaltante, motivoFaltanteInsumo,
-  FACTOR_DISPONIBILIDAD, specsDesdeReceta, buscarFilamento, necesitaRestock,
+  FACTOR_DISPONIBILIDAD, specsDesdeReceta, filamentosDe, necesitaRestock,
 } from '../lib/disponibilidad.js';
 import {
   calcularDisponibilidad, disponibilidadPorVariantes, normalizarReceta,
@@ -1233,10 +1233,77 @@ function ModalRenumeracion({ plan, onClose, onConfirm }) {
 }
 
 // ─── Detalle expandible de disponibilidad (solo backoffice) ───────────
-// Material | Color | Variante(s) | Por unidad | Necesario | En inventario | Estado
-const COL_INVENTARIO = "1.2fr 1fr 1.4fr 90px 110px 110px 80px";
+// Material | Color | Variante(s) | Por unidad | Necesario | Owner | Cantidad | Estado
+const COL_INVENTARIO = "1.1fr .9fr 1.2fr 85px 105px 1fr 95px 75px";
 // Insumo | Origen (fijo o grupo) | Por unidad | Necesario | En catálogo | Estado
 const COL_INSUMOS = "2fr 1.4fr 100px 110px 130px 90px";
+const celdaFila = {
+  display: "grid", gridTemplateColumns: COL_INVENTARIO,
+  gap: 10, padding: "8px 0", fontSize: 12, alignItems: "center",
+};
+const Estado = ({ ok }) => (
+  <div style={{ color: ok ? "#4a7a52" : "#c64138", fontWeight: 700 }}>{ok ? "OK" : "Falta"}</div>
+);
+
+/**
+ * Una línea de la tabla receta vs. inventario.
+ *
+ * Con un solo rollo (o ninguno) es una fila como siempre, con la columna Owner
+ * al lado de la cantidad. Con dos o más se parte: arriba el material+color con
+ * el estado del conjunto, y debajo una fila indentada por owner con SU estado,
+ * porque cada rollo se evalúa solo y hay que poder ver quién puede imprimir.
+ */
+function FilaInventario({ d }) {
+  const owners = d.owners || [];
+  if (owners.length <= 1) {
+    return (
+      <div style={{ ...celdaFila, borderTop: "1px solid var(--line)" }}>
+        <div style={{ fontWeight: 600 }}>{d.material}</div>
+        <div>{d.color}</div>
+        <div style={{ fontSize: 11, color: "var(--muted)" }}>{d.variantes.join(", ")}</div>
+        <div>{d.gramosPorUnidad} g</div>
+        <div style={{ fontWeight: 600 }}>{d.requerido} g</div>
+        <div style={{ color: d.owner ? "var(--text)" : "var(--muted)" }}>{d.owner || "—"}</div>
+        <div style={{ color: d.ok ? "var(--text)" : "#c64138", fontWeight: d.ok ? 400 : 700 }}>
+          {d.existe ? `${d.enInventario} g` : "sin cargar"}
+        </div>
+        <Estado ok={d.ok}/>
+      </div>
+    );
+  }
+  return (
+    <div style={{ borderTop: "1px solid var(--line)" }}>
+      <div style={{ ...celdaFila, paddingBottom: 2 }}>
+        <div style={{ fontWeight: 600 }}>{d.material}</div>
+        <div>{d.color}</div>
+        <div style={{ fontSize: 11, color: "var(--muted)" }}>{d.variantes.join(", ")}</div>
+        <div>{d.gramosPorUnidad} g</div>
+        <div style={{ fontWeight: 600 }}>{d.requerido} g</div>
+        <div style={{ fontSize: 11, color: "var(--muted)" }}>{owners.length} owners</div>
+        <div style={{ fontSize: 11, color: "var(--muted)" }}>
+          {owners.filter(o => o.ok).length} pueden
+        </div>
+        <Estado ok={d.ok}/>
+      </div>
+      {owners.map(o => (
+        <div key={o.id} style={{ ...celdaFila, padding: "5px 0" }}>
+          <div/><div/><div/><div/><div/>
+          <div style={{
+            borderLeft: "2px solid var(--line-strong)", paddingLeft: 8,
+            color: o.owner ? "var(--text)" : "var(--muted)",
+          }}>
+            {o.owner || "(sin owner)"}
+          </div>
+          <div style={{ color: o.ok ? "var(--text)" : "#c64138", fontWeight: o.ok ? 400 : 700 }}>
+            {o.disponible} g
+          </div>
+          <Estado ok={o.ok}/>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function DisponibilidadDetalle({ disp, producto, filamentos = [], insumos = [] }) {
   if (disp.sinReceta) {
     return (
@@ -1281,29 +1348,21 @@ function DisponibilidadDetalle({ disp, producto, filamentos = [], insumos = [] }
         ))}
       </div>
 
+      <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 8, lineHeight: 1.5 }}>
+        Cada rollo se evalúa por separado: si dos personas tienen el mismo material y color,
+        va <strong>una fila por owner</strong> y alcanza con que <strong>uno solo</strong> llegue
+        al {FACTOR_DISPONIBILIDAD}× — el stock no se suma entre owners, porque una pieza sale
+        de un rollo.
+      </div>
       <div style={{
         display: "grid", gridTemplateColumns: COL_INVENTARIO,
         gap: 10, padding: "8px 0", fontSize: 10, textTransform: "uppercase",
         letterSpacing: 1.2, color: "var(--muted)", fontWeight: 700,
       }}>
-        <div>Material</div><div>Color</div><div>Variante(s)</div><div>Por unidad</div><div>Necesario (×{FACTOR_DISPONIBILIDAD})</div><div>En inventario</div><div>Estado</div>
+        <div>Material</div><div>Color</div><div>Variante(s)</div><div>Por unidad</div><div>Necesario (×{FACTOR_DISPONIBILIDAD})</div><div>Owner</div><div>Cantidad</div><div>Estado</div>
       </div>
       {filasInventario.map((d, i) => (
-        <div key={i} style={{
-          display: "grid", gridTemplateColumns: COL_INVENTARIO,
-          gap: 10, padding: "8px 0", fontSize: 12, borderTop: "1px solid var(--line)",
-          alignItems: "center",
-        }}>
-          <div style={{ fontWeight: 600 }}>{d.material}</div>
-          <div>{d.color}</div>
-          <div style={{ fontSize: 11, color: "var(--muted)" }}>{d.variantes.join(", ")}</div>
-          <div>{d.gramosPorUnidad} g</div>
-          <div style={{ fontWeight: 600 }}>{d.requerido} g</div>
-          <div style={{ color: d.ok ? "var(--text)" : "#c64138", fontWeight: d.ok ? 400 : 700 }}>
-            {d.existe ? `${d.enInventario} g` : "sin cargar"}
-          </div>
-          <div style={{ color: d.ok ? "#4a7a52" : "#c64138", fontWeight: 700 }}>{d.ok ? "OK" : "Falta"}</div>
-        </div>
+        <FilaInventario key={i} d={d}/>
       ))}
       {faltantesTodos.length > 0 && (
         <ul style={{ margin: "12px 0 0", paddingLeft: 18, fontSize: 12, color: "#c64138", lineHeight: 1.7 }}>
@@ -1430,16 +1489,29 @@ function EstadoEnInventario({ linea, filamentos }) {
   const color = String(linea?.color || "").trim();
   if (!material || !color) return null;
 
-  const existente = buscarFilamento(filamentos, material, color);
+  // Todos los rollos de ese par, no el primero: el mismo material+color puede
+  // estar cargado por dos personas, y son stocks separados.
+  const rollos = filamentosDe(filamentos, material, color);
+
   const base = { fontSize: 11, marginTop: 4, lineHeight: 1.5 };
 
-  if (existente) {
-    const alerta = necesitaRestock(existente);
+  if (rollos.length > 0) {
+    const alerta = rollos.every(necesitaRestock);
     return (
       <div style={{ ...base, color: alerta ? "#B56B3E" : "var(--muted)" }}>
-        En inventario: <strong>{existente.cantidadGramos ?? 0} g</strong>
-        {existente.marca ? ` · ${existente.marca}` : ""}
-        {alerta ? " · marcado para restock" : ""}
+        En inventario:{" "}
+        {rollos.map((f, i) => (
+          <span key={f._id}>
+            {i > 0 && " · "}
+            <strong>{f.cantidadGramos ?? 0} g</strong>
+            {f.owner ? ` de ${f.owner}` : ""}
+            {f.marca ? ` (${f.marca})` : ""}
+            {necesitaRestock(f) ? " · restock" : ""}
+          </span>
+        ))}
+        {rollos.length > 1 && (
+          <span> — son rollos separados, no se suman.</span>
+        )}
       </div>
     );
   }

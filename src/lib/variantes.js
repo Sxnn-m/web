@@ -18,7 +18,7 @@
 // fusionaría y perdería esa distinción.
 
 import {
-  claveFilamento, buscarFilamento, FACTOR_DISPONIBILIDAD,
+  claveFilamento, mejorFilamento, opcionesDeOwner, FACTOR_DISPONIBILIDAD,
   lineasDeInsumo, detalleDeLineaInsumo,
 } from './disponibilidad.js';
 import { disponibilidadDeGrupos, gruposArmables } from './variantesInsumo.js';
@@ -125,9 +125,13 @@ export function consumoDeVariante(receta = [], variante) {
 }
 
 /**
- * Disponibilidad de UNA variante: para cada material+color que consume, el
- * inventario tiene que tener al menos FACTOR_DISPONIBILIDAD veces los gramos.
- * Mismo criterio de siempre, ahora por combinación de colores.
+ * Disponibilidad de UNA variante: para cada material+color que consume, algún
+ * owner tiene que tener, ÉL SOLO, al menos FACTOR_DISPONIBILIDAD veces los
+ * gramos.
+ *
+ * El stock de dos owners con el mismo material+color no se suma: son rollos
+ * separados y una pieza sale de uno. Si entre los dos juntan el doble pero
+ * ninguno llega por su cuenta, el material+color cuenta como faltante.
  */
 export function disponibilidadDeVariante(receta = [], variante, filamentos = []) {
   const lineas = consumoDeVariante(receta, variante);
@@ -144,9 +148,14 @@ export function disponibilidadDeVariante(receta = [], variante, filamentos = [])
   }
 
   const detalle = lineas.map(item => {
-    const filamento = buscarFilamento(filamentos, item.material, item.color);
-    const enInventario = filamento ? Number(filamento.cantidadGramos) || 0 : 0;
     const requerido = item.gramos * FACTOR_DISPONIBILIDAD;
+    // Cada rollo se evalúa solo. El que se reporta es el más grande: es el
+    // que decide si el material alcanza, y es el número útil para mostrar.
+    const owners = opcionesDeOwner(filamentos, item.material, item.color).map(o => ({
+      ...o, ok: o.disponible >= requerido,
+    }));
+    const filamento = mejorFilamento(filamentos, item.material, item.color);
+    const enInventario = filamento ? Number(filamento.cantidadGramos) || 0 : 0;
     return {
       material: item.material,
       color: item.color,
@@ -155,7 +164,11 @@ export function disponibilidadDeVariante(receta = [], variante, filamentos = [])
       enInventario,
       existe: Boolean(filamento),
       filamentoId: filamento?._id || null,
-      ok: Boolean(filamento) && enInventario >= requerido,
+      owner: filamento?.owner || "",
+      // El desglose completo, para que el backoffice pueda mostrar una fila
+      // por owner en vez de una sola combinada.
+      owners,
+      ok: owners.some(o => o.ok),
     };
   });
 
@@ -263,8 +276,14 @@ export const esDisponible = (producto, filamentos, insumos) =>
  * ninguna de las dos. Cuando el consumo coincide —el caso habitual— la fila
  * es una sola y lista las variantes que la comparten.
  *
+ * Cada fila trae además el desglose por owner: dos personas con el mismo
+ * material+color son dos rollos que se evalúan por separado, así que la tabla
+ * los muestra en filas distintas y no combinados. `ok` de la fila es "alguno
+ * de los owners cumple por su cuenta".
+ *
  * @returns {Array<{material, color, gramosPorUnidad, requerido, enInventario,
- *                  existe, ok, variantes: string[]}>}
+ *                  existe, ok, owner, owners: Array<{owner, disponible, ok}>,
+ *                  variantes: string[]}>}
  */
 export function filasDeInventario(producto, filamentos = []) {
   const receta = producto?.receta || [];
