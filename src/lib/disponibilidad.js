@@ -167,6 +167,35 @@ export function buscarFilamento(filamentos = [], material, color) {
 }
 
 /**
+ * TODOS los rollos que coinciden en material Y color, no solo el primero.
+ *
+ * El mismo PLA Negro puede estar cargado dos veces, una por cada persona que
+ * lo compró: son documentos distintos con stock distinto, y descontar del
+ * primero que aparece vacía el rollo equivocado en silencio.
+ */
+export function filamentosDe(filamentos = [], material, color) {
+  const clave = claveFilamento(material, color);
+  return filamentos.filter(f => claveFilamento(f.material, f.color) === clave);
+}
+
+/**
+ * Los owners que REALMENTE tienen ese material+color, con sus gramos.
+ * Es lo que alimenta el selector "Descontar de" del modal de impresión: si un
+ * owner no tiene ese rollo cargado, no aparece como opción.
+ *
+ * Va por documento y no por nombre de owner: la misma persona puede tener dos
+ * rollos del mismo material+color cargados por separado, y el descuento
+ * siempre sale de UN documento.
+ */
+export function opcionesDeOwner(filamentos = [], material, color) {
+  return filamentosDe(filamentos, material, color).map(f => ({
+    id: f._id,
+    owner: f.owner || "",
+    disponible: Number(f.cantidadGramos) || 0,
+  }));
+}
+
+/**
  * Calcula la disponibilidad de un producto contra el inventario de filamentos.
  *
  * Un producto está disponible SOLO SI tiene receta cargada y, para cada

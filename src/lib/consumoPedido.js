@@ -9,6 +9,31 @@ import { claveFilamento } from './disponibilidad.js';
 import { claveTipo } from './tiposInsumo.js';
 
 /**
+ * La asignación de owner de una línea del plan, si la hay.
+ * Ver agruparConsumo() para las tres formas que puede tomar.
+ */
+const asignacionDe = (linea, asignaciones) => asignaciones?.[linea?.clave] || null;
+
+/**
+ * Clave con la que una línea del plan entra al consumo agrupado.
+ *
+ * Incluye el documento de filamento elegido: dos líneas del mismo material y
+ * color pero de owners distintos son stocks separados y no se pueden sumar en
+ * la misma bolsa. Dos líneas del MISMO owner sí: ahí la clave vuelve a
+ * coincidir y el total combinado es el que se valida.
+ *
+ * Devuelve null cuando la línea no participa del consumo (sin color resuelto,
+ * o con owner sin elegir todavía).
+ */
+export function claveConsumoFilamento(linea, asignaciones = {}) {
+  if (!linea || linea.sinVariante) return null;
+  const asignada = asignacionDe(linea, asignaciones);
+  if (asignada?.pendiente) return null;
+  const base = claveFilamento(linea.material, linea.color);
+  return asignada?.id ? `${base}|${asignada.id}` : base;
+}
+
+/**
  * Agrupa el consumo total del pedido.
  *
  * Un pedido puede tener dos productos que usan el mismo filamento o el mismo
@@ -18,9 +43,13 @@ import { claveTipo } from './tiposInsumo.js';
  * @param {Array}  plan         salida de planDeConsumo()
  * @param {object} desperdicios mapa clave-del-plan → gramos desperdiciados
  * @param {Array}  planInsumos  salida de planDeInsumos()
+ * @param {object} asignaciones mapa clave-del-plan → de qué rollo se descuenta:
+ *   - {id, owner}      el documento elegido (o el único que hay);
+ *   - {pendiente:true} hay más de un owner y todavía no se eligió;
+ *   - ausente          no hay ningún rollo cargado para ese material+color.
  * @returns {{filamentos: Array, insumos: Array}} totales por recurso
  */
-export function agruparConsumo(plan = [], desperdicios = {}, planInsumos = []) {
+export function agruparConsumo(plan = [], desperdicios = {}, planInsumos = [], asignaciones = {}) {
   const filamentos = new Map();
   for (const linea of plan) {
     // Línea sin color resuelto: el pedido es anterior a las variantes y ni la
@@ -28,8 +57,13 @@ export function agruparConsumo(plan = [], desperdicios = {}, planInsumos = []) {
     // uno cualquiera sería vaciar el equivocado en silencio. Se deja afuera
     // del consumo —el modal la muestra aparte, para ajustarla a mano— en vez
     // de bloquear para siempre un pedido que ya se imprimió.
-    if (linea.sinVariante) continue;
-    const clave = claveFilamento(linea.material, linea.color);
+    //
+    // Owner sin elegir: mismo criterio, pero temporal. Hay dos rollos que
+    // coinciden y todavía no se dijo de cuál sale, así que no se valida contra
+    // ninguno; el modal lo pide y hasta entonces no deja confirmar.
+    const clave = claveConsumoFilamento(linea, asignaciones);
+    if (!clave) continue;
+    const asignada = asignacionDe(linea, asignaciones);
     const desperdiciada = Number(desperdicios[linea.clave]) || 0;
     const total = (Number(linea.cantidadConsumida) || 0) + desperdiciada;
     const previo = filamentos.get(clave);
@@ -38,11 +72,17 @@ export function agruparConsumo(plan = [], desperdicios = {}, planInsumos = []) {
       previo.consumida += Number(linea.cantidadConsumida) || 0;
       previo.desperdiciada += desperdiciada;
     } else {
+      const owner = asignada?.owner || "";
+      const nombre = `${linea.material} ${linea.color}`.trim();
       filamentos.set(clave, {
         clave,
         material: linea.material,
         color: linea.color,
-        etiqueta: `${linea.material} ${linea.color}`.trim(),
+        filamentoId: asignada?.id || null,
+        owner,
+        // Con dos rollos idénticos el nombre solo no alcanza para saber cuál
+        // es el que no llega: el owner es lo único que los distingue.
+        etiqueta: owner ? `${nombre} de ${owner}` : nombre,
         total,
         consumida: Number(linea.cantidadConsumida) || 0,
         desperdiciada,
@@ -129,6 +169,7 @@ export function validarStock(consumo, stockFilamento, stockInsumo) {
 
 /**
  * "PLA Negro (necesitás 145g, hay 90g disponibles)"
+ * "PLA Negro de Santiago (necesitás 90g, tiene 50g disponibles)"
  * "Imán neodimio 10mm (necesitás 8 unidades, hay 3 disponibles)"
  */
 export function textoFaltante(item) {
@@ -136,7 +177,9 @@ export function textoFaltante(item) {
     ? `${item.total}g`
     : `${item.total} ${item.total === 1 ? "unidad" : "unidades"}`;
   const hay = item.unidad === "g" ? `${item.disponible}g` : `${item.disponible}`;
-  return `${item.etiqueta} (necesitás ${necesita}, hay ${hay} disponibles)`;
+  // Con owner el faltante es de alguien, no del depósito: "tiene", no "hay".
+  const verbo = item.owner ? "tiene" : "hay";
+  return `${item.etiqueta} (necesitás ${necesita}, ${verbo} ${hay} disponibles)`;
 }
 
 /** Mensaje único con TODOS los faltantes, no de a uno. */
