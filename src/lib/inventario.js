@@ -428,14 +428,22 @@ export function varianteDeLinea(item, producto) {
  */
 export function planDeConsumo(pedido, productos = [], personalizados = []) {
   const plan = [];
-  for (const item of pedido.items || []) {
+  for (const [indice, item] of (pedido.items || []).entries()) {
     const producto = buscarProductoDeLinea(item, productos, personalizados);
     const variante = varianteDeLinea(item, producto);
     for (const linea of consumoDeVariante(producto?.receta || [], variante)) {
       plan.push({
-        clave: `${item.productoId}|${variante?.id || ""}|${linea.material}|${linea.color}`,
+        // El índice de la línea del pedido entra en la clave, igual que en
+        // planDeInsumos: el mismo producto y la misma variante pueden pedirse
+        // en dos líneas distintas, y sin él las dos filas compartían clave —
+        // misma key de React, y el desperdicio y el owner de una pisaban los
+        // de la otra, porque el modal guarda ese estado por clave.
+        clave: `${indice}|${item.productoId}|${variante?.id || ""}|${linea.material}|${linea.color}`,
+        indice,
         productoId: item.productoId,
         productoNombre: item.productoNombre,
+        // Para el encabezado de la pieza: qué se eligió en esta línea.
+        opcionesTexto: item.opcionesTexto || "",
         varianteId: variante?.id || item.varianteId || null,
         // El nombre guardado en el pedido manda; los pedidos viejos no lo
         // tienen y se resuelve contra el producto.
@@ -490,8 +498,13 @@ export function planDeInsumos(pedido, productos = [], personalizados = [], catal
         // en el modal de impresión). El agrupado por insumo lo hace después
         // agruparConsumo, que suma por insumoId.
         clave: `${indice}|${item.productoId}|${linea.opcionId || ""}|${linea.insumoId}|${linea.tipoId || ""}`,
+        // El índice también como campo, para poder agrupar las filas por
+        // pieza sin tener que desarmar la clave.
+        indice,
         productoId: item.productoId,
         productoNombre: item.productoNombre,
+        varianteNombre: item.varianteNombre || "",
+        opcionesTexto: item.opcionesTexto || "",
         insumoId: linea.insumoId,
         tipoId: linea.tipoId || "",
         nombre: linea.nombre,
@@ -505,6 +518,40 @@ export function planDeInsumos(pedido, productos = [], personalizados = [], catal
     }
   }
   return plan;
+}
+
+/**
+ * Junta las filas de un plan (de consumo o de insumos) por PIEZA: una entrada
+ * por línea del pedido, con todo lo que esa línea descuenta.
+ *
+ * Una receta de dos materiales genera dos filas de plan, pero las dos son de
+ * la misma pieza: el modal las muestra bajo un solo encabezado en vez de
+ * repetir el nombre del producto una vez por material.
+ *
+ * El agrupador es el índice de la línea del pedido, no el producto: el mismo
+ * producto pedido dos veces con opciones distintas son dos piezas distintas y
+ * cada una descuenta lo suyo.
+ *
+ * @returns {Array<{indice, productoId, productoNombre, varianteNombre,
+ *                  opcionesTexto, lineas: Array}>} en el orden del pedido
+ */
+export function agruparPorPieza(filas = []) {
+  const grupos = new Map();
+  for (const fila of filas) {
+    const indice = Number(fila?.indice) || 0;
+    if (!grupos.has(indice)) {
+      grupos.set(indice, {
+        indice,
+        productoId: fila.productoId,
+        productoNombre: fila.productoNombre,
+        varianteNombre: fila.varianteNombre || "",
+        opcionesTexto: fila.opcionesTexto || "",
+        lineas: [],
+      });
+    }
+    grupos.get(indice).lineas.push(fila);
+  }
+  return [...grupos.values()].sort((a, b) => a.indice - b.indice);
 }
 
 /**
