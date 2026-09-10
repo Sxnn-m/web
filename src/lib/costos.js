@@ -5,6 +5,9 @@
 import { normalizar } from './disponibilidad.js';
 import { horasDeImpresion } from './tiempoImpresion.js';
 import { TODAS, coincideCategoria } from './filtros.js';
+import {
+  normalizarGruposPublicos, precioDeCombinacion, claveSeleccion, permiteManual,
+} from './variantesInsumo.js';
 
 /**
  * Margen sobre el material por defecto: el precio de venta usa el costo del
@@ -244,8 +247,108 @@ export function calcularPrecioSugerido(producto, costs = DEFAULT_COSTS) {
 }
 
 /**
+ * Todas las combinaciones posibles de opciones de variante de insumo.
+ *
+ * Con un grupo es una por opción; con varios, el producto cartesiano entre
+ * todos (2 grupos de 2 opciones = 4). Se incluyen también las opciones sin
+ * stock: la rentabilidad de una combinación no depende de que hoy se pueda
+ * armar, y esconderla dejaría un producto a medio analizar.
+ *
+ * @returns {Array<{seleccion: object, etiqueta: string, clave: string}>}
+ *   vacío si el producto no tiene grupos: ese no se desglosa.
+ */
+export function combinacionesDeInsumo(grupos = []) {
+  const gs = normalizarGruposPublicos(grupos).filter(g => (g.opciones || []).length > 0);
+  if (gs.length === 0) return [];
+  const combos = gs.reduce((acumuladas, g) =>
+    acumuladas.flatMap(c => g.opciones.map(o => ({
+      seleccion: { ...c.seleccion, [g.id]: o.id },
+      nombres: [...c.nombres, o.nombre || "(sin nombre)"],
+    }))), [{ seleccion: {}, nombres: [] }]);
+  return combos.map(c => ({
+    seleccion: c.seleccion,
+    etiqueta: c.nombres.join(", "),
+    clave: claveSeleccion(c.seleccion),
+  }));
+}
+
+/**
+ * La rentabilidad de UNA combinación concreta, a partir de la del producto.
+ *
+ * El costo suma lo que cuesta el insumo de cada opción elegida. Se usa el
+ * precio guardado en la opción (su snapshot cantidad × precio unitario), que
+ * es el mismo criterio con el que totalInsumos valúa los insumos FIJOS: leer
+ * el catálogo vivo para unos y el snapshot para otros daría una columna que
+ * mezcla dos momentos.
+ *
+ * El precio sale de precioDeCombinacion, la única regla de precio del modelo
+ * —la misma que ven el detalle, el catálogo y el carrito— sobre el precio real
+ * del producto. Con un solo grupo, una opción con precio manual fija el precio
+ * FINAL de la fila; con varios grupos los manuales no rigen y todo es
+ * base + sumandos.
+ */
+export function rentDeCombinacion(rent, grupos = [], seleccion = {}) {
+  const gs = normalizarGruposPublicos(grupos);
+  const elegidas = gs.map(g => (g.opciones || []).find(o => o.id === seleccion[g.id]) || null);
+
+  const costoOpciones = elegidas.reduce((s, o) => s + (o ? Number(o.precio) || 0 : 0), 0);
+  const costoFabricacion = rent.costoFabricacion + costoOpciones;
+  // exigirStock: false — la fila es la opción que nombra, no la primera que
+  // esté disponible; si no, dos filas mostrarían el mismo precio.
+  const precioVenta = precioDeCombinacion(rent.precioVenta, gs, seleccion, { exigirStock: false });
+  const ganancia = precioVenta - costoFabricacion;
+
+  // El precio de esta fila también es "a mano" si lo fijó la opción.
+  const manualDeOpcion = permiteManual(gs) &&
+    elegidas[0] && elegidas[0].precioManual !== null && elegidas[0].precioManual !== undefined;
+
+  return {
+    ...rent,
+    costoFabricacion,
+    // La columna desglosa "material + insumos": las opciones son insumos.
+    insumos: rent.insumos + costoOpciones,
+    precioVenta,
+    precioFormula: rent.precioFormula + costoOpciones,
+    esManual: rent.esManual || manualDeOpcion,
+    ganancia,
+    margen: precioVenta > 0 ? (ganancia / precioVenta) * 100 : 0,
+  };
+}
+
+/**
+ * Una fila por combinación de variante de insumo, o la fila tal cual si el
+ * producto no tiene grupos.
+ *
+ * Un producto NO calculable (sin receta, o sin costo de material) no se
+ * desglosa: sin números que mostrar, las filas serían todas idénticas y solo
+ * agregarían ruido a una tabla que ya las manda al final.
+ */
+function desglosarPorInsumo(fila) {
+  if (!fila.rent.calculable) return [fila];
+  const combinaciones = combinacionesDeInsumo(fila.variantesInsumo || []);
+  if (combinaciones.length === 0) return [fila];
+
+  return combinaciones.map(c => ({
+    ...fila,
+    // La opción va DENTRO del nombre: la tabla no gana una columna.
+    name: `${fila.name || ""} (${c.etiqueta})`,
+    clave: `${fila.clave}|${c.clave}`,
+    // El buscador tiene que seguir encontrando el producto por su nombre y su
+    // código, y además por la opción.
+    busqueda: `${fila.busqueda} ${c.etiqueta}`.toLowerCase(),
+    rent: rentDeCombinacion(fila.rent, fila.variantesInsumo || [], c.seleccion),
+  }));
+}
+
+/**
  * Filas de la tabla de Rentabilidad: el catálogo y los personalizados
  * mezclados en una sola lista, ordenada de menor a mayor margen.
+ *
+ * Un producto con variantes de insumo aporta una fila por combinación de
+ * opciones, no una sola: cada opción consume un insumo distinto, así que su
+ * costo y su precio son distintos y promediarlos en una fila escondía cuál de
+ * las dos deja plata. Las variantes de COLOR no desglosan: no cambian ni el
+ * costo ni el precio.
  *
  * Los dos tipos se calculan con la MISMA fórmula: calcularRentabilidad no
  * mira de qué colección salió el producto, solo su receta, sus insumos y su
@@ -295,7 +398,7 @@ export function filasDeRentabilidad(productos = [], personalizados = [], costs =
     // no pueda ver dos filas con la misma key.
     clave: `${p.tipo}:${p._id || p.id}`,
     rent: calcularRentabilidad(p, costs),
-  }));
+  })).flatMap(desglosarPorInsumo);
 
   // Peor margen primero; los no calculables van al final para que no ensucien
   // el ranking pero queden visibles.
