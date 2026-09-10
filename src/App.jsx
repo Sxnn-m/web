@@ -211,21 +211,39 @@ const iconBtn = {
   cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
 };
 
-function Footer({ go }) {
+/**
+ * Cuántas categorías entran en la columna "Tienda" del footer.
+ *
+ * Se muestran las primeras del MISMO array que alimenta los tabs del
+ * catálogo (ordenado por "order" en loadCategories), no alfabéticamente ni
+ * por cantidad de productos: así el footer y el catálogo nunca dicen cosas
+ * distintas, y ordenar una vez ordena los dos lugares. Si hay más, abajo va
+ * un link a todo el catálogo para que ninguna quede inalcanzable.
+ */
+const CATEGORIAS_EN_FOOTER = 4;
+
+// Exportado para poder montarlo aislado en las pruebas de navegador.
+export function Footer({ go, categories = [] }) {
+  const enFooter = categories.slice(0, CATEGORIAS_EN_FOOTER);
   return (
     <footer style={{ borderTop: "1px solid var(--line)", marginTop: 60, padding: "48px 0 28px" }}>
       <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", gap: 40 }} className="about-grid">
         <div>
           <TKLogo size={24}/>
           <p style={{ color: "var(--muted)", fontSize: 13, lineHeight: 1.6, marginTop: 16, maxWidth: 280 }}>
-            Impresión 3D diseñada y producida en Buenos Aires. Precisión, calidad y productos que se usan.
+            Impresión 3D diseñada y producida en Buenos Aires. Precisión, calidad y productos que funcionan.
           </p>
         </div>
         <div>
           <div style={{ fontSize: 10, letterSpacing: 1.5, textTransform: "uppercase", color: "var(--muted)", marginBottom: 14 }}>Tienda</div>
-          <FL onClick={() => go("catalogo", {cat:"casa"})}>Para la Casa</FL>
-          <FL onClick={() => go("catalogo", {cat:"gadgets"})}>Gadgets</FL>
-          <FL onClick={() => go("catalogo", {cat:"lamparas"})}>Lámparas</FL>
+          {/* Las categorías REALES de Firestore: borrar o renombrar una en el
+              backoffice se refleja acá sin tocar código. */}
+          {enFooter.map(c => (
+            <FL key={c._id || c.id} onClick={() => go("catalogo", { cat: c.id })}>{c.name}</FL>
+          ))}
+          {categories.length > enFooter.length && (
+            <FL onClick={() => go("catalogo")}>Ver todo el catálogo</FL>
+          )}
         </div>
         <div>
           <div style={{ fontSize: 10, letterSpacing: 1.5, textTransform: "uppercase", color: "var(--muted)", marginBottom: 14 }}>Info</div>
@@ -445,7 +463,7 @@ function AppInterna() {
     <div className="app-wrap" style={{ maxWidth: 1240, margin: "0 auto", padding: "0 24px" }}>
       <Nav route={route} go={go} user={user} isAdmin={isAdmin} onLogout={handleLogout}/>
       {renderScreen()}
-      <Footer go={go}/>
+      <Footer go={go} categories={categories}/>
     </div>
   );
 

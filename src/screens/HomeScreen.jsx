@@ -116,7 +116,7 @@ export function HomeScreen({ go, addToCart, homeVariant = "A", products = [], ca
           {[
             { icon: <Icon.spark/>, title: "Diseño propio", text: "Piezas desarrolladas en casa. Iteramos prototipos hasta afinar cada detalle." },
             { icon: <Icon.layers/>, title: "Impresión FDM", text: "Usamos PLA, PETG y TPU según la función y acabado de cada pieza." },
-            { icon: <Icon.shield/>, title: "Control de calidad", text: "Cada producto pasa por revisión manual antes de salir al envío." },
+            { icon: <Icon.shield/>, title: "Control de calidad", text: "Cada producto pasa por revisión manual antes de ser entregado." },
           ].map((v, i) => (
             <div key={i}>
               <div style={{ color: "var(--accent)", marginBottom: 16 }}>{v.icon}</div>
