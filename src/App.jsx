@@ -15,6 +15,8 @@ import { CarritoModal } from './components/CarritoModal.jsx';
 import { configuracionInicial } from './lib/carrito.js';
 import { nombreVisible, mostrarEmail } from './lib/usuario.js';
 import { escucharMantenimiento, debeBloquear } from './lib/mantenimiento.js';
+import { rutaDe, estadoDe, esRutaConocida } from './lib/rutas.js';
+import { useLocation, useNavigate, Navigate } from 'react-router-dom';
 import { auth, db } from './firebase.js';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
@@ -271,8 +273,8 @@ function FL({ children, onClick }) {
 
 function AppInterna() {
   const { agregar: agregarAlCarrito } = useCarrito();
-  const [route, setRoute] = useState("home");
-  const [routeData, setRouteData] = useState({});
+  const location = useLocation();
+  const navigate = useNavigate();
   const [user, setUser] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [products, setProducts] = useState(FALLBACK_PRODUCTS);
@@ -386,9 +388,26 @@ function AppInterna() {
     go("home");
   };
 
+  // La URL manda: de acá salen el nombre de pantalla y sus parámetros, que es
+  // exactamente la forma que ya consumía el switch de renderScreen(). Las
+  // categorías entran para poder resolver el slug de la subcategoría
+  // (/catalogo/casa/decoracion → sub "Decoración").
+  const { route, routeData } = useMemo(
+    () => estadoDe(location.pathname, categories),
+    [location.pathname, categories],
+  );
+
+  /**
+   * La misma firma de siempre —go("detalle", { id })— pero ahora empuja una
+   * entrada real al historial en vez de solo cambiar estado. Los 34 llamados
+   * repartidos por las pantallas no se enteran del cambio.
+   *
+   * El scroll al tope se queda acá, en el empujón, y NO en un efecto sobre la
+   * ubicación: así volver con el botón atrás conserva la posición de scroll en
+   * vez de tirarte al techo de la pantalla anterior.
+   */
   const go = (r, data = {}) => {
-    setRoute(r);
-    setRouteData(data);
+    navigate(rutaDe(r, data));
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -476,7 +495,15 @@ function AppInterna() {
       case "detalle": return <DetalleScreen key={routeData.id} go={go} addToCart={addToCart} productId={routeData.id} products={publicProducts} categories={publicCategories}/>;
       case "auth": return <AuthScreen go={go} onLogin={setUser}/>;
       case "about": return <AboutScreen go={go} categories={publicCategories}/>;
-      case "admin": return isAdmin ? <AdminScreen go={go} onProductsChange={loadProducts} onCategoriesChange={loadCategories} categories={categories} products={products}/> : <AuthScreen go={go} onLogin={setUser}/>;
+      // El control de acceso no cambia: /admin/* sigue mostrando el login
+      // cuando no hay sesión de admin, con el mismo criterio de antes. La URL
+      // es la misma para las dos ramas, así que entrar deja al admin ya parado
+      // en el tab que había pedido.
+      case "admin": return isAdmin
+        ? <AdminScreen go={go} tab={routeData.tab} onTab={t => go("admin", { tab: t })}
+            onProductsChange={loadProducts} onCategoriesChange={loadCategories}
+            categories={categories} products={products}/>
+        : <AuthScreen go={go} onLogin={setUser}/>;
       default: return <HomeScreen go={go} addToCart={addToCart} products={publicProducts}/>;
     }
   };
@@ -487,6 +514,12 @@ function AppInterna() {
   // —Nav, Footer, modal de carrito y botón flotante—, no solo la zona central:
   // dejar el menú y el carrito de una tienda cerrada invita a navegar algo que
   // no está. Y va en un solo lugar para no repetir el chequeo en cada pantalla.
+  // Una URL que no es de ninguna pantalla se normaliza a la home, con replace
+  // para no dejar basura en el historial (el atrás no debería devolverte a un
+  // 404). Va antes del mantenimiento para que estadoDe() nunca tenga que
+  // adivinar sobre una ruta inventada.
+  if (!esRutaConocida(location.pathname)) return <Navigate to="/" replace/>;
+
   const decidiendo = mantenimiento === null || !authListo;
   if (decidiendo) {
     // Splash mínimo, con el fondo y el logo del sitio: dura lo que tarda la

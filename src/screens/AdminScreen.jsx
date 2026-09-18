@@ -65,8 +65,14 @@ import { aplicarRenumeracionIds } from '../lib/migracionIds.js';
 // implementación para la tabla de Rentabilidad y para la columna "Costo fab.".
 
 // ─── Admin Screen ───────────────────────────────────────────────
-export function AdminScreen({ go, onProductsChange, onCategoriesChange, categories: propCategories = [], products: propProductsAll = [] }) {
-  const [tab, setTab] = useState("dashboard");
+export function AdminScreen({ go, tab = "dashboard", onTab, onProductsChange, onCategoriesChange, categories: propCategories = [], products: propProductsAll = [] }) {
+  // El tab dejó de ser estado propio: ahora sale de la URL (/admin/pedidos) y
+  // el que manda es App.jsx, así que cada tab tiene su link y entra en el
+  // historial. onTab es opcional para poder montar la pantalla aislada en una
+  // prueba sin router.
+  const [tabLocal, setTabLocal] = useState(tab);
+  const tabActivo = onTab ? tab : tabLocal;
+  const setTab = (t) => (onTab ? onTab(t) : setTabLocal(t));
   const [products, setProducts] = useState([]);
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -622,10 +628,10 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
             {navItems.map(n => (
               <button key={n.id} onClick={() => { setTab(n.id); setShowForm(false); }} style={{
                 textAlign: "left", padding: "12px 14px",
-                background: tab === n.id ? "var(--bg-alt)" : "transparent",
+                background: tabActivo === n.id ? "var(--bg-alt)" : "transparent",
                 border: "none",
-                borderLeft: `2px solid ${tab === n.id ? "var(--accent)" : "transparent"}`,
-                color: tab === n.id ? "var(--text)" : "var(--muted)",
+                borderLeft: `2px solid ${tabActivo === n.id ? "var(--accent)" : "transparent"}`,
+                color: tabActivo === n.id ? "var(--text)" : "var(--muted)",
                 fontWeight: 600, fontSize: 14,
                 cursor: "pointer", display: "flex", alignItems: "center", gap: 10,
               }}>
@@ -648,8 +654,8 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
 
         {/* Content */}
         <main>
-          {tab === "dashboard" && <DashboardTab products={products} users={users} seedProducts={() => {}} categories={propCategories} onCategoriesChange={onCategoriesChange} onProductsChange={onProductsChange} setMsg={setMsg} />}
-          {tab === "productos" && (
+          {tabActivo === "dashboard" && <DashboardTab products={products} users={users} seedProducts={() => {}} categories={propCategories} onCategoriesChange={onCategoriesChange} onProductsChange={onProductsChange} setMsg={setMsg} />}
+          {tabActivo === "productos" && (
             showForm
               ? <ProductForm product={editProduct} onSave={handleSave} onCancel={() => { setShowForm(false); setEditProduct(null); }} categories={propCategories} filamentos={filamentos} costs={costSettings} nextId={siguienteIdProducto(products)} catalogoInsumos={insumos}
                   tags={tags} onAgregarTag={handleAgregarTag} onEliminarTag={handleEliminarTag}/>
@@ -677,7 +683,7 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
                     onProductsChange?.();
                   }}/>
           )}
-          {tab === "personalizados" && (
+          {tabActivo === "personalizados" && (
             showFormPers
               ? <ProductForm
                   modo="personalizado"
@@ -698,14 +704,14 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
                   onNew={() => { setEditPersonalizado(null); setShowFormPers(true); }}
                 />
           )}
-          {tab === "categorias" && <CategoriesTab categories={propCategories} products={products} onCategoriesChange={onCategoriesChange} setMsg={setMsg}/>}
-          {tab === "inventario" && (
+          {tabActivo === "categorias" && <CategoriesTab categories={propCategories} products={products} onCategoriesChange={onCategoriesChange} setMsg={setMsg}/>}
+          {tabActivo === "inventario" && (
             <InventarioTab filamentos={filamentos} onChanged={handleInventarioChange} setMsg={setMsg}/>
           )}
-          {tab === "insumos" && (
+          {tabActivo === "insumos" && (
             <InsumosTab insumos={insumos} onChanged={handleInventarioChange} setMsg={setMsg}/>
           )}
-          {tab === "pedidos" && (
+          {tabActivo === "pedidos" && (
             <PedidosTab
               pedidos={pedidos}
               productos={productosFull}
@@ -717,7 +723,7 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
               setMsg={setMsg}
             />
           )}
-          {tab === "estadisticas" && (
+          {tabActivo === "estadisticas" && (
             <EstadisticasTab
               pedidos={pedidos}
               productos={productosFull}
@@ -727,11 +733,11 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
               costs={costSettings}
             />
           )}
-          {tab === "mensajeria" && (
+          {tabActivo === "mensajeria" && (
             <MensajeriaTab mensajes={mensajes} onChanged={loadMensajes} setMsg={setMsg} />
           )}
-          {tab === "usuarios" && <UsersTab users={users} onToggleRole={toggleRole} />}
-          {tab === "costos" && (
+          {tabActivo === "usuarios" && <UsersTab users={users} onToggleRole={toggleRole} />}
+          {tabActivo === "costos" && (
             <CostosTab
               products={productosFull}
               personalizados={personalizados}
