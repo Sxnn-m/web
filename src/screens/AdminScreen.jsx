@@ -749,11 +749,18 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
 
 // ─── Dashboard Tab ───────────────────────────────────
 function DashboardTab({ products, users, categories, onCategoriesChange, onProductsChange, setMsg }) {
+  // Las cuatro barras van del mismo azul y no una de cada color. El verde y el
+  // naranja que había no significaban nada —ni "bien" ni "atención", eran solo
+  // cuatro tarjetas— así que leerlas como estados era leer mal. Con un único
+  // acento, lo que distingue a cada tarjeta es su número, que es el dato.
+  //
+  // Sin campo color por tarjeta, a propósito: mientras el acento sea uno solo,
+  // no hay dónde meter un quinto color por descuido.
   const stats = [
-    { label: "Productos", value: products.length, color: "var(--accent)" },
-    { label: "Visibles", value: products.filter(p => p.visible !== false).length, color: "#4a7a52" },
-    { label: "Categorías", value: categories.length, color: "#B56B3E" },
-    { label: "Usuarios", value: users.length, color: "#345C83" },
+    { label: "Productos", value: products.length },
+    { label: "Visibles", value: products.filter(p => p.visible !== false).length },
+    { label: "Categorías", value: categories.length },
+    { label: "Usuarios", value: users.length },
   ];
   return (
     <>
@@ -761,7 +768,7 @@ function DashboardTab({ products, users, categories, onCategoriesChange, onProdu
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 16, marginBottom: 32 }}>
         {stats.map((s, i) => (
           <div key={i} style={{
-            padding: 20, background: "var(--bg-alt)", borderLeft: `3px solid ${s.color}`,
+            padding: 20, background: "var(--bg-alt)", borderLeft: "3px solid var(--accent)",
           }}>
             <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 1.5, color: "var(--muted)", marginBottom: 8 }}>
               {s.label}
@@ -807,7 +814,7 @@ function SwitchMantenimiento({ setMsg }) {
       await guardarMantenimiento(nuevo);
       // El "✓" no es decorativo: el banner de arriba pinta de rojo todo lo que
       // no lo lleve, y estas dos son acciones que salieron bien. Que el sitio
-      // quede cerrado ya lo dice el borde y el badge naranja del propio switch.
+      // quede cerrado ya lo dice el badge del propio switch.
       setMsg(nuevo
         ? "✓ Sitio en mantenimiento: los visitantes ya no ven la tienda."
         : "✓ Sitio reabierto: la tienda vuelve a estar visible.");
@@ -821,8 +828,12 @@ function SwitchMantenimiento({ setMsg }) {
 
   return (
     <div style={{
+      // Mismo azul y mismo grosor que las tarjetas de arriba, encendido o
+      // apagado: así la columna de barras del Dashboard se lee como una sola
+      // cosa. Que el sitio esté cerrado lo dice el badge, que solo aparece
+      // cuando lo está, y no un color de borde que hay que recordar.
       padding: 20, background: "var(--bg-alt)",
-      borderLeft: `3px solid ${activo ? "#B56B3E" : "var(--line-strong)"}`,
+      borderLeft: "3px solid var(--accent)",
       marginBottom: 32,
     }}>
       <label style={{ display: "flex", alignItems: "flex-start", gap: 12, cursor: cargando ? "wait" : "pointer" }}>
@@ -831,15 +842,17 @@ function SwitchMantenimiento({ setMsg }) {
           checked={activo}
           disabled={cargando || guardando}
           onChange={e => alternar(e.target.checked)}
-          style={{ width: 18, height: 18, accentColor: "#B56B3E", cursor: "inherit", marginTop: 2, flexShrink: 0 }}
+          style={{ width: 18, height: 18, accentColor: "var(--accent)", cursor: "inherit", marginTop: 2, flexShrink: 0 }}
         />
         <div>
           <div style={{ fontSize: 15, color: "var(--text)", marginBottom: 6 }}>
             Sitio en mantenimiento
+            {/* Relleno sólido del mismo azul: dentro de la familia, y sobre el
+                panel claro destaca sin necesidad de otro color. */}
             {activo && (
               <span style={{
                 marginLeft: 10, fontSize: 10, fontWeight: 700, letterSpacing: 1,
-                textTransform: "uppercase", color: "#fff", background: "#B56B3E",
+                textTransform: "uppercase", color: "#fff", background: "var(--accent)",
                 padding: "3px 8px",
               }}>Activo</span>
             )}
