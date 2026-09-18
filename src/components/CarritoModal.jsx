@@ -171,12 +171,24 @@ export function CarritoModal() {
               </div>
             )}
 
+            {/* Lo que va a pasar al tocar el botón, dicho ANTES de tocarlo: el
+                resumen se copia solo, pero el link de Instagram no lo lleva
+                puesto, así que si el cliente no lo pega el pedido no llega.
+                Por eso el cartel destaca en vez de ser una nota al pie más. */}
+            <div style={{
+              marginTop: 12, padding: "10px 12px",
+              background: "var(--accent-suave)", borderLeft: "3px solid var(--accent)",
+              color: "var(--accent)", fontSize: 12, fontWeight: 600, lineHeight: 1.5,
+            }}>
+              Se copiará automáticamente el resumen, enviánoslo para finalizar tu pedido.
+            </div>
+
             {/* Instagram no acepta texto prellenado en el link, así que el
                 resumen queda acá a mano para copiarlo si el portapapeles
                 falló o el navegador lo bloqueó. */}
             <details style={{ marginTop: 12 }}>
               <summary style={{ fontSize: 11, color: "var(--muted)", cursor: "pointer" }}>
-                Ver resumen para copiar
+                Ver resumen
               </summary>
               <pre style={{
                 marginTop: 8, padding: 12, background: "var(--bg-alt)",
