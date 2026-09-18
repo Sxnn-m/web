@@ -11,6 +11,10 @@
   --line: #E4E1D9;
   --line-strong: #C9C5BB;
   --accent: var(--azul);
+  /* El mismo --azul apenas insinuado, para el fondo de un cartel que tiene
+     que llamar la atención sin gritar. Va como token y no como rgba suelto
+     en el componente para no repetir el hex de la marca fuera de acá. */
+  --accent-suave: rgba(52, 92, 131, .09);
 }
 
 [data-theme="dark"] {
