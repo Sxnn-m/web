@@ -50,11 +50,10 @@ export function Nav({ route, go, user, isAdmin, onLogout }) {
         </div>
 
         <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+          {/* Instagram no va acá: ya está el botón flotante, que lleva al
+              mismo lugar. Quedan lupa, carrito y perfil. */}
           <button onClick={() => go("catalogo")} style={iconBtn}><Icon.search/></button>
           <BotonCarrito/>
-          <a href={CONTACT.instagramUrl} target="_blank" rel="noopener noreferrer" style={iconBtn} title="Seguinos en Instagram">
-            <Icon.ig/>
-          </a>
           <MenuPerfil user={user} isAdmin={isAdmin} go={go} onLogout={onLogout}/>
           <button className="nav-mobile" onClick={() => setOpen(!open)} style={{...iconBtn, display: "none"}}>
             {open ? <Icon.close/> : <Icon.menu/>}
@@ -477,12 +476,14 @@ function AppInterna() {
 
       <CarritoModal/>
 
-      {/* Botón flotante de Instagram */}
+      {/* Botón flotante de Instagram: va al PERFIL (instagramUrl), no al deep
+          link de mensaje directo. El DM se usa solo al cerrar el pedido desde
+          el carrito, que es donde tiene sentido abrir un chat. */}
       <a
-        href={CONTACT.instagramDmUrl}
+        href={CONTACT.instagramUrl}
         target="_blank"
         rel="noopener noreferrer"
-        title={`Escribinos por Instagram — @${CONTACT.instagramHandle}`}
+        title={`Seguinos en Instagram — @${CONTACT.instagramHandle}`}
         style={{
           position: "fixed", bottom: 20, left: 20, zIndex: 101,
           width: 52, height: 52, borderRadius: "50%",
