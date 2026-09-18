@@ -49,12 +49,11 @@ export function MantenimientoScreen({ go }) {
             </h1>
 
             <p style={{ fontSize: 17, color: "var(--text)", lineHeight: 1.6, margin: "0 0 12px" }}>
-              Volvé a intentarlo en un rato: estamos actualizando el catálogo y
-              preferimos no mostrarlo a medias.
+              Volvé a intentarlo más tarde, estamos refinando la página.
             </p>
             <p style={{ fontSize: 15, color: "var(--muted)", lineHeight: 1.7, margin: "0 0 36px" }}>
-              Si necesitás algo ahora, escribinos por Instagram y te
-              respondemos igual.
+              Si te querés contactar con nosotros, escribinos por Instagram y te
+              responderemos de todas formas.
             </p>
 
             <a
