@@ -35,6 +35,7 @@ import { EstadisticasTab } from './admin/EstadisticasTab.jsx';
 import { MensajeriaTab } from './admin/MensajeriaTab.jsx';
 import { cargarMensajes, asignarNumerosFaltantes } from '../lib/mensajes.js';
 import { contarNoLeidos } from '../lib/consultas.js';
+import { leerMantenimiento, guardarMantenimiento } from '../lib/mantenimiento.js';
 import { useFiltrosCategoria, FiltrosCategoria } from '../components/FiltrosCategoria.jsx';
 import { ArchivosDiseno } from './admin/ArchivosDiseno.jsx';
 import { normalizarArchivos } from '../lib/archivosDiseno.js';
@@ -771,7 +772,89 @@ function DashboardTab({ products, users, categories, onCategoriesChange, onProdu
           </div>
         ))}
       </div>
+
+      <SwitchMantenimiento setMsg={setMsg}/>
     </>
+  );
+}
+
+/**
+ * Clausura y reabre el sitio público. Vive en el Dashboard porque es el primer
+ * tab que se abre: si el mantenimiento quedó activado por error, se apaga sin
+ * tener que buscarlo en ningún lado.
+ *
+ * El backoffice NUNCA se bloquea a sí mismo con esta bandera, así que este
+ * switch siempre es alcanzable.
+ */
+function SwitchMantenimiento({ setMsg }) {
+  const [activo, setActivo] = useState(false);
+  const [cargando, setCargando] = useState(true);
+  const [guardando, setGuardando] = useState(false);
+
+  useEffect(() => {
+    leerMantenimiento()
+      .then(setActivo)
+      .catch(err => console.warn("No se pudo leer el modo mantenimiento:", err))
+      .finally(() => setCargando(false));
+  }, []);
+
+  const alternar = async (nuevo) => {
+    // Optimista, pero se revierte si Firestore rechaza: dejar el switch en una
+    // posición que no es la real es peor que no moverlo.
+    setActivo(nuevo);
+    setGuardando(true);
+    try {
+      await guardarMantenimiento(nuevo);
+      // El "✓" no es decorativo: el banner de arriba pinta de rojo todo lo que
+      // no lo lleve, y estas dos son acciones que salieron bien. Que el sitio
+      // quede cerrado ya lo dice el borde y el badge naranja del propio switch.
+      setMsg(nuevo
+        ? "✓ Sitio en mantenimiento: los visitantes ya no ven la tienda."
+        : "✓ Sitio reabierto: la tienda vuelve a estar visible.");
+    } catch (err) {
+      setActivo(!nuevo);
+      setMsg("No se pudo cambiar el modo mantenimiento: " + err.message);
+    } finally {
+      setGuardando(false);
+    }
+  };
+
+  return (
+    <div style={{
+      padding: 20, background: "var(--bg-alt)",
+      borderLeft: `3px solid ${activo ? "#B56B3E" : "var(--line-strong)"}`,
+      marginBottom: 32,
+    }}>
+      <label style={{ display: "flex", alignItems: "flex-start", gap: 12, cursor: cargando ? "wait" : "pointer" }}>
+        <input
+          type="checkbox"
+          checked={activo}
+          disabled={cargando || guardando}
+          onChange={e => alternar(e.target.checked)}
+          style={{ width: 18, height: 18, accentColor: "#B56B3E", cursor: "inherit", marginTop: 2, flexShrink: 0 }}
+        />
+        <div>
+          <div style={{ fontSize: 15, color: "var(--text)", marginBottom: 6 }}>
+            Sitio en mantenimiento
+            {activo && (
+              <span style={{
+                marginLeft: 10, fontSize: 10, fontWeight: 700, letterSpacing: 1,
+                textTransform: "uppercase", color: "#fff", background: "#B56B3E",
+                padding: "3px 8px",
+              }}>Activo</span>
+            )}
+          </div>
+          <div style={{ fontSize: 12.5, color: "var(--muted)", lineHeight: 1.6, maxWidth: 620 }}>
+            Los visitantes verán una pantalla de mantenimiento en vez de la tienda
+            (Home, Catálogo, Detalle de producto) hasta que lo desactives. Se aplica
+            al instante, sin necesidad de volver a publicar el sitio.
+            <br/>
+            Vos, con sesión de admin, seguís viendo el sitio público normal y entrás
+            al backoffice sin restricciones.
+          </div>
+        </div>
+      </label>
+    </div>
   );
 }
 

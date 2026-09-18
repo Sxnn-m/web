@@ -8,11 +8,13 @@ import { DetalleScreen } from './screens/DetalleScreen.jsx';
 import { AuthScreen } from './screens/AuthScreen.jsx';
 import { AboutScreen } from './screens/AboutScreen.jsx';
 import { AdminScreen } from './screens/AdminScreen.jsx';
+import { MantenimientoScreen } from './screens/MantenimientoScreen.jsx';
 import { MobileHome, MobileCatalogoHub, MobileCategoria, MobileBuscador, MobileTabBar, MobileHeader } from './screens/mobile/MobileScreens.jsx';
 import { CarritoProvider, useCarrito } from './context/CarritoContext.jsx';
 import { CarritoModal } from './components/CarritoModal.jsx';
 import { configuracionInicial } from './lib/carrito.js';
 import { nombreVisible, mostrarEmail } from './lib/usuario.js';
+import { escucharMantenimiento, debeBloquear } from './lib/mantenimiento.js';
 import { auth, db } from './firebase.js';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
@@ -276,6 +278,16 @@ function AppInterna() {
   const [products, setProducts] = useState(FALLBACK_PRODUCTS);
   const [categories, setCategories] = useState(FALLBACK_CATEGORIES);
 
+  // null = todavía no se sabe. Se distingue de false a propósito: mientras no
+  // se sepa no se puede pintar ni el sitio (parpadearía el catálogo de una
+  // tienda cerrada) ni la pantalla de mantenimiento (parpadearía en un sitio
+  // abierto). Ver el splash de más abajo.
+  const [mantenimiento, setMantenimiento] = useState(null);
+  // onAuthStateChanged tarda un instante en decir si hay sesión, y el rol es
+  // otra lectura más. Sin esperar a eso, un admin vería la pantalla de
+  // mantenimiento un parpadeo antes de que se resuelva que es admin.
+  const [authListo, setAuthListo] = useState(false);
+
   // Load products from Firestore (falls back to hardcoded if Firestore empty)
   const loadProducts = async () => {
     try {
@@ -304,6 +316,20 @@ function AppInterna() {
   };
 
   useEffect(() => { loadProducts(); loadCategories(); }, []);
+
+  // Modo mantenimiento. Va con suscripción y no con una lectura puntual para
+  // que activarlo o desactivarlo desde el Dashboard se aplique sin rebuild ni
+  // redeploy, y además reabra las pestañas que ya estaban abiertas.
+  useEffect(() => {
+    // Red de seguridad: si la lectura ni responde ni falla —típico de una
+    // conexión cortada— el sitio no se queda en el splash para siempre.
+    const watchdog = setTimeout(() => setMantenimiento(v => v === null ? false : v), 2500);
+    const cancelar = escucharMantenimiento(activo => {
+      clearTimeout(watchdog);
+      setMantenimiento(activo);
+    });
+    return () => { clearTimeout(watchdog); cancelar(); };
+  }, []);
 
   // El panel de Tweaks escribía acá data-theme y --accent en <html>. Ya no
   // hace falta: index.css define el tema claro en :root y --accent: var(--azul),
@@ -339,6 +365,9 @@ function AppInterna() {
         setUser(null);
         setIsAdmin(false);
       }
+      // Recién acá se sabe si hay sesión y si es admin: hasta este punto el
+      // modo mantenimiento no puede decidir nada sobre este visitante.
+      setAuthListo(true);
     });
     return () => unsubscribe();
   }, []);
@@ -451,6 +480,30 @@ function AppInterna() {
       default: return <HomeScreen go={go} addToCart={addToCart} products={publicProducts}/>;
     }
   };
+
+  // ── Modo mantenimiento ────────────────────────────────────────────────
+  // Único punto de control del sitio clausurado. Va acá y no adentro de
+  // renderScreen() porque la pantalla tiene que reemplazar el shell COMPLETO
+  // —Nav, Footer, modal de carrito y botón flotante—, no solo la zona central:
+  // dejar el menú y el carrito de una tienda cerrada invita a navegar algo que
+  // no está. Y va en un solo lugar para no repetir el chequeo en cada pantalla.
+  const decidiendo = mantenimiento === null || !authListo;
+  if (decidiendo) {
+    // Splash mínimo, con el fondo y el logo del sitio: dura lo que tarda la
+    // bandera (una lectura de un documento diminuto) y evita el parpadeo del
+    // catálogo entero antes de cerrarse.
+    return (
+      <div style={{
+        minHeight: "100vh", background: "var(--bg)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+      }}>
+        <TKLogo size={26}/>
+      </div>
+    );
+  }
+  if (debeBloquear({ activo: mantenimiento, esAdmin: isAdmin, ruta: route })) {
+    return <MantenimientoScreen go={go}/>;
+  }
 
   const content = isMobile ? (
     <div className="app-wrap mobile-wrap" style={{ padding: "0 16px", display: "flex", flexDirection: "column", minHeight: 824 }}>
