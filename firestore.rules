@@ -78,9 +78,26 @@ service cloud.firestore {
       allow read: if esAdmin();
     }
 
-    // ── Configuración de costos (backoffice) ───────────────────────────
+    // ── Configuración (backoffice) ─────────────────────────────────────
+    // Casi todo acá es interno: "costos" tiene los multiplicadores de margen,
+    // "tags" y "opcionesOcultas" son listas del backoffice. Siguen admin-only,
+    // lectura incluida.
+    //
+    // La excepción es settings/general, el ÚNICO documento de lectura pública:
+    // guarda el modo mantenimiento, y el sitio tiene que poder saber si está
+    // clausurado ANTES de que exista ninguna sesión. Un visitante anónimo lee
+    // ese documento y nada más.
+    //
+    // Por eso su escritura valida hasOnly: como el documento es público, un
+    // campo interno guardado ahí por descuido quedaría expuesto sin que nadie
+    // lo note. La validación va DENTRO de este mismo match y no en uno nuevo
+    // aparte, porque las reglas de Firestore se combinan con OR: un segundo
+    // match dejaría este hasOnly sin efecto.
     match /settings/{settingId} {
-      allow read, write: if esAdmin();
+      allow read: if esAdmin() || settingId == 'general';
+      allow write: if esAdmin()
+        && (settingId != 'general'
+            || request.resource.data.keys().hasOnly(['mantenimientoActivo', 'updatedAt']));
     }
 
     // ── Inventario de filamento ────────────────────────────────────────
