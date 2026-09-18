@@ -216,8 +216,8 @@ export function InventarioTab({ filamentos, onChanged, setMsg }) {
         <div style={{ minWidth: 820 }}>
           <div style={{
             display: "grid", gridTemplateColumns: COL,
-            gap: 12, padding: "10px 12px", background: "var(--bg-alt)",
-            fontSize: 10, textTransform: "uppercase", letterSpacing: 1.5,
+            gap: 10, padding: "9px 10px", background: "var(--bg-alt)",
+            fontSize: 9.5, textTransform: "uppercase", letterSpacing: 1.2,
             color: "var(--muted)", fontWeight: 700,
           }}>
             <div>Material</div><div>Color</div><div>Marca</div><div>Owner</div>
@@ -229,7 +229,7 @@ export function InventarioTab({ filamentos, onChanged, setMsg }) {
             return (
               <div key={f._id} style={{
                 display: "grid", gridTemplateColumns: COL,
-                gap: 12, padding: "14px 12px", borderBottom: "1px solid var(--line)",
+                gap: 10, padding: "12px 10px", borderBottom: "1px solid var(--line)",
                 fontSize: 13, alignItems: "center",
                 background: alerta ? "#c6413808" : "transparent",
               }}>

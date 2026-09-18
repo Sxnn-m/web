@@ -18,7 +18,7 @@ import { tiposDe, claveTipo } from '../../lib/tiposInsumo.js';
 import { ListaDesplegable } from '../../components/ListaDesplegable.jsx';
 
 const actionBtn = {
-  background: "none", border: "1px solid var(--line)", padding: "6px 8px",
+  background: "none", border: "1px solid var(--line)", padding: "5px 6px",
   cursor: "pointer", color: "var(--text)", display: "flex", alignItems: "center",
   borderRadius: 4,
 };
@@ -366,7 +366,11 @@ export function PedidosTab({ pedidos, productos, personalizados = [], filamentos
     } catch (err) { setMsg("Error: " + err.message); }
   };
 
-  const COL = "105px 1.3fr 80px 110px 105px 105px 105px 110px";
+  // Misma densidad que el resto de las tablas del backoffice.
+  // Acciones lleva CUATRO botones (impreso, entregado, pagado, borrar):
+  // 4 × 28 + 3 de gap = 126. Achicarla no la comprime, la desborda — el
+  // ancho sale de Cliente, que es la columna flexible.
+  const COL = "96px 1.3fr 74px 96px 96px 96px 96px 126px";
 
   return (
     <>
@@ -532,11 +536,11 @@ export function PedidosTab({ pedidos, productos, personalizados = [], filamentos
       </div>
 
       <div style={{ overflowX: "auto", margin: "0 -16px", padding: "0 16px" }}>
-        <div style={{ minWidth: 900 }}>
+        <div style={{ minWidth: 860 }}>
           <div style={{
             display: "grid", gridTemplateColumns: COL,
-            gap: 12, padding: "10px 12px", background: "var(--bg-alt)",
-            fontSize: 10, textTransform: "uppercase", letterSpacing: 1.5,
+            gap: 10, padding: "9px 10px", background: "var(--bg-alt)",
+            fontSize: 9.5, textTransform: "uppercase", letterSpacing: 1.2,
             color: "var(--muted)", fontWeight: 700,
           }}>
             <div>Orden</div><div>Cliente</div><div>Productos</div><div>Total</div>
@@ -550,7 +554,7 @@ export function PedidosTab({ pedidos, productos, personalizados = [], filamentos
               <div key={pedido._id} style={{ borderBottom: "1px solid var(--line)" }}>
                 <div style={{
                   display: "grid", gridTemplateColumns: COL,
-                  gap: 12, padding: "14px 12px", fontSize: 13, alignItems: "center",
+                  gap: 10, padding: "12px 10px", fontSize: 12.5, alignItems: "center",
                 }}>
                   <div
                     onClick={() => setExpandido(abierto ? null : pedido._id)}

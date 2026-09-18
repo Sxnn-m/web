@@ -104,13 +104,13 @@ export function TKPill({ children, variant = "default" }) {
   return (
     <span style={{
       display: "inline-block",
-      padding: "4px 10px",
+      padding: "3px 8px",
       background: v.bg,
       color: v.fg,
       border: v.border || "none",
       fontSize: 10,
       fontWeight: 600,
-      letterSpacing: 1,
+      letterSpacing: 0.8,
       textTransform: "uppercase",
       borderRadius: 2,
     }}>{children}</span>

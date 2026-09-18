@@ -133,7 +133,7 @@ export function MensajeriaTab({ mensajes = [], onChanged, setMsg }) {
           <div style={{ minWidth: 760 }}>
             <div style={{
               display: "grid", gridTemplateColumns: COL,
-              gap: 12, padding: "10px 12px", background: "var(--bg-alt)",
+              gap: 10, padding: "9px 10px", background: "var(--bg-alt)",
               fontSize: 10, textTransform: "uppercase", letterSpacing: 1.5,
               color: "var(--muted)", fontWeight: 700,
             }}>

@@ -257,8 +257,8 @@ export function InsumosTab({ insumos, onChanged, setMsg }) {
         <div style={{ minWidth: 760 }}>
           <div style={{
             display: "grid", gridTemplateColumns: COL,
-            gap: 12, padding: "10px 12px", background: "var(--bg-alt)",
-            fontSize: 10, textTransform: "uppercase", letterSpacing: 1.5,
+            gap: 10, padding: "9px 10px", background: "var(--bg-alt)",
+            fontSize: 9.5, textTransform: "uppercase", letterSpacing: 1.2,
             color: "var(--muted)", fontWeight: 700,
           }}>
             <div>Nombre</div><div>Precio unidad</div>
@@ -276,7 +276,7 @@ export function InsumosTab({ insumos, onChanged, setMsg }) {
               <div key={i._id}>
                 <div style={{
                   display: "grid", gridTemplateColumns: COL,
-                  gap: 12, padding: "14px 12px", borderBottom: "1px solid var(--line)",
+                  gap: 10, padding: "12px 10px", borderBottom: "1px solid var(--line)",
                   fontSize: 13, alignItems: "center",
                   background: alerta ? "#c6413808" : "transparent",
                 }}>

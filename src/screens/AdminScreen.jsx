@@ -611,7 +611,10 @@ export function AdminScreen({ go, onProductsChange, onCategoriesChange, categori
         </div>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "200px 1fr", gap: 40 }} className="cart-layout">
+      {/* Sidebar 170 + gap 28 y no 200 + 40: son 42 px más para las tablas,
+          que es lo que les faltaba para entrar sin scroll. Se recorta acá
+          antes que la tipografía, que es lo que se lee. */}
+      <div style={{ display: "grid", gridTemplateColumns: "170px 1fr", gap: 28 }} className="cart-layout">
         {/* Sidebar */}
         <aside>
           <nav style={{ display: "flex", flexDirection: "column", gap: 2 }}>
@@ -804,7 +807,9 @@ export function ProductsTab({
   const duplicados = useMemo(() => idsDuplicados(products), [products]);
 
   // ID | Nombre | Categoría | Precio | Costo fab. | Disponible | Origen | Visible | Acciones
-  const COL = "70px 2fr 1fr 90px 90px 110px 70px 70px 90px";
+  // Recortadas ~10% para que la tabla entre sin scroll en el ancho del
+  // panel. Nombre y Categoría siguen siendo fr: se llevan el sobrante.
+  const COL = "62px 2fr 1fr 82px 82px 100px 62px 60px 84px";
 
   return (
     <>
@@ -903,13 +908,13 @@ export function ProductsTab({
 
       {/* Table container with horizontal scroll for mobile */}
       <div style={{ overflowX: "auto", margin: "0 -16px", padding: "0 16px" }}>
-        <div style={{ minWidth: 1040 }}>
+        <div style={{ minWidth: 962 }}>
           {/* Table header */}
           <div style={{
             display: "grid", gridTemplateColumns: COL,
-            gap: 12, padding: "10px 12px", background: "var(--bg-alt)",
-            fontSize: 10, textTransform: "uppercase",
-            letterSpacing: 1.5, color: "var(--muted)", fontWeight: 700,
+            gap: 10, padding: "9px 10px", background: "var(--bg-alt)",
+            fontSize: 9.5, textTransform: "uppercase",
+            letterSpacing: 1.2, color: "var(--muted)", fontWeight: 700,
           }}>
             <div>ID</div><div>Nombre</div><div>Categoría</div><div>Precio</div><div>Costo fab.</div><div>Disponible</div><div>Origen</div><div>Visible</div><div>Acciones</div>
           </div>
@@ -922,8 +927,8 @@ export function ProductsTab({
               <div key={p._id} style={{ borderBottom: "1px solid var(--line)", opacity: p.visible === false ? 0.5 : 1 }}>
                 <div style={{
                   display: "grid", gridTemplateColumns: COL,
-                  gap: 12, padding: "14px 12px",
-                  fontSize: 13, alignItems: "center",
+                  gap: 10, padding: "12px 10px",
+                  fontSize: 12.5, alignItems: "center",
                 }}>
                   <div
                     style={{
@@ -1028,7 +1033,7 @@ export function ProductsTab({
 }
 
 const actionBtn = {
-  background: "none", border: "1px solid var(--line)", padding: "6px 8px",
+  background: "none", border: "1px solid var(--line)", padding: "5px 7px",
   cursor: "pointer", color: "var(--text)", display: "flex", alignItems: "center",
   borderRadius: 4,
 };
@@ -1080,9 +1085,9 @@ function PersonalizadosTab({
         <div style={{ minWidth: 860 }}>
           <div style={{
             display: "grid", gridTemplateColumns: COL,
-            gap: 12, padding: "10px 12px", background: "var(--bg-alt)",
-            fontSize: 10, textTransform: "uppercase",
-            letterSpacing: 1.5, color: "var(--muted)", fontWeight: 700,
+            gap: 10, padding: "9px 10px", background: "var(--bg-alt)",
+            fontSize: 9.5, textTransform: "uppercase",
+            letterSpacing: 1.2, color: "var(--muted)", fontWeight: 700,
           }}>
             <div>Cliente</div><div>Pieza</div><div>Precio</div><div>Costo fab.</div>
             <div>Disponible</div><div>Origen</div><div>Acciones</div>
@@ -1096,7 +1101,7 @@ function PersonalizadosTab({
               <div key={p._id} style={{ borderBottom: "1px solid var(--line)" }}>
                 <div style={{
                   display: "grid", gridTemplateColumns: COL,
-                  gap: 12, padding: "14px 12px", fontSize: 13, alignItems: "center",
+                  gap: 10, padding: "12px 10px", fontSize: 12.5, alignItems: "center",
                 }}>
                   <div style={{ fontWeight: 600 }}>{p.clienteNombre || "—"}</div>
                   <div>{p.name}</div>
@@ -3188,7 +3193,7 @@ function UsersTab({ users, onToggleRole }) {
       {/* Table header */}
       <div style={{
         display: "grid", gridTemplateColumns: "2fr 1.5fr 100px 120px",
-        gap: 12, padding: "10px 12px", background: "var(--bg-alt)",
+        gap: 10, padding: "9px 10px", background: "var(--bg-alt)",
         fontSize: 10, textTransform: "uppercase",
         letterSpacing: 1.5, color: "var(--muted)", fontWeight: 700,
       }}>
@@ -3198,7 +3203,7 @@ function UsersTab({ users, onToggleRole }) {
       {users.map(u => (
         <div key={u._id} style={{
           display: "grid", gridTemplateColumns: "2fr 1.5fr 100px 120px",
-          gap: 12, padding: "14px 12px", borderBottom: "1px solid var(--line)",
+          gap: 10, padding: "12px 10px", borderBottom: "1px solid var(--line)",
           fontSize: 13, alignItems: "center",
         }}>
           <div style={{ fontWeight: 600 }}>{u.nombre || "—"}</div>
@@ -3449,7 +3454,8 @@ function CategoriesTab({ categories, products, onCategoriesChange, setMsg }) {
 // Columnas de la tabla de Rentabilidad. Header y filas son grids separados:
 // se alinean solo mientras compartan este valor.
 //   Producto | Categoría | Material/es | Peso | Tiempo | Costo | Precio | Ganancia
-const COL_RENTABILIDAD = "2fr 130px 110px 130px 80px 100px 100px 90px";
+// Recortadas ~10%, igual que la de Productos: es la otra que no entraba.
+const COL_RENTABILIDAD = "2fr 118px 100px 118px 74px 92px 92px 84px";
 
 // Exportado para poder montarlo aislado en las pruebas de navegador.
 export function CostosTab({
@@ -3739,13 +3745,13 @@ export function CostosTab({
           padding + ~190 para el nombre. El contenedor scrollea solo, el body
           nunca queda con scroll horizontal en mobile. */}
       <div style={{ overflowX: "auto", margin: "0 -16px", padding: "0 16px" }}>
-        <div style={{ minWidth: 1040 }}>
+        <div style={{ minWidth: 962 }}>
           {/* Table header */}
           <div style={{
             display: "grid",
             gridTemplateColumns: COL_RENTABILIDAD,
-            gap: 12, padding: "10px 12px", background: "var(--bg-alt)",
-            fontSize: 10, textTransform: "uppercase", letterSpacing: 1.5,
+            gap: 10, padding: "9px 10px", background: "var(--bg-alt)",
+            fontSize: 9.5, textTransform: "uppercase", letterSpacing: 1.2,
             color: "var(--muted)", fontWeight: 700,
           }}>
             <div>Producto</div>
@@ -3767,8 +3773,8 @@ export function CostosTab({
               <div key={p.clave} style={{
                 display: "grid",
                 gridTemplateColumns: COL_RENTABILIDAD,
-                gap: 12, padding: "14px 12px", borderBottom: "1px solid var(--line)",
-                fontSize: 13, alignItems: "center",
+                gap: 10, padding: "12px 10px", borderBottom: "1px solid var(--line)",
+                fontSize: 12.5, alignItems: "center",
               }}>
                 {/* Producto: solo el nombre. Para un personalizado, debajo el
                     cliente, que es lo que lo identifica al no tener ID TKPx. */}
