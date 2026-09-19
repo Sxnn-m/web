@@ -7,6 +7,11 @@ import {
 import { TKButton, TKInput, TKPill, Icon, ProductCard, fmtARS, SinStockBadge, sinStock } from '../components/UI.jsx';
 import { formatTiempoProducto } from '../lib/tiempoImpresion.js';
 import { descripcionPublica } from '../lib/descripcion.js';
+import Lightbox from 'yet-another-react-lightbox';
+import Zoom from 'yet-another-react-lightbox/plugins/zoom';
+import Counter from 'yet-another-react-lightbox/plugins/counter';
+import 'yet-another-react-lightbox/styles.css';
+import 'yet-another-react-lightbox/plugins/counter.css';
 
 /**
  * Specs que ve el público, con etiquetas legibles. Lista explícita a propósito:
@@ -44,6 +49,12 @@ export function DetalleScreen({ go, addToCart, productId, detalleVariant = "A", 
   const [imgElegida, setImgElegida] = useState(null);
   const activeImg = gallery.includes(imgElegida) ? imgElegida : (gallery[0] || "");
   const setActiveImg = setImgElegida;
+  // El visor a pantalla completa. Solo guarda si está abierto: en qué foto
+  // está lo dice activeImg, el mismo estado que manejan las miniaturas. Con dos
+  // índices separados habría que sincronizarlos, y al cerrar el visor la foto
+  // grande volvería a la que estaba antes de abrirlo.
+  const [visor, setVisor] = useState(false);
+  const indiceActivo = Math.max(0, gallery.indexOf(activeImg));
   const [qty, setQty] = useState(1);
   const [custom, setCustom] = useState("");
   const [tab, setTab] = useState("desc");
@@ -114,9 +125,17 @@ export function DetalleScreen({ go, addToCart, productId, detalleVariant = "A", 
       <div style={{ display: "grid", gridTemplateColumns: "1.1fr 1fr", gap: 48 }} className="detalle-grid">
         {/* Gallery */}
         <div>
-          {/* Main image */}
+          {/* Main image — la única que abre el visor. Las miniaturas de abajo
+              siguen solo cambiando cuál se muestra acá.
+
+              El cursor va en zoom-in con UNA foto también: antes pedía
+              gallery.length > 1, pero agrandar una sola imagen es justamente
+              para lo que sirve el visor. Con cero fotos no hay nada que abrir. */}
           <div
-            style={{ background: "var(--beige)", aspectRatio: "4/3", overflow: "hidden", cursor: gallery.length > 1 ? "zoom-in" : "default", position: "relative" }}
+            onClick={() => activeImg && setVisor(true)}
+            role={activeImg ? "button" : undefined}
+            aria-label={activeImg ? "Ampliar la foto" : undefined}
+            style={{ background: "var(--beige)", aspectRatio: "4/3", overflow: "hidden", cursor: activeImg ? "zoom-in" : "default", position: "relative" }}
           >
             {activeImg ? (
               <img
@@ -282,6 +301,49 @@ export function DetalleScreen({ go, addToCart, productId, detalleVariant = "A", 
           {related.map(p => <ProductCard key={p.id} product={p} onClick={() => go("detalle", { id: p.id })} onAdd={addToCart}/>)}
         </div>
       </div>
+
+      {/* Visor a pantalla completa.
+          Se monta solo cuando está abierto: así el <Lightbox> nace ya con el
+          índice correcto, en vez de arrancar en 0 y saltar.
+
+          onView escribe en setActiveImg, el MISMO setter de las miniaturas. Por
+          eso, si adentro del visor avanzás a la foto 3, al cerrar el panel
+          grande ya está en la 3: no hay nada que sincronizar al salir.
+
+          Cerrar con X, con clic afuera y con Escape viene de fábrica; el zoom
+          (pinch en mobile, rueda y doble clic en desktop) y el contador "2 / 4"
+          son los dos plugins. */}
+      {visor && (
+        <Lightbox
+          open
+          close={() => setVisor(false)}
+          index={indiceActivo}
+          on={{ view: ({ index }) => gallery[index] && setActiveImg(gallery[index]) }}
+          slides={gallery.map(src => ({ src, alt: product.name }))}
+          // Con una sola foto no hay a dónde ir: se van las flechas y el
+          // contador, que diría "1 / 1" y sería solo ruido. El zoom queda, que
+          // es justamente para lo que se abre el visor en ese caso.
+          plugins={gallery.length > 1 ? [Zoom, Counter] : [Zoom]}
+          carousel={{ finite: gallery.length <= 1 }}
+          counter={{ container: { style: { top: 0, left: 0 } } }}
+          render={gallery.length <= 1
+            ? { buttonPrev: () => null, buttonNext: () => null }
+            : undefined}
+          // Los controles vienen en inglés de fábrica y el sitio es todo en
+          // castellano. Estos textos son los aria-label y los title de los
+          // botones, así que es lo que lee un lector de pantalla.
+          labels={{
+            Previous: "Anterior", Next: "Siguiente", Close: "Cerrar",
+            "Zoom in": "Acercar", "Zoom out": "Alejar",
+          }}
+          // scrollToZoom NO viene activado: sin él la rueda del mouse no hace
+          // zoom, solo la combinación con Ctrl. Y doubleClickMaxStops deja que
+          // el doble clic llegue al máximo en dos pasos en vez de uno.
+          zoom={{ maxZoomPixelRatio: 4, scrollToZoom: true, doubleClickMaxStops: 2 }}
+          styles={{ container: { backgroundColor: "rgba(0, 0, 0, .9)" } }}
+          controller={{ closeOnBackdropClick: true }}
+        />
+      )}
     </div>
   );
 }
