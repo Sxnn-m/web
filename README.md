@@ -25,7 +25,7 @@ npx firebase-tools login    # solo la primera vez
 npm run deploy:rules
 ```
 
-El proyecto de destino sale de `.firebaserc` (`tkprints-74d09`). Para apuntar a
+El proyecto de destino sale de `.firebaserc` (`tk-web-b37f2`). Para apuntar a
 otro: `npm run deploy:rules -- --project <id>`.
 
 **Alternativa sin CLI:** consola de Firebase → Firestore Database → pestaña
