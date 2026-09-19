@@ -1,8 +1,15 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { TKButton, TKInput, Icon } from '../components/UI.jsx';
 import { auth, db } from '../firebase.js';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
+import {
+  signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile,
+  sendPasswordResetEmail, signInWithPopup, signInWithRedirect, getRedirectResult,
+  GoogleAuthProvider,
+} from 'firebase/auth';
 import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
+import {
+  EXITO_RESET, errorDeReset, errorDeGoogle, conviveConRedirect, perfilInicial,
+} from '../lib/auth.js';
 
 export function AuthScreen({ go, onLogin }) {
   const [mode, setMode] = useState("login");
@@ -12,6 +19,22 @@ export function AuthScreen({ go, onLogin }) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [showPwd, setShowPwd] = useState(false);
+  // Restablecer contraseña: null = cerrado, string = el email tipeado.
+  const [emailReset, setEmailReset] = useState(null);
+  const [avisoReset, setAvisoReset] = useState("");
+  const [errorReset, setErrorReset] = useState("");
+  const [enviandoReset, setEnviandoReset] = useState(false);
+
+  /**
+   * Crea /users/{uid} si todavía no existe. Se usa en los tres caminos de
+   * entrada (email, Google por popup y Google por redirect): una cuenta sin su
+   * documento no tiene rol, y App.jsx la trataría como no-admin para siempre.
+   */
+  const asegurarPerfil = async (user) => {
+    const ref = doc(db, "users", user.uid);
+    if ((await getDoc(ref)).exists()) return;
+    await setDoc(ref, { ...perfilInicial(user), createdAt: serverTimestamp() });
+  };
 
   const submit = async () => {
     setError("");
@@ -19,17 +42,8 @@ export function AuthScreen({ go, onLogin }) {
     try {
       if (mode === "login") {
         const cred = await signInWithEmailAndPassword(auth, email, pwd);
-        // Ensure user doc exists (in case they registered before Firestore was set up)
-        const userRef = doc(db, "users", cred.user.uid);
-        const userSnap = await getDoc(userRef);
-        if (!userSnap.exists()) {
-          await setDoc(userRef, {
-            email: cred.user.email,
-            nombre: cred.user.displayName || cred.user.email,
-            role: "customer",
-            createdAt: serverTimestamp(),
-          });
-        }
+        // Por si la cuenta se creó antes de que existiera la colección users.
+        await asegurarPerfil(cred.user);
         go("home");
       } else {
         if (!nombre.trim()) throw new Error("Debes ingresar un nombre");
@@ -55,6 +69,86 @@ export function AuthScreen({ go, onLogin }) {
     }
   };
 
+  // ── Google ────────────────────────────────────────────────────────────
+  // El botón no tenía onClick: nunca estuvo implementado, no era algo que se
+  // hubiera roto. Se hace por popup, que no pierde el estado de la página, y
+  // se cae a redirect solo si el navegador bloquea la ventana.
+  const entrarConGoogle = async () => {
+    setError("");
+    setLoading(true);
+    try {
+      const proveedor = new GoogleAuthProvider();
+      // Que Google pregunte siempre con qué cuenta entrar, en vez de reusar en
+      // silencio la última: es una pantalla de backoffice y la máquina puede
+      // estar compartida.
+      proveedor.setCustomParameters({ prompt: "select_account" });
+      const cred = await signInWithPopup(auth, proveedor);
+      await asegurarPerfil(cred.user);
+      go("home");
+    } catch (err) {
+      console.error(err);
+      if (conviveConRedirect(err.code)) {
+        // El popup no se pudo abrir: se sale de la página y se vuelve. Lo que
+        // pase después lo levanta el useEffect de abajo.
+        try {
+          await signInWithRedirect(auth, new GoogleAuthProvider());
+          return;
+        } catch (err2) {
+          console.error(err2);
+          setError(errorDeGoogle(err2.code) || "");
+        }
+      } else {
+        // null = el usuario cerró el popup; no es un error que valga mostrar.
+        setError(errorDeGoogle(err.code) || "");
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Cierre del camino por redirect. Devuelve null en una carga normal, así que
+  // en el 99% de las veces no hace nada.
+  useEffect(() => {
+    let vivo = true;
+    getRedirectResult(auth)
+      .then(async (cred) => {
+        if (!cred?.user || !vivo) return;
+        await asegurarPerfil(cred.user);
+        go("home");
+      })
+      .catch(err => {
+        console.error(err);
+        if (vivo) setError(errorDeGoogle(err.code) || "");
+      });
+    return () => { vivo = false; };
+  }, []);
+
+  // ── Restablecer contraseña ────────────────────────────────────────────
+  const abrirReset = () => {
+    setAvisoReset("");
+    setErrorReset("");
+    // Arranca con lo que ya haya escrito arriba, que suele ser su email.
+    setEmailReset(email);
+  };
+
+  const enviarReset = async () => {
+    setErrorReset("");
+    setEnviandoReset(true);
+    try {
+      await sendPasswordResetEmail(auth, emailReset.trim());
+      setAvisoReset(EXITO_RESET);
+    } catch (err) {
+      console.error(err);
+      const mensaje = errorDeReset(err.code);
+      // mensaje null = el email no está registrado. Se responde exactamente lo
+      // mismo que si existiera, para no delatar qué cuentas hay.
+      if (mensaje === null) setAvisoReset(EXITO_RESET);
+      else setErrorReset(mensaje);
+    } finally {
+      setEnviandoReset(false);
+    }
+  };
+
   return (
     <div style={{ padding: "40px 0 80px", maxWidth: 480, margin: "0 auto" }}>
       <div style={{ fontSize: 11, color: "var(--muted)", letterSpacing: 2, textTransform: "uppercase", marginBottom: 12, textAlign: "center" }}>
@@ -67,7 +161,8 @@ export function AuthScreen({ go, onLogin }) {
         {mode === "login" ? "Iniciá sesión para administrar el catálogo." : "Creá una cuenta de acceso al backoffice."}
       </p>
 
-      <TKButton variant="outline" full size="lg" icon={<Icon.google/>}>
+      <TKButton variant="outline" full size="lg" icon={<Icon.google/>}
+        onClick={entrarConGoogle} disabled={loading}>
         Continuar con Google
       </TKButton>
 
@@ -118,9 +213,21 @@ export function AuthScreen({ go, onLogin }) {
             </button>
           </div>
         </div>
-        {error && <div style={{ color: "var(--accent)", fontSize: 13, fontWeight: 500, background: "#C6413815", padding: "10px 12px", borderRadius: 8 }}>{error}</div>}
+        {/* El texto va en rojo, no en var(--accent): estaba azul sobre el fondo
+            rojo del error, que se leía como un aviso cualquiera. */}
+        {error && <div style={{ color: "#C64138", fontSize: 13, fontWeight: 500, background: "#C6413815", padding: "10px 12px", borderRadius: 8 }}>{error}</div>}
         {mode === "login" && (
-          <a href="#" style={{ fontSize: 12, color: "var(--accent)", textAlign: "right", textDecoration: "none", fontWeight: 600 }}>¿Olvidaste tu contraseña?</a>
+          <button
+            type="button"
+            onClick={abrirReset}
+            style={{
+              alignSelf: "flex-end", background: "none", border: "none", padding: 0,
+              fontSize: 12, color: "var(--accent)", fontWeight: 600, cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            ¿Olvidaste tu contraseña?
+          </button>
         )}
         <TKButton size="lg" full onClick={submit} disabled={loading}>
           {loading ? "Cargando..." : (mode === "login" ? "Iniciar sesión" : "Crear cuenta y continuar")}
@@ -133,6 +240,96 @@ export function AuthScreen({ go, onLogin }) {
           {mode === "login" ? "Crear cuenta" : "Iniciar sesión"}
         </button>
       </div>
+
+      {emailReset !== null && (
+        <ModalReset
+          email={emailReset}
+          onEmail={setEmailReset}
+          aviso={avisoReset}
+          error={errorReset}
+          enviando={enviandoReset}
+          onEnviar={enviarReset}
+          onCerrar={() => setEmailReset(null)}
+        />
+      )}
     </div>
+  );
+}
+
+/**
+ * Pide el email y manda el link de restablecimiento.
+ *
+ * Cuando sale bien reemplaza el formulario por la confirmación en vez de
+ * dejarlo abierto: el mensaje es a propósito el mismo exista o no la cuenta
+ * (ver EXITO_RESET), y volver a mostrar el campo invita a reintentar con otra
+ * dirección para ver si cambia la respuesta. No cambia.
+ */
+function ModalReset({ email, onEmail, aviso, error, enviando, onEnviar, onCerrar }) {
+  const puedeEnviar = email.trim().length > 0 && !enviando;
+  return (
+    <>
+      <div onClick={onCerrar} style={{
+        position: "fixed", inset: 0, background: "rgba(0,0,0,.35)", zIndex: 190,
+      }}/>
+      <div
+        role="dialog"
+        aria-label="Restablecer contraseña"
+        style={{
+          position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)",
+          zIndex: 191, width: "min(420px, calc(100vw - 32px))",
+          background: "var(--bg)", border: "1px solid var(--line)",
+          boxShadow: "0 20px 60px rgba(0,0,0,.22)", padding: 24,
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+          <div style={{ fontSize: 20, letterSpacing: -0.3, color: "var(--text)" }}>
+            Restablecer contraseña
+          </div>
+          <button onClick={onCerrar} aria-label="Cerrar" style={{
+            background: "none", border: "none", cursor: "pointer",
+            color: "var(--muted)", padding: 2, display: "flex",
+          }}>
+            <Icon.close size={18}/>
+          </button>
+        </div>
+
+        {aviso ? (
+          <div style={{
+            marginTop: 18, padding: "12px 14px",
+            background: "var(--accent-suave)", borderLeft: "3px solid var(--accent)",
+            color: "var(--accent)", fontSize: 13, fontWeight: 600, lineHeight: 1.5,
+          }}>
+            {aviso}
+          </div>
+        ) : (
+          <>
+            <p style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.6, margin: "10px 0 18px" }}>
+              Escribí el email de tu cuenta y te mandamos un link para elegir una
+              contraseña nueva.
+            </p>
+            <TKInput
+              label="Email"
+              type="email"
+              icon={<Icon.mail size={16}/>}
+              value={email}
+              onChange={e => onEmail(e.target.value)}
+            />
+            {error && (
+              <div style={{
+                marginTop: 12, color: "#C64138", fontSize: 13, fontWeight: 500,
+                background: "#C6413815", padding: "10px 12px", borderRadius: 8,
+              }}>
+                {error}
+              </div>
+            )}
+            <div style={{ marginTop: 18 }}>
+              <TKButton size="lg" full onClick={onEnviar} disabled={!puedeEnviar}>
+                {enviando ? "Enviando..." : "Enviar link"}
+              </TKButton>
+            </div>
+          </>
+        )}
+      </div>
+    </>
   );
 }
