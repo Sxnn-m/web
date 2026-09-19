@@ -1361,50 +1361,101 @@ const Estado = ({ ok }) => (
  * porque cada rollo se evalúa solo y hay que poder ver quién puede imprimir.
  */
 function FilaInventario({ d }) {
-  const owners = d.owners || [];
-  if (owners.length <= 1) {
-    return (
-      <div style={{ ...celdaFila, borderTop: "1px solid var(--line)" }}>
-        <div style={{ fontWeight: 600 }}>{d.material}</div>
-        <div>{d.color}</div>
-        <div style={{ fontSize: 11, color: "var(--muted)" }}>{d.variantes.join(", ")}</div>
-        <div>{d.gramosPorUnidad} g</div>
-        <div style={{ fontWeight: 600 }}>{d.requerido} g</div>
-        <div style={{ color: d.owner ? "var(--text)" : "var(--muted)" }}>{d.owner || "—"}</div>
-        <div style={{ color: d.ok ? "var(--text)" : "#c64138", fontWeight: d.ok ? 400 : 700 }}>
-          {d.existe ? `${d.enInventario} g` : "sin cargar"}
+  const porMaterial = d.porMaterial?.length ? d.porMaterial : [{
+    material: d.material, owners: d.owners || [], existe: d.existe,
+    enInventario: d.enInventario, owner: d.owner, ok: d.ok,
+  }];
+
+  // Las columnas comunes a toda la línea de receta. Se pintan una sola vez,
+  // arriba, y las filas de abajo las dejan vacías para que se lean como
+  // dependientes de ella y no como líneas sueltas.
+  const comunes = (
+    <>
+      <div>{d.color}</div>
+      <div style={{ fontSize: 11, color: "var(--muted)" }}>{d.variantes.join(", ")}</div>
+      <div>{d.gramosPorUnidad} g</div>
+      <div style={{ fontWeight: 600 }}>{d.requerido} g</div>
+    </>
+  );
+
+  // Las tres últimas columnas de un material: owner, cantidad y estado. Con un
+  // solo rollo van en la misma fila; con dos o más se abre una por owner,
+  // porque cada rollo se evalúa solo y hay que ver quién puede imprimir.
+  const colasDe = (m) => m.owners.length <= 1
+    ? (
+      <>
+        <div style={{ color: m.owner ? "var(--text)" : "var(--muted)" }}>{m.owner || "—"}</div>
+        <div style={{ color: m.ok ? "var(--text)" : "#c64138", fontWeight: m.ok ? 400 : 700 }}>
+          {m.existe ? `${m.enInventario} g` : "sin cargar"}
         </div>
-        <Estado ok={d.ok}/>
+        <Estado ok={m.ok}/>
+      </>
+    ) : (
+      <>
+        <div style={{ fontSize: 11, color: "var(--muted)" }}>{m.owners.length} owners</div>
+        <div style={{ fontSize: 11, color: "var(--muted)" }}>{m.owners.filter(o => o.ok).length} pueden</div>
+        <Estado ok={m.ok}/>
+      </>
+    );
+
+  const filasOwner = (m) => m.owners.length <= 1 ? null : m.owners.map(o => (
+    <div key={`${m.material}|${o.id}`} style={{ ...celdaFila, padding: "5px 0" }}>
+      <div/><div/><div/><div/><div/>
+      <div style={{
+        borderLeft: "2px solid var(--line-strong)", paddingLeft: 8,
+        color: o.owner ? "var(--text)" : "var(--muted)",
+      }}>
+        {o.owner || "(sin owner)"}
+      </div>
+      <div style={{ color: o.ok ? "var(--text)" : "#c64138", fontWeight: o.ok ? 400 : 700 }}>
+        {o.disponible} g
+      </div>
+      <Estado ok={o.ok}/>
+    </div>
+  ));
+
+  // Un solo material posible: la línea de siempre, sin encabezado extra.
+  if (porMaterial.length === 1) {
+    const m = porMaterial[0];
+    return (
+      <div style={{ borderTop: "1px solid var(--line)" }}>
+        <div style={{ ...celdaFila, paddingBottom: m.owners.length > 1 ? 2 : 8 }}>
+          <div style={{ fontWeight: 600 }}>{m.material}</div>
+          {comunes}
+          {colasDe(m)}
+        </div>
+        {filasOwner(m)}
       </div>
     );
   }
+
+  // Varios materiales posibles: encabezado con los dos y el estado del
+  // conjunto —alcanza con que uno alcance— y debajo cada material con el suyo,
+  // para ver con cuál se podría imprimir.
   return (
     <div style={{ borderTop: "1px solid var(--line)" }}>
       <div style={{ ...celdaFila, paddingBottom: 2 }}>
-        <div style={{ fontWeight: 600 }}>{d.material}</div>
-        <div>{d.color}</div>
-        <div style={{ fontSize: 11, color: "var(--muted)" }}>{d.variantes.join(", ")}</div>
-        <div>{d.gramosPorUnidad} g</div>
-        <div style={{ fontWeight: 600 }}>{d.requerido} g</div>
-        <div style={{ fontSize: 11, color: "var(--muted)" }}>{owners.length} owners</div>
+        <div style={{ fontWeight: 600 }}>{porMaterial.map(m => m.material).join(" / ")}</div>
+        {comunes}
+        <div style={{ fontSize: 11, color: "var(--muted)" }}>{porMaterial.length} materiales</div>
         <div style={{ fontSize: 11, color: "var(--muted)" }}>
-          {owners.filter(o => o.ok).length} pueden
+          {porMaterial.filter(m => m.ok).length} alcanzan
         </div>
         <Estado ok={d.ok}/>
       </div>
-      {owners.map(o => (
-        <div key={o.id} style={{ ...celdaFila, padding: "5px 0" }}>
-          <div/><div/><div/><div/><div/>
-          <div style={{
-            borderLeft: "2px solid var(--line-strong)", paddingLeft: 8,
-            color: o.owner ? "var(--text)" : "var(--muted)",
-          }}>
-            {o.owner || "(sin owner)"}
+      {porMaterial.map(m => (
+        <div key={m.material}>
+          <div style={{ ...celdaFila, padding: "5px 0" }}>
+            <div style={{
+              borderLeft: "2px solid var(--line-strong)", paddingLeft: 8,
+              color: m.ok ? "var(--text)" : "#c64138", fontWeight: m.ok ? 400 : 700,
+            }}>
+              {m.material}
+            </div>
+            <div/><div/><div/><div/>
+            {colasDe(m)}
           </div>
-          <div style={{ color: o.ok ? "var(--text)" : "#c64138", fontWeight: o.ok ? 400 : 700 }}>
-            {o.disponible} g
-          </div>
-          <Estado ok={o.ok}/>
+          {filasOwner(m)}
         </div>
       ))}
     </div>
@@ -1639,7 +1690,10 @@ export function RecetaEditor({ receta, setReceta, filamentos }) {
 
   const up = (i, patch) => setReceta(r => r.map((l, j) => j === i ? { ...l, ...patch } : l));
   const quitar = (i) => setReceta(r => r.filter((_, j) => j !== i));
-  const agregar = () => setReceta(r => [...r, { id: nuevoId("l"), material: "", gramos: 0 }]);
+  const agregar = () => setReceta(r => [...r, { id: nuevoId("l"), materiales: [], gramos: 0 }]);
+  // Las líneas guardadas antes de los materiales múltiples traen "material".
+  const materialesDeLinea = (l) =>
+    Array.isArray(l.materiales) ? l.materiales : [l.material].filter(Boolean);
 
   const totalGramos = receta.reduce((s, l) => s + (Number(l.gramos) || 0), 0);
 
@@ -1650,6 +1704,10 @@ export function RecetaEditor({ receta, setReceta, filamentos }) {
         Qué material y <strong>cuántos gramos</strong> consume una unidad. El color no se define
         acá: cada variante de abajo le asigna uno a cada línea. La disponibilidad exige tener al
         menos {FACTOR_DISPONIBILIDAD}× estos gramos del color de la variante.
+        <br/>
+        Una línea puede aceptar <strong>varios materiales</strong> si da igual con cuál se imprima
+        (PLA o PETG, por ejemplo): los gramos son los mismos, alcanza con que uno tenga stock, y al
+        marcar el pedido como impreso se elige con cuál se hizo.
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -1657,9 +1715,14 @@ export function RecetaEditor({ receta, setReceta, filamentos }) {
           <div key={l.id || i}>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 110px 36px", gap: 10, alignItems: "end" }}>
               <SelectorConAgregar
-                value={l.material}
+                multiple
+                value={materialesDeLinea(l)}
                 opciones={materiales}
-                onChange={material => up(i, { material })}
+                // Solo se escribe materiales. El campo material viejo que
+                // pueda traer la línea no se toca acá: normalizarReceta lo
+                // recalcula al guardar (= materiales[0]), así que no hay forma
+                // de que queden en desacuerdo.
+                onChange={ms => up(i, { materiales: ms })}
                 resolver={resolverValor}
                 placeholder="Nuevo material..."
                 vacio="— Material —"
@@ -1786,7 +1849,9 @@ function VarianteCard({ indice, variante, abierta, onAlternar, onQuitar, faltanC
 
 export function VariantesEditor({ receta, variantes, setVariantes, filamentos }) {
   const colores = coloresUsados(filamentos);
-  const lineas = receta.filter(l => String(l.material || "").trim() && (Number(l.gramos) || 0) > 0);
+  // Una línea por línea de RECETA, no por material: aunque acepte PLA y PETG,
+  // la variante le asigna UN color, el mismo salga con el que salga.
+  const lineas = normalizarReceta(receta).filter(l => l.materiales.length > 0 && l.gramos > 0);
 
   const up = (i, patch) => setVariantes(vs => vs.map((v, j) => j === i ? { ...v, ...patch } : v));
   const quitar = (i) => setVariantes(vs => vs.filter((_, j) => j !== i));
@@ -1850,7 +1915,9 @@ export function VariantesEditor({ receta, variantes, setVariantes, filamentos })
                 {lineas.map(l => (
                   <div key={l.id}>
                     <SelectorConAgregar
-                      label={`${l.material} · ${l.gramos} g`}
+                      // "PLA / PETG · 20 g": la línea acepta cualquiera de los
+                      // dos y el color elegido vale para todos.
+                      label={`${l.materiales.join(" / ")} · ${l.gramos} g`}
                       value={v.colores?.[l.id] || ""}
                       opciones={colores}
                       onChange={color => ponerColor(i, l.id, color)}
@@ -1858,10 +1925,15 @@ export function VariantesEditor({ receta, variantes, setVariantes, filamentos })
                       placeholder="Nuevo color..."
                       vacio="— Color —"
                     />
-                    <EstadoEnInventario
-                      linea={{ material: l.material, color: v.colores?.[l.id] || "" }}
-                      filamentos={filamentos}
-                    />
+                    {/* Un estado por material posible: cada uno es un rollo
+                        distinto del inventario y puede faltar por separado. */}
+                    {l.materiales.map(m => (
+                      <EstadoEnInventario
+                        key={m}
+                        linea={{ material: m, color: v.colores?.[l.id] || "" }}
+                        filamentos={filamentos}
+                      />
+                    ))}
                   </div>
                 ))}
               </div>

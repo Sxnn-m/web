@@ -32,9 +32,14 @@ const opcionStyle = {
 };
 
 /**
- * @param {string}   value      valor elegido ("" = ninguno)
+ * @param {string|string[]} value  valor elegido ("" = ninguno). Con multiple,
+ *                              un array de valores.
+ * @param {boolean}  [multiple] permite elegir varios: la caja muestra chips, el
+ *                              clic alterna cada opción y el desplegable queda
+ *                              abierto para seguir eligiendo. onChange recibe el
+ *                              array completo.
  * @param {string[]} opciones   valores existentes, ya deduplicados
- * @param {Function} onChange   recibe el valor final (string)
+ * @param {Function} onChange   recibe el valor final (string, o string[])
  * @param {Function} [resolver] (texto, opciones) => {valor, existente}; permite
  *                              que el llamador normalice lo que se escribe a
  *                              mano contra lo que ya existe
@@ -51,7 +56,7 @@ const opcionStyle = {
  *                              cargado en el formulario abierto.
  */
 export function SelectorConAgregar({
-  label, value = "", opciones = [], onChange,
+  label, value = "", opciones = [], onChange, multiple = false,
   placeholder = "Nuevo...", vacio = "— Sin especificar —",
   hint, resolver, onAgregar, onEliminarOpcion,
 }) {
@@ -60,10 +65,17 @@ export function SelectorConAgregar({
   const [texto, setTexto] = useState("");
   const [aviso, setAviso] = useState("");
 
+  // Con multiple el valor es un array; sin él, un string. Adentro se trabaja
+  // siempre con la lista, y al salir se devuelve la forma que corresponde.
+  const elegidos = multiple
+    ? (Array.isArray(value) ? value.filter(Boolean) : [value].filter(Boolean))
+    : [value].filter(Boolean);
+  const estaElegido = (o) => elegidos.includes(o);
+
   // Un valor guardado que ya no está en la lista (su última referencia se
   // borró, o se ocultó la opción) igual tiene que poder verse y conservarse
   // al editar.
-  const lista = value && !opciones.includes(value) ? [...opciones, value] : opciones;
+  const lista = [...opciones, ...elegidos.filter(v => !opciones.includes(v))];
 
   // Escape cierra, como en el select nativo.
   useEffect(() => {
@@ -73,7 +85,14 @@ export function SelectorConAgregar({
     return () => document.removeEventListener("keydown", alTeclear);
   }, [abierto]);
 
-  const elegir = (v) => { setAviso(""); onChange(v); setAbierto(false); };
+  const elegir = (v) => {
+    setAviso("");
+    if (!multiple) { onChange(v); setAbierto(false); return; }
+    // En modo múltiple el clic ALTERNA y el desplegable no se cierra: elegir
+    // dos materiales seguidos no debería costar dos aperturas.
+    if (!v) { onChange([]); setAbierto(false); return; }
+    onChange(estaElegido(v) ? elegidos.filter(x => x !== v) : [...elegidos, v]);
+  };
 
   const confirmar = () => {
     const crudo = texto.trim();
@@ -81,7 +100,10 @@ export function SelectorConAgregar({
     const { valor, existente } = resolver
       ? resolver(crudo, opciones)
       : { valor: crudo, existente: opciones.includes(crudo) };
-    onChange(valor);
+    // Un valor nuevo se SUMA a lo ya elegido, no lo reemplaza.
+    onChange(multiple
+      ? (elegidos.includes(valor) ? elegidos : [...elegidos, valor])
+      : valor);
     if (!existente) onAgregar?.(valor);
     setAgregando(false);
     setTexto("");
@@ -96,7 +118,7 @@ export function SelectorConAgregar({
     // Sin esto, el clic en la papelera también elegiría la opción.
     e.stopPropagation();
     setAbierto(false);
-    onEliminarOpcion(opcion, { seleccionada: opcion === value });
+    onEliminarOpcion(opcion, { seleccionada: estaElegido(opcion) });
   };
 
   const etiqueta = label ? (
@@ -150,12 +172,25 @@ export function SelectorConAgregar({
           aria-haspopup="listbox"
           aria-expanded={abierto}
         >
-          <span style={{
-            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-            color: value ? "var(--text)" : "var(--muted)",
-          }}>
-            {value || vacio}
-          </span>
+          {multiple && elegidos.length > 0 ? (
+            <span style={{ display: "flex", flexWrap: "wrap", gap: 5, minWidth: 0 }}>
+              {elegidos.map(v => (
+                <span key={v} style={{
+                  background: "var(--accent-suave)", color: "var(--accent)",
+                  border: "1px solid var(--accent)", borderRadius: 3,
+                  padding: "1px 7px", fontSize: 12, fontWeight: 600,
+                  whiteSpace: "nowrap",
+                }}>{v}</span>
+              ))}
+            </span>
+          ) : (
+            <span style={{
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+              color: elegidos.length > 0 ? "var(--text)" : "var(--muted)",
+            }}>
+              {elegidos[0] || vacio}
+            </span>
+          )}
           <span style={{ color: "var(--muted)", flexShrink: 0, fontSize: 9 }}>▼</span>
         </button>
 
@@ -184,17 +219,22 @@ export function SelectorConAgregar({
                 <div
                   key={o}
                   role="option"
-                  aria-selected={o === value}
+                  aria-selected={estaElegido(o)}
                   onClick={() => elegir(o)}
                   style={{
                     ...opcionStyle,
-                    background: o === value ? "var(--bg-alt)" : "none",
-                    fontWeight: o === value ? 600 : 400,
+                    background: estaElegido(o) ? "var(--bg-alt)" : "none",
+                    fontWeight: estaElegido(o) ? 600 : 400,
                   }}
                   onMouseEnter={e => (e.currentTarget.style.background = "var(--bg-alt)")}
-                  onMouseLeave={e => (e.currentTarget.style.background = o === value ? "var(--bg-alt)" : "none")}
+                  onMouseLeave={e => (e.currentTarget.style.background = estaElegido(o) ? "var(--bg-alt)" : "none")}
                 >
                   <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {/* Con varios elegibles hace falta ver de un vistazo cuáles
+                        están puestos, no solo el resaltado de la fila. */}
+                    {multiple && <span style={{ color: estaElegido(o) ? "var(--accent)" : "var(--line-strong)", marginRight: 8 }}>
+                      {estaElegido(o) ? "✓" : "○"}
+                    </span>}
                     {o}
                   </span>
                   {onEliminarOpcion && (

@@ -438,7 +438,10 @@ export function planDeConsumo(pedido, productos = [], personalizados = []) {
         // en dos líneas distintas, y sin él las dos filas compartían clave —
         // misma key de React, y el desperdicio y el owner de una pisaban los
         // de la otra, porque el modal guarda ese estado por clave.
-        clave: `${indice}|${item.productoId}|${variante?.id || ""}|${linea.material}|${linea.color}`,
+        // La clave lleva el CONJUNTO de materiales y no el elegido: el modal
+        // guarda por clave el desperdicio tipeado y el owner, así que si la
+        // clave cambiara al elegir otro material se perderían los dos.
+        clave: `${indice}|${item.productoId}|${variante?.id || ""}|${linea.materiales.join("+")}|${linea.color}`,
         indice,
         productoId: item.productoId,
         productoNombre: item.productoNombre,
@@ -448,6 +451,9 @@ export function planDeConsumo(pedido, productos = [], personalizados = []) {
         // El nombre guardado en el pedido manda; los pedidos viejos no lo
         // tienen y se resuelve contra el producto.
         varianteNombre: item.varianteNombre || variante?.nombre || "",
+        // Todos los que la receta acepta para esta línea, y cuál se usa. Con
+        // uno solo son lo mismo y el modal ni muestra el selector.
+        materiales: linea.materiales,
         material: linea.material,
         color: linea.color,
         // Sin variante resuelta la línea queda sin color: se marca para que

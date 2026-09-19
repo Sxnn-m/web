@@ -45,10 +45,10 @@ export function margenDeCostos(costs = DEFAULT_COSTS) {
  *
  * @returns {Array<{material: string, gramos: number}>} en orden de aparición
  */
-export function gramosPorMaterial(receta = []) {
+export function gramosPorMaterial(receta = [], costs = null) {
   const mapa = new Map();
   for (const item of receta) {
-    const material = String(item?.material || "").trim();
+    const material = materialQueMandaElPrecio(item, costs);
     const gramos = Number(item?.gramos) || 0;
     if (!material || gramos <= 0) continue;
     const clave = normalizar(material);
@@ -57,6 +57,33 @@ export function gramosPorMaterial(receta = []) {
     else mapa.set(clave, { material, gramos });
   }
   return [...mapa.values()];
+}
+
+/**
+ * De qué material se cobra una línea que acepta varios.
+ *
+ * Se toma el MÁS CARO de los posibles: no se sabe con cuál se va a terminar
+ * imprimiendo, y cotizar con el barato deja el precio corto justo cuando se usa
+ * el otro. Con el caro, en el peor caso se gana de más.
+ *
+ * Si a alguno de los materiales le falta el costo configurado se devuelve ESE,
+ * no el más caro de los que sí tienen: sin su precio no hay forma de saber si
+ * era el más caro de todos, y calcular igual sería inventar. Devolverlo hace
+ * que la línea caiga en "sin costo configurado" y el precio no se calcule, que
+ * es lo que ya pasa hoy con un material sin costo.
+ */
+function materialQueMandaElPrecio(linea, costs) {
+  const materiales = Array.isArray(linea?.materiales) && linea.materiales.length > 0
+    ? linea.materiales.map(m => String(m || "").trim()).filter(Boolean)
+    : [String(linea?.material || "").trim()].filter(Boolean);
+  if (materiales.length === 0) return "";
+  if (materiales.length === 1 || !costs) return materiales[0];
+
+  const sinCosto = materiales.find(m => costoPorGramo(m, costs) === null);
+  if (sinCosto) return sinCosto;
+
+  return materiales.reduce((caro, m) =>
+    costoPorGramo(m, costs) > costoPorGramo(caro, costs) ? m : caro);
 }
 
 /**
@@ -154,7 +181,9 @@ export function materialesDeCostos(costs = DEFAULT_COSTS, filamentos = []) {
  * }}
  */
 export function calcularRentabilidad(producto, costs = DEFAULT_COSTS) {
-  const desglose = gramosPorMaterial(producto?.receta || []);
+  // costs entra para poder elegir el material más caro en las líneas que
+  // aceptan varios.
+  const desglose = gramosPorMaterial(producto?.receta || [], costs);
   // Horas decimales reales: 5h 30min son 5.5, no 530.
   const horas = horasDeImpresion(producto);
   const gramosTotales = desglose.reduce((s, d) => s + d.gramos, 0);
@@ -433,6 +462,22 @@ export function filtrarFilas(filas = [], filtros = {}) {
   );
 }
 
-/** "PLA, PETG" — materiales distintos de la receta, para la columna Material/es. */
-export const listaMateriales = (producto) =>
-  gramosPorMaterial(producto?.receta || []).map(d => d.material).join(", ");
+/**
+ * "PLA, PETG" — materiales distintos de la receta, para la columna Material/es.
+ *
+ * Lista TODOS los que la receta acepta, no solo el que manda el precio: la
+ * columna informa con qué se puede imprimir la pieza, no cuánto sale.
+ */
+export const listaMateriales = (producto) => {
+  const vistos = new Map();
+  for (const linea of (producto?.receta || [])) {
+    const materiales = Array.isArray(linea?.materiales) && linea.materiales.length > 0
+      ? linea.materiales : [linea?.material];
+    if (!(Number(linea?.gramos) > 0)) continue;
+    for (const m of materiales) {
+      const texto = String(m || "").trim();
+      if (texto && !vistos.has(normalizar(texto))) vistos.set(normalizar(texto), texto);
+    }
+  }
+  return [...vistos.values()].join(", ");
+};
