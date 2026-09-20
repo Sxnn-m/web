@@ -8,7 +8,7 @@ import {
 } from '../../lib/inventario.js';
 import {
   agruparConsumo, validarStock, textoFaltante,
-  materialesDe, materialesQueAlcanzan, resolverMateriales,
+  materialesDe, estadoDeMateriales, resolverMateriales,
 } from '../../lib/consumoPedido.js';
 import { buscarFilamento } from '../../lib/disponibilidad.js';
 import { opcionesDeDescuento } from '../../lib/opcionesFilamento.js';
@@ -723,19 +723,22 @@ export function ModalImpresion({ pedido, productos, personalizados = [], filamen
   const [errorStock, setErrorStock] = useState("");   // faltante detectado por la transacción
 
   // ── Material usado ────────────────────────────────────────────────────
-  // Solo los materiales de la línea que ALCANZAN para esta impresión. Un
-  // material que no llega no se lista ni en gris: ofrecer algo que no se va a
-  // poder usar en esta impresión solo confunde.
+  // TODOS los materiales de la línea, con si alcanzan para esta impresión. Los
+  // que no llegan se listan igual, deshabilitados y con el motivo: saber que
+  // falta PETG Verde es justamente lo que hay que ver para reponerlo.
   const materialesPosibles = useMemo(() => {
     const mapa = {};
     for (const l of plan) {
       if (l.sinVariante) continue;
-      const todos = materialesDe(l);
-      if (todos.length <= 1) continue;   // sin alternativas no hay nada que elegir
-      mapa[l.clave] = materialesQueAlcanzan(l, filamentos, desperdicios);
+      if (materialesDe(l).length <= 1) continue;   // sin alternativas no hay nada que elegir
+      mapa[l.clave] = estadoDeMateriales(l, filamentos, desperdicios);
     }
     return mapa;
   }, [plan, filamentos, desperdicios]);
+
+  /** Los que se pueden elegir de verdad. */
+  const queAlcanzan = (clave) =>
+    (materialesPosibles[clave] || []).filter(m => m.alcanza).map(m => m.material);
 
   // El material efectivo de cada línea. Lo elegido a mano manda mientras siga
   // alcanzando; si dejó de alcanzar (subió el desperdicio, se gastó el rollo)
@@ -744,10 +747,10 @@ export function ModalImpresion({ pedido, productos, personalizados = [], filamen
   const planResuelto = useMemo(() => {
     const eleccion = {};
     for (const l of plan) {
-      const posibles = materialesPosibles[l.clave];
-      if (!posibles) continue;
+      if (!materialesPosibles[l.clave]) continue;
+      const alcanzan = queAlcanzan(l.clave);
       const aMano = materialElegido[l.clave];
-      eleccion[l.clave] = posibles.includes(aMano) ? aMano : posibles[0];
+      eleccion[l.clave] = alcanzan.includes(aMano) ? aMano : alcanzan[0];
     }
     return resolverMateriales(plan, eleccion);
   }, [plan, materialesPosibles, materialElegido]);
@@ -755,7 +758,7 @@ export function ModalImpresion({ pedido, productos, personalizados = [], filamen
   // Líneas con alternativas donde NINGUNA alcanza: bloquean igual que la falta
   // de owner, y el detalle de cuánto falta sale de la validación de abajo.
   const sinMaterialConStock = planResuelto.filter(
-    l => materialesPosibles[l.clave]?.length === 0);
+    l => materialesPosibles[l.clave] && queAlcanzan(l.clave).length === 0);
 
   // Las dos listas del modal, agrupadas por pieza: una receta de dos
   // materiales es UN bloque con dos filas, no dos bloques.
@@ -1014,7 +1017,7 @@ export function ModalImpresion({ pedido, productos, personalizados = [], filamen
                             tendría sentido, un owner no dice nada hasta saber de
                             qué rollo se habla. */}
                         {materialesPosibles[l.clave] && (
-                          <div style={{ marginBottom: 12, maxWidth: 250 }}>
+                          <div style={{ marginBottom: 12, maxWidth: 300 }}>
                             <label style={{
                               display: "block", fontSize: 11, fontWeight: 600, letterSpacing: 0.8,
                               textTransform: "uppercase", color: "var(--muted)", marginBottom: 6,
@@ -1022,20 +1025,27 @@ export function ModalImpresion({ pedido, productos, personalizados = [], filamen
                               Material usado
                             </label>
                             <ListaDesplegable
-                              // Solo los que alcanzan. Los que no, directamente
-                              // no se listan: no se van a poder usar en esta
-                              // impresión y verlos en gris solo confunde.
-                              opciones={materialesPosibles[l.clave].map(m => ({ id: m, nombre: m }))}
-                              valor={materialesPosibles[l.clave].includes(l.material) ? l.material : ""}
+                              // Se listan TODOS, también los que no llegan:
+                              // deshabilitados y con el motivo, que es lo que
+                              // deja ver de un vistazo qué filamento reponer.
+                              opciones={materialesPosibles[l.clave].map(m => ({
+                                id: m.material,
+                                nombre: m.material,
+                                nota: m.alcanza ? ""
+                                  : m.tiene
+                                    ? `· ${m.disponible} g disponibles, necesita ${m.necesita} g`
+                                    : `· no hay ${m.material} ${l.color} en inventario`,
+                                deshabilitada: !m.alcanza,
+                              }))}
+                              valor={queAlcanzan(l.clave).includes(l.material) ? l.material : ""}
                               onElegir={m => setMaterialElegido(e => ({ ...e, [l.clave]: m }))}
-                              vacio={materialesPosibles[l.clave].length === 0
+                              vacio={queAlcanzan(l.clave).length === 0
                                 ? "— Ninguno alcanza —"
                                 : "— Elegir material —"}
-                              invalido={materialesPosibles[l.clave].length === 0}
-                              deshabilitado={materialesPosibles[l.clave].length === 0}
+                              invalido={queAlcanzan(l.clave).length === 0}
                               titulo={`Con cuál de ${materialesDe(l).join(" o ")} se imprimió`}
                             />
-                            {materialesPosibles[l.clave].length === 0 && (
+                            {queAlcanzan(l.clave).length === 0 && (
                               <div style={{ fontSize: 11, color: "#c64138", marginTop: 6, lineHeight: 1.5 }}>
                                 Ninguno de {materialesDe(l).join(" / ")} en {l.color} llega a los{" "}
                                 {totalPorLinea(l)} g que hacen falta.

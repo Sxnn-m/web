@@ -41,22 +41,47 @@ export const materialesDe = (linea) =>
     : [linea?.material].filter(Boolean);
 
 /**
- * Los materiales de la línea que ALCANZAN para esta impresión.
+ * Cada material que acepta la línea, con si alcanza para ESTA impresión y, si
+ * no, por qué.
  *
  * "Alcanza" es contra el consumo real —receta x cantidad + el desperdicio que
  * se haya tipeado—, no contra el 2x de la vitrina: acá se está imprimiendo, no
  * decidiendo si mostrar el producto.
  *
- * Un material que no llega no se devuelve en absoluto. La idea es que el
- * selector no lo liste ni en gris: ofrecer algo que nunca se va a poder usar
- * en esta impresión solo confunde.
+ * Se devuelven TODOS, incluso los que no llegan: el selector los muestra
+ * deshabilitados con el motivo, que es la forma de ver de un vistazo qué
+ * filamento hay que reponer. El que decide si se puede elegir es `alcanza`.
+ *
+ * Como el stock de dos owners no se suma, "disponible" es el del rollo MÁS
+ * GRANDE: es el que define si el material alcanza, y el número que sirve para
+ * saber cuánto falta.
+ *
+ * @returns {Array<{material, alcanza, tiene, disponible, falta}>}
+ *   tiene=false → no hay ningún rollo de ese material en ese color.
  */
-export function materialesQueAlcanzan(linea, filamentos = [], desperdicios = {}) {
+export function estadoDeMateriales(linea, filamentos = [], desperdicios = {}) {
   const necesita = (Number(linea?.cantidadConsumida) || 0)
     + (Number(desperdicios?.[linea?.clave]) || 0);
-  return materialesDe(linea).filter(material =>
-    opcionesDeDescuento(filamentos, material, linea.color, necesita)
-      .some(o => o.alcanza));
+  return materialesDe(linea).map(material => {
+    const opciones = opcionesDeDescuento(filamentos, material, linea?.color, necesita);
+    const cargados = opciones.filter(o => o.tiene);
+    const mayor = cargados.sort((a, b) => b.disponible - a.disponible)[0] || null;
+    return {
+      material,
+      alcanza: opciones.some(o => o.alcanza),
+      tiene: Boolean(mayor),
+      disponible: mayor ? mayor.disponible : 0,
+      falta: mayor ? mayor.falta : necesita,
+      necesita,
+    };
+  });
+}
+
+/** Solo los que alcanzan. Es lo que decide qué se puede elegir y qué bloquea. */
+export function materialesQueAlcanzan(linea, filamentos = [], desperdicios = {}) {
+  return estadoDeMateriales(linea, filamentos, desperdicios)
+    .filter(m => m.alcanza)
+    .map(m => m.material);
 }
 
 /**
