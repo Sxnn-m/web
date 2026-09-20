@@ -95,6 +95,7 @@ export function DetalleHistorial({
   const totalConsumido = gastos.reduce((s, g) => s + (Number(g.cantidadConsumida) || 0), 0);
   const totalDesperdiciado = gastos.reduce((s, g) => s + (Number(g.cantidadDesperdiciada) || 0), 0);
   const totalRepuesto = restocks.reduce((s, r) => s + (Number(r.cantidadAgregada) || 0), 0);
+  const hayMovimientos = restocks.some(r => (Number(r.cantidadAgregada) || 0) < 0);
 
   const COL_GASTOS = conDesperdicio
     ? "1.6fr 90px 90px 90px 1fr"
@@ -196,7 +197,12 @@ export function DetalleHistorial({
               Restocks
             </div>
             <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 12 }}>
-              Carga manual · {totalRepuesto} {unidad} repuestas en total
+              {/* Con alguna salida la suma ya no es "lo repuesto" sino el
+                  neto, y decirle repuesto sería contar una transferencia como
+                  si hubiera entrado material nuevo. Sin salidas, el texto de
+                  siempre. */}
+              Carga manual y movimientos · {totalRepuesto} {unidad}{" "}
+              {hayMovimientos ? "netas en total" : "repuestas en total"}
             </div>
             <div style={{
               display: "grid", gridTemplateColumns: "100px 1fr 1fr",
@@ -211,7 +217,17 @@ export function DetalleHistorial({
                 display: "grid", gridTemplateColumns: "100px 1fr 1fr",
                 gap: 10, padding: "12px", borderBottom: "1px solid var(--line)", fontSize: 12,
               }}>
-                <div style={{ fontWeight: 700, color: "#4a7a52" }}>+{r.cantidadAgregada} {unidad}</div>
+                {/* Con signo y con color propio: una transferencia sale del
+                    rollo con cantidad negativa, y el "+" fijo en verde de
+                    antes la mostraba como "+-40 g", leyéndose como si hubiera
+                    entrado material. */}
+                <div style={{
+                  fontWeight: 700,
+                  color: (Number(r.cantidadAgregada) || 0) < 0 ? "#B56B3E" : "#4a7a52",
+                }}>
+                  {(Number(r.cantidadAgregada) || 0) < 0 ? "−" : "+"}
+                  {Math.abs(Number(r.cantidadAgregada) || 0)} {unidad}
+                </div>
                 <div style={{ color: "var(--muted)" }}>{fmtFecha(r.fecha)}</div>
                 <div style={{ color: "var(--muted)" }}>{r.nota || "—"}</div>
               </div>

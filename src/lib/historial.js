@@ -141,6 +141,30 @@ export async function registrarRestockEn(coleccion, docId, cantidadAgregada, not
   });
 }
 
+/**
+ * El documento de restock que registra un MOVIMIENTO entre owners.
+ *
+ * La cantidad va CON SIGNO: negativa en el rollo del que sale, positiva en el
+ * que recibe. registrarRestockEn() sigue exigiendo > 0 —una carga manual en
+ * negativo sería un error de tipeo— pero el historial en sí admite el signo, y
+ * mostrar la salida ahí es lo que deja los dos lados simétricos.
+ *
+ * No se registra como "gasto" a propósito: los gastos llevan
+ * cantidadConsumida/cantidadDesperdiciada y alimentan las estadísticas de
+ * consumo y desperdicio del mes. Una transferencia no se imprimió ni se tiró,
+ * y contarla ahí inflaría las dos métricas.
+ *
+ * Devuelve el objeto en vez de escribirlo: la transferencia lo escribe dentro
+ * de su propia transacción, y así las dos puntas comparten la misma forma.
+ */
+export function movimientoDeStock(cantidadConSigno, nota) {
+  return {
+    cantidadAgregada: Number(cantidadConSigno) || 0,
+    nota: String(nota || "").trim(),
+    fecha: serverTimestamp(),
+  };
+}
+
 // El descuento al imprimir un pedido NO pasa por acá: va dentro de la
 // transacción de marcarPedidoImpreso() en src/lib/inventario.js, que valida
 // el stock y escribe los gastos de forma atómica.
