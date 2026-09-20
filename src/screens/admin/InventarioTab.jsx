@@ -15,8 +15,12 @@ import { DetalleHistorial, RestockBadge, fmtFecha } from './DetalleHistorial.jsx
 // Se reexportan para no romper a quien ya los importaba desde acá.
 export { RestockBadge, fmtFecha };
 
+// 6x8 con un icono de 14 daba botones de 32 px: cuatro de esos más sus
+// separaciones pedían 146 px en una columna declarada de 90, y la grilla
+// empujaba la tabla fuera del panel. Con 4x6 e icono 13 cada uno mide 27, que
+// sigue siendo cómodo de tocar.
 const actionBtn = {
-  background: "none", border: "1px solid var(--line)", padding: "6px 8px",
+  background: "none", border: "1px solid var(--line)", padding: "4px 6px",
   cursor: "pointer", color: "var(--text)", display: "flex", alignItems: "center",
   borderRadius: 4,
 };
@@ -135,7 +139,11 @@ export function InventarioTab({ filamentos, onChanged, setMsg }) {
   }
 
   const enAlerta = filamentos.filter(necesitaRestock).length;
-  const COL = "1.1fr 1fr 1fr 1fr 110px 140px 90px";
+  // Acciones pasa de 90 a 120: son cuatro botones de 27 px más tres
+  // separaciones de 4, y una columna que no entra empuja toda la grilla afuera
+  // del panel en vez de recortarse. Los 30 px salen de las columnas flexibles,
+  // que son las que tienen sobrante.
+  const COL = "1.1fr 1fr 1fr 1fr 104px 128px 120px";
 
   return (
     <>
@@ -220,8 +228,8 @@ export function InventarioTab({ filamentos, onChanged, setMsg }) {
         <div style={{ minWidth: 820 }}>
           <div style={{
             display: "grid", gridTemplateColumns: COL,
-            gap: 10, padding: "9px 10px", background: "var(--bg-alt)",
-            fontSize: 9.5, textTransform: "uppercase", letterSpacing: 1.2,
+            gap: 8, padding: "8px 8px", background: "var(--bg-alt)",
+            fontSize: 9.5, textTransform: "uppercase", letterSpacing: 1.1,
             color: "var(--muted)", fontWeight: 700,
           }}>
             <div>Material</div><div>Color</div><div>Marca</div><div>Owner</div>
@@ -233,8 +241,8 @@ export function InventarioTab({ filamentos, onChanged, setMsg }) {
             return (
               <div key={f._id} style={{
                 display: "grid", gridTemplateColumns: COL,
-                gap: 10, padding: "12px 10px", borderBottom: "1px solid var(--line)",
-                fontSize: 13, alignItems: "center",
+                gap: 8, padding: "10px 8px", borderBottom: "1px solid var(--line)",
+                fontSize: 12.5, alignItems: "center",
                 background: alerta ? "#c6413808" : "transparent",
               }}>
                 <div
@@ -251,15 +259,15 @@ export function InventarioTab({ filamentos, onChanged, setMsg }) {
                   {Number(f.cantidadGramos || 0).toLocaleString("es-AR")} g
                 </div>
                 <div>{alerta ? <RestockBadge/> : <span style={{ color: "var(--muted)", fontSize: 12 }}>OK</span>}</div>
-                <div style={{ display: "flex", gap: 4 }}>
-                  <button onClick={() => setSeleccionado(f._id)} style={actionBtn} title="Ver detalle"><Icon.list size={14}/></button>
-                  <button onClick={() => openEditar(f)} style={actionBtn} title="Editar"><Icon.spark size={14}/></button>
+                <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
+                  <button onClick={() => setSeleccionado(f._id)} style={actionBtn} title="Ver detalle"><Icon.list size={13}/></button>
+                  <button onClick={() => openEditar(f)} style={actionBtn} title="Editar"><Icon.spark size={13}/></button>
                   <button onClick={() => setTransfiriendo(f)} style={actionBtn}
                     title={`Transferir ${f.material} ${f.color} a otro owner`}
                     aria-label={`Transferir ${f.material} ${f.color}`}>
-                    <Icon.truck size={14}/>
+                    <Icon.truck size={13}/>
                   </button>
-                  <button onClick={() => borrar(f)} style={{ ...actionBtn, color: "#c64138" }} title="Eliminar"><Icon.trash size={14}/></button>
+                  <button onClick={() => borrar(f)} style={{ ...actionBtn, color: "#c64138" }} title="Eliminar"><Icon.trash size={13}/></button>
                 </div>
               </div>
             );

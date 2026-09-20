@@ -2784,7 +2784,15 @@ export function ProductForm({
         insumoId: o.insumoId || "",
         // Vacío en las opciones anteriores a los tipos: se ancla al primero.
         tipoId: o.tipoId || "",
-        cantidad: Math.max(1, Number(o.cantidad) || 1),
+        // Con mínimo 0, no 1. El guardado ya respetaba el 0 —es lo que hace
+        // que "Sin cargador" no consuma nada— pero la LECTURA lo subía a 1 por
+        // dos vías: `0 || 1` y el Math.max(1, ...). Así el 0 llegaba bien a
+        // Firestore, la pantalla lo mostraba en 1 al reabrir el producto, y el
+        // siguiente guardado escribía ese 1 encima. Solo se usa el 1 cuando no
+        // hay valor, que es una opción recién creada.
+        cantidad: o.cantidad === undefined || o.cantidad === null || o.cantidad === ""
+          ? 1
+          : Math.max(0, Math.round(Number(o.cantidad) || 0)),
         manual: o.manual === true || (o.precioManual !== null && o.precioManual !== undefined),
         precioManual: o.precioManual ?? null,
         nombreEditado: Boolean(o.nombre),
