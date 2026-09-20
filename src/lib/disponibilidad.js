@@ -100,15 +100,27 @@ export function agruparReceta(receta = []) {
 // specs.material y specs.peso ya no se cargan a mano: salen de la receta,
 // que es la única fuente de verdad de qué y cuánto consume el producto.
 
-/** Materiales únicos de la receta, en orden de aparición: "PLA, PETG". */
+/**
+ * Materiales únicos de la receta, en orden de aparición: "PLA, PETG".
+ *
+ * Una línea que acepta varios aporta TODOS, no solo el primero: el resumen
+ * dice con qué está hecho el producto, y si una línea puede salir en PLA o en
+ * PETG los dos son materiales del producto. La deduplicación es general, no
+ * por línea, así que un material que ya apareció en otra no se repite.
+ */
 export function materialesDeReceta(receta = []) {
   const vistos = new Map();
   for (const item of receta) {
-    const material = String(item?.material || "").trim();
-    if (!material) continue;
     if ((Number(item?.gramos) || 0) <= 0) continue;
-    const clave = normalizar(material);
-    if (!vistos.has(clave)) vistos.set(clave, material);
+    const lista = Array.isArray(item?.materiales) && item.materiales.length > 0
+      ? item.materiales
+      : [item?.material];
+    for (const crudo of lista) {
+      const material = String(crudo || "").trim();
+      if (!material) continue;
+      const clave = normalizar(material);
+      if (!vistos.has(clave)) vistos.set(clave, material);
+    }
   }
   return [...vistos.values()];
 }
