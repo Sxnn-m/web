@@ -166,12 +166,16 @@ export function ListaDesplegable({
                 onMouseLeave={e => (e.currentTarget.style.background =
                   o.id === valor ? "var(--bg-alt)" : "transparent")}
               >
-                <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {/* El nombre no encoge y la nota sí, pasando a la línea de
+                    abajo si no entra. Antes era al revés: con una nota larga
+                    el nombre se recortaba a "PE…" y no se sabía de qué opción
+                    hablaba, que es justo lo que no se puede perder. */}
+                <div style={{ display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap" }}>
+                  <span style={{ flexShrink: 0 }}>
                     {o.nombre}
                   </span>
                   {o.nota && (
-                    <span style={{ fontSize: 11, color: "#B56B3E", whiteSpace: "nowrap" }}>
+                    <span style={{ fontSize: 11, color: "#B56B3E", minWidth: 0 }}>
                       {o.nota}
                     </span>
                   )}

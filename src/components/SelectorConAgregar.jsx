@@ -172,25 +172,16 @@ export function SelectorConAgregar({
           aria-haspopup="listbox"
           aria-expanded={abierto}
         >
-          {multiple && elegidos.length > 0 ? (
-            <span style={{ display: "flex", flexWrap: "wrap", gap: 5, minWidth: 0 }}>
-              {elegidos.map(v => (
-                <span key={v} style={{
-                  background: "var(--accent-suave)", color: "var(--accent)",
-                  border: "1px solid var(--accent)", borderRadius: 3,
-                  padding: "1px 7px", fontSize: 12, fontWeight: 600,
-                  whiteSpace: "nowrap",
-                }}>{v}</span>
-              ))}
-            </span>
-          ) : (
-            <span style={{
-              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-              color: elegidos.length > 0 ? "var(--text)" : "var(--muted)",
-            }}>
-              {elegidos[0] || vacio}
-            </span>
-          )}
+          {/* Varios elegidos se leen como una lista separada por comas, con la
+              misma letra y el mismo negro que el resto del formulario. Estuvo
+              un rato con chips azules y se leían como etiquetas de estado —un
+              cartel— cuando son solo el valor del campo. */}
+          <span style={{
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            color: elegidos.length > 0 ? "var(--text)" : "var(--muted)",
+          }}>
+            {elegidos.join(", ") || vacio}
+          </span>
           <span style={{ color: "var(--muted)", flexShrink: 0, fontSize: 9 }}>▼</span>
         </button>
 
