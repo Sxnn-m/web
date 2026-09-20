@@ -8,6 +8,7 @@ import {
 } from '../../lib/inventario.js';
 import {
   agruparConsumo, validarStock, textoFaltante,
+  materialesDe, materialesQueAlcanzan, resolverMateriales,
 } from '../../lib/consumoPedido.js';
 import { buscarFilamento } from '../../lib/disponibilidad.js';
 import { opcionesDeDescuento } from '../../lib/opcionesFilamento.js';
@@ -700,7 +701,8 @@ function EncabezadoPieza({ pieza }) {
 }
 
 // ─── Modal: marcar como impreso + gramos desperdiciados ──────────────
-function ModalImpresion({ pedido, productos, personalizados = [], filamentos, insumos = [], onClose, onDone }) {
+// Exportado para poder montarlo aislado en las pruebas de navegador.
+export function ModalImpresion({ pedido, productos, personalizados = [], filamentos, insumos = [], onClose, onDone }) {
   const plan = useMemo(() => planDeConsumo(pedido, productos, personalizados), [pedido, productos, personalizados]);
   const planInsumos = useMemo(
     () => planDeInsumos(pedido, productos, personalizados, insumos),
@@ -710,17 +712,55 @@ function ModalImpresion({ pedido, productos, personalizados = [], filamentos, in
   const faltanOpciones = useMemo(
     () => opcionesFaltantes(pedido, productos, personalizados),
     [pedido, productos, personalizados]);
-  // Las dos listas del modal, agrupadas por pieza: una receta de dos
-  // materiales es UN bloque con dos filas, no dos bloques.
-  const piezasDeMaterial = useMemo(() => agruparPorPieza(plan), [plan]);
-  const piezasDeInsumo = useMemo(() => agruparPorPieza(planInsumos), [planInsumos]);
-
   const [desperdicios, setDesperdicios] = useState({});
   // De qué rollo se descuenta cada línea, cuando hay más de un owner con el
   // mismo material+color: clave de la línea del plan → id del filamento.
   const [elegido, setElegido] = useState({});
+  // Con qué material se imprimió, cuando la receta acepta varios:
+  // clave de la línea del plan → material.
+  const [materialElegido, setMaterialElegido] = useState({});
   const [guardando, setGuardando] = useState(false);
   const [errorStock, setErrorStock] = useState("");   // faltante detectado por la transacción
+
+  // ── Material usado ────────────────────────────────────────────────────
+  // Solo los materiales de la línea que ALCANZAN para esta impresión. Un
+  // material que no llega no se lista ni en gris: ofrecer algo que no se va a
+  // poder usar en esta impresión solo confunde.
+  const materialesPosibles = useMemo(() => {
+    const mapa = {};
+    for (const l of plan) {
+      if (l.sinVariante) continue;
+      const todos = materialesDe(l);
+      if (todos.length <= 1) continue;   // sin alternativas no hay nada que elegir
+      mapa[l.clave] = materialesQueAlcanzan(l, filamentos, desperdicios);
+    }
+    return mapa;
+  }, [plan, filamentos, desperdicios]);
+
+  // El material efectivo de cada línea. Lo elegido a mano manda mientras siga
+  // alcanzando; si dejó de alcanzar (subió el desperdicio, se gastó el rollo)
+  // se cae al primero que sí, y si no queda ninguno al primero de la receta,
+  // que es el que después va a reportar cuánto le falta.
+  const planResuelto = useMemo(() => {
+    const eleccion = {};
+    for (const l of plan) {
+      const posibles = materialesPosibles[l.clave];
+      if (!posibles) continue;
+      const aMano = materialElegido[l.clave];
+      eleccion[l.clave] = posibles.includes(aMano) ? aMano : posibles[0];
+    }
+    return resolverMateriales(plan, eleccion);
+  }, [plan, materialesPosibles, materialElegido]);
+
+  // Líneas con alternativas donde NINGUNA alcanza: bloquean igual que la falta
+  // de owner, y el detalle de cuánto falta sale de la validación de abajo.
+  const sinMaterialConStock = planResuelto.filter(
+    l => materialesPosibles[l.clave]?.length === 0);
+
+  // Las dos listas del modal, agrupadas por pieza: una receta de dos
+  // materiales es UN bloque con dos filas, no dos bloques.
+  const piezasDeMaterial = useMemo(() => agruparPorPieza(planResuelto), [planResuelto]);
+  const piezasDeInsumo = useMemo(() => agruparPorPieza(planInsumos), [planInsumos]);
 
   const totalPorLinea = (l) => l.cantidadConsumida + (Number(desperdicios[l.clave]) || 0);
 
@@ -730,14 +770,14 @@ function ModalImpresion({ pedido, productos, personalizados = [], filamentos, in
   // que se recalcula con cada tecla.
   const candidatos = useMemo(() => {
     const mapa = {};
-    for (const l of plan) {
+    for (const l of planResuelto) {
       if (l.sinVariante) continue;
       mapa[l.clave] = opcionesDeDescuento(
         filamentos, l.material, l.color,
         l.cantidadConsumida + (Number(desperdicios[l.clave]) || 0));
     }
     return mapa;
-  }, [plan, filamentos, desperdicios]);
+  }, [planResuelto, filamentos, desperdicios]);
 
   // De qué rollo sale cada línea.
   //
@@ -748,7 +788,7 @@ function ModalImpresion({ pedido, productos, personalizados = [], filamentos, in
   // pregunta, y con ninguno la línea queda bloqueada por falta de stock.
   const asignaciones = useMemo(() => {
     const mapa = {};
-    for (const l of plan) {
+    for (const l of planResuelto) {
       const opciones = candidatos[l.clave] || [];
       if (opciones.length === 0) continue;   // ni un rollo: "no está cargado"
       const elegida = opciones.find(o => o.id === elegido[l.clave] && o.tiene);
@@ -759,17 +799,17 @@ function ModalImpresion({ pedido, productos, personalizados = [], filamentos, in
       else mapa[l.clave] = { pendiente: true };
     }
     return mapa;
-  }, [plan, candidatos, elegido]);
+  }, [planResuelto, candidatos, elegido]);
 
   // Lo que el owner elegido efectivamente cubre está en la asignación; estas
   // dos listas son los bloqueos previos a eso.
-  const faltaElegir = plan.filter(l => asignaciones[l.clave]?.pendiente && !asignaciones[l.clave].sinStock);
-  const sinOwnerConStock = plan.filter(l => asignaciones[l.clave]?.sinStock);
+  const faltaElegir = planResuelto.filter(l => asignaciones[l.clave]?.pendiente && !asignaciones[l.clave].sinStock);
+  const sinOwnerConStock = planResuelto.filter(l => asignaciones[l.clave]?.sinStock);
 
   // Validación en vivo, con la MISMA lógica que corre dentro de la transacción:
   // se recalcula con cada cambio de desperdicio o de owner.
   const validacion = useMemo(() => {
-    const consumo = agruparConsumo(plan, desperdicios, planInsumos, asignaciones);
+    const consumo = agruparConsumo(planResuelto, desperdicios, planInsumos, asignaciones);
     return validarStock(
       consumo,
       (f) => {
@@ -787,9 +827,10 @@ function ModalImpresion({ pedido, productos, personalizados = [], filamentos, in
         return tipo ? { id: i.clave, disponible: Number(tipo.cantidadDisponible) || 0 } : null;
       }
     );
-  }, [plan, desperdicios, planInsumos, asignaciones, filamentos, insumos]);
+  }, [planResuelto, desperdicios, planInsumos, asignaciones, filamentos, insumos]);
 
-  const puedeConfirmar = validacion.ok && faltaElegir.length === 0 && sinOwnerConStock.length === 0;
+  const puedeConfirmar = validacion.ok && faltaElegir.length === 0
+    && sinOwnerConStock.length === 0 && sinMaterialConStock.length === 0;
 
   const confirmar = async () => {
     if (!puedeConfirmar) return;   // el botón ya está deshabilitado, pero por las dudas
@@ -797,7 +838,7 @@ function ModalImpresion({ pedido, productos, personalizados = [], filamentos, in
     setErrorStock("");
     try {
       const { advertencias } = await marcarPedidoImpreso(
-        pedido, plan, desperdicios, filamentos, planInsumos, insumos, asignaciones
+        pedido, planResuelto, desperdicios, filamentos, planInsumos, insumos, asignaciones
       );
       const base = `✓ Pedido ${pedido.numeroOrden} marcado como impreso e inventario descontado.`;
       await onDone(advertencias.length ? `${base} Atención: ${advertencias.join(" ")}` : base);
@@ -959,9 +1000,49 @@ function ModalImpresion({ pedido, productos, personalizados = [], filamentos, in
                         paddingTop: i > 0 ? 14 : 0,
                       }}>
                         <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 10 }}>
-                          {l.material} · {l.color} — {l.gramosPorUnidad} g × {l.cantidad} u ={" "}
+                          {/* Con alternativas se nombran todas y se marca cuál
+                              se va a usar, que es lo que el selector decide. */}
+                          {materialesDe(l).length > 1
+                            ? <>{materialesDe(l).join(" / ")} · {l.color} — usando <strong style={{ color: "var(--text)" }}>{l.material}</strong> —{" "}</>
+                            : <>{l.material} · {l.color} — </>}
+                          {l.gramosPorUnidad} g × {l.cantidad} u ={" "}
                           <strong style={{ color: "var(--text)" }}>{l.cantidadConsumida} g</strong>
                         </div>
+                        {/* El material se resuelve ANTES que el owner: los
+                            owners de abajo son los de ESTE material+color, así
+                            que cambiar el material cambia esa lista. Al revés no
+                            tendría sentido, un owner no dice nada hasta saber de
+                            qué rollo se habla. */}
+                        {materialesPosibles[l.clave] && (
+                          <div style={{ marginBottom: 12, maxWidth: 250 }}>
+                            <label style={{
+                              display: "block", fontSize: 11, fontWeight: 600, letterSpacing: 0.8,
+                              textTransform: "uppercase", color: "var(--muted)", marginBottom: 6,
+                            }}>
+                              Material usado
+                            </label>
+                            <ListaDesplegable
+                              // Solo los que alcanzan. Los que no, directamente
+                              // no se listan: no se van a poder usar en esta
+                              // impresión y verlos en gris solo confunde.
+                              opciones={materialesPosibles[l.clave].map(m => ({ id: m, nombre: m }))}
+                              valor={materialesPosibles[l.clave].includes(l.material) ? l.material : ""}
+                              onElegir={m => setMaterialElegido(e => ({ ...e, [l.clave]: m }))}
+                              vacio={materialesPosibles[l.clave].length === 0
+                                ? "— Ninguno alcanza —"
+                                : "— Elegir material —"}
+                              invalido={materialesPosibles[l.clave].length === 0}
+                              deshabilitado={materialesPosibles[l.clave].length === 0}
+                              titulo={`Con cuál de ${materialesDe(l).join(" o ")} se imprimió`}
+                            />
+                            {materialesPosibles[l.clave].length === 0 && (
+                              <div style={{ fontSize: 11, color: "#c64138", marginTop: 6, lineHeight: 1.5 }}>
+                                Ninguno de {materialesDe(l).join(" / ")} en {l.color} llega a los{" "}
+                                {totalPorLinea(l)} g que hacen falta.
+                              </div>
+                            )}
+                          </div>
+                        )}
                         <div style={{
                           display: "grid", gridTemplateColumns: "150px 250px 1fr",
                           gap: 14, alignItems: "start",
@@ -1028,6 +1109,44 @@ function ModalImpresion({ pedido, productos, personalizados = [], filamentos, in
                     );
                   })}
                 </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Ninguno de los materiales alternativos alcanza. Se detalla cada uno
+            con cuánto le falta, en vez de un "no hay stock" que no dice qué
+            reponer. */}
+        {sinMaterialConStock.length > 0 && (
+          <div style={{
+            padding: "14px 16px", background: "#c6413812",
+            borderLeft: "3px solid #c64138", marginBottom: 20,
+            fontSize: 13, lineHeight: 1.6,
+          }}>
+            <strong style={{ color: "#c64138" }}>
+              No se puede marcar como impreso: ninguno de los materiales posibles
+              tiene stock suficiente.
+            </strong>
+            {sinMaterialConStock.map(l => (
+              <div key={l.clave} style={{ marginTop: 8 }}>
+                <div style={{ fontWeight: 600 }}>
+                  {l.color} — necesita {totalPorLinea(l)} g
+                </div>
+                <ul style={{ margin: "4px 0 0", paddingLeft: 18, color: "var(--muted)", fontSize: 12 }}>
+                  {materialesDe(l).map(m => {
+                    const opciones = opcionesDeDescuento(filamentos, m, l.color, totalPorLinea(l));
+                    const mejor = opciones.filter(o => o.tiene)
+                      .sort((a, b) => b.disponible - a.disponible)[0];
+                    return (
+                      <li key={m}>
+                        <strong style={{ color: "var(--text)" }}>{m}</strong>:{" "}
+                        {mejor
+                          ? `el rollo más grande tiene ${mejor.disponible} g, le faltan ${mejor.falta} g`
+                          : "no hay ningún rollo cargado en ese color"}
+                      </li>
+                    );
+                  })}
+                </ul>
               </div>
             ))}
           </div>
@@ -1119,6 +1238,7 @@ function ModalImpresion({ pedido, productos, personalizados = [], filamentos, in
           <TKButton variant="outline" onClick={onClose}>Cancelar</TKButton>
           <TKButton onClick={confirmar} disabled={guardando || !puedeConfirmar}>
             {guardando ? "Procesando..."
+              : sinMaterialConStock.length > 0 ? "Falta stock"
               : sinOwnerConStock.length > 0 ? "Falta stock"
               : faltaElegir.length > 0 ? "Falta elegir owner"
               : !validacion.ok ? "Falta stock"

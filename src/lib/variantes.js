@@ -28,8 +28,34 @@ export function nuevoId(prefijo = "v") {
   return `${prefijo}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
 }
 
+/** Limpia y deduplica una lista de materiales conservando el orden. */
+export function normalizarMateriales(valor) {
+  const lista = Array.isArray(valor) ? valor : (valor ? [valor] : []);
+  const vistos = new Set();
+  const salida = [];
+  for (const m of lista) {
+    const texto = String(m || "").trim();
+    if (!texto) continue;
+    const clave = texto.toLowerCase();
+    if (vistos.has(clave)) continue;
+    vistos.add(clave);
+    salida.push(texto);
+  }
+  return salida;
+}
+
 /**
- * Garantiza que cada línea de receta tenga id, material y gramos.
+ * Garantiza que cada línea de receta tenga id, materiales y gramos.
+ *
+ * Una línea puede aceptar VARIOS materiales: da igual imprimir en PLA o en
+ * PETG, el consumo en gramos es el mismo y se elige al imprimir.
+ *
+ * Se emiten las dos formas a propósito:
+ *   materiales — la lista completa, lo que consulta el código nuevo
+ *   material   — materiales[0], para todo lo que ya existía
+ * Así una receta vieja ({material: "PLA"}) entra y sale bien sin migrar nada,
+ * y los consumidores que solo miran "material" siguen siendo correctos: con un
+ * único material, materiales[0] ES el material.
  *
  * Las líneas viejas traen además "color": se conserva tal cual para que la
  * migración pueda leerlo, pero ya no participa del cálculo.
@@ -37,17 +63,21 @@ export function nuevoId(prefijo = "v") {
 export function normalizarReceta(receta = []) {
   return (Array.isArray(receta) ? receta : [])
     .filter(Boolean)
-    .map((l, i) => ({
-      ...l,
-      id: l.id || `l${i}_${claveFilamento(l.material, l.color || "")}`,
-      material: String(l.material || "").trim(),
-      gramos: Number(l.gramos) || 0,
-    }));
+    .map((l, i) => {
+      const materiales = normalizarMateriales(l.materiales ?? l.material);
+      return {
+        ...l,
+        id: l.id || `l${i}_${claveFilamento(materiales[0] || "", l.color || "")}`,
+        materiales,
+        material: materiales[0] || "",
+        gramos: Number(l.gramos) || 0,
+      };
+    });
 }
 
 /** Líneas que efectivamente consumen algo. Las incompletas no cuentan. */
 export function lineasUtiles(receta = []) {
-  return normalizarReceta(receta).filter(l => l.material && l.gramos > 0);
+  return normalizarReceta(receta).filter(l => l.materiales.length > 0 && l.gramos > 0);
 }
 
 /** Normaliza la parte privada: la asignación de colores de cada variante. */
@@ -112,11 +142,23 @@ export function consumoDeVariante(receta = [], variante) {
   const mapa = new Map();
   for (const linea of lineasUtiles(receta)) {
     const color = colorDeLinea(variante, linea.id, linea);
-    const clave = claveFilamento(linea.material, color);
+    // La clave es el CONJUNTO de materiales, no uno solo: dos líneas que
+    // aceptan [PLA, PETG] en el mismo color sí comparten destino y se suman,
+    // pero una que solo acepta PLA no se puede mezclar con ellas, porque la
+    // elección al imprimir es por línea y podrían terminar en rollos distintos.
+    //
+    // Con un único material la clave queda idéntica a la de antes
+    // ("pla|negro"), así que el agrupamiento de siempre no se mueve.
+    const clave = claveFilamento(linea.materiales.join("+"), color);
     const previo = mapa.get(clave);
     if (previo) previo.gramos += linea.gramos;
     else mapa.set(clave, {
-      clave, material: linea.material, color, gramos: linea.gramos,
+      clave,
+      materiales: [...linea.materiales],
+      // El primero, para todo lo que todavía lee un material solo.
+      material: linea.materiales[0],
+      color,
+      gramos: linea.gramos,
       // Sin color asignado no hay rollo al que apuntar.
       incompleta: !color,
     });
@@ -149,26 +191,47 @@ export function disponibilidadDeVariante(receta = [], variante, filamentos = [])
 
   const detalle = lineas.map(item => {
     const requerido = item.gramos * FACTOR_DISPONIBILIDAD;
-    // Cada rollo se evalúa solo. El que se reporta es el más grande: es el
-    // que decide si el material alcanza, y es el número útil para mostrar.
-    const owners = opcionesDeOwner(filamentos, item.material, item.color).map(o => ({
-      ...o, ok: o.disponible >= requerido,
-    }));
-    const filamento = mejorFilamento(filamentos, item.material, item.color);
-    const enInventario = filamento ? Number(filamento.cantidadGramos) || 0 : 0;
+    // Un bloque por cada material que la línea acepta. Con [PLA, PETG] basta
+    // que UNO llegue al 2x para poder imprimir la pieza, así que el ok de la
+    // línea es "alguno de los materiales cumple". Dentro de cada material el
+    // criterio de owners no cambia: un rollo solo tiene que llegar, el stock
+    // de dos owners no se suma.
+    const porMaterial = item.materiales.map(material => {
+      const owners = opcionesDeOwner(filamentos, material, item.color).map(o => ({
+        ...o, ok: o.disponible >= requerido,
+      }));
+      const filamento = mejorFilamento(filamentos, material, item.color);
+      return {
+        material,
+        enInventario: filamento ? Number(filamento.cantidadGramos) || 0 : 0,
+        existe: Boolean(filamento),
+        filamentoId: filamento?._id || null,
+        owner: filamento?.owner || "",
+        owners,
+        ok: owners.some(o => o.ok),
+      };
+    });
+    // El material que se reporta "en jefe" es el primero que alcanza; si no
+    // alcanza ninguno, el primero de la lista. Así los campos planos de abajo
+    // —los que lee el código que todavía no sabe de materiales múltiples—
+    // describen el material con el que la pieza realmente se imprimiría.
+    const elegido = porMaterial.find(m => m.ok) || porMaterial[0];
     return {
-      material: item.material,
+      materiales: item.materiales,
+      // El desglose por material, para la tabla del backoffice.
+      porMaterial,
+      material: elegido?.material || "",
       color: item.color,
       gramosPorUnidad: item.gramos,
       requerido,
-      enInventario,
-      existe: Boolean(filamento),
-      filamentoId: filamento?._id || null,
-      owner: filamento?.owner || "",
+      enInventario: elegido?.enInventario ?? 0,
+      existe: Boolean(elegido?.existe),
+      filamentoId: elegido?.filamentoId ?? null,
+      owner: elegido?.owner || "",
       // El desglose completo, para que el backoffice pueda mostrar una fila
       // por owner en vez de una sola combinada.
-      owners,
-      ok: owners.some(o => o.ok),
+      owners: elegido?.owners || [],
+      ok: porMaterial.some(m => m.ok),
     };
   });
 
@@ -294,7 +357,10 @@ export function filasDeInventario(producto, filamentos = []) {
     const { detalle } = disponibilidadDeVariante(receta, variante, filamentos);
     const etiqueta = variante.nombre || "(sin nombre)";
     for (const d of detalle) {
-      const clave = `${claveFilamento(d.material, d.color)}|${d.gramosPorUnidad}`;
+      // Por el CONJUNTO de materiales, no por el que hoy alcanza: ese cambia
+      // con el stock, y dos variantes de la misma línea se separarían en dos
+      // filas solo porque una tiene PLA y la otra tuvo que caer en PETG.
+      const clave = `${claveFilamento((d.materiales || [d.material]).join("+"), d.color)}|${d.gramosPorUnidad}`;
       const previa = filas.get(clave);
       if (previa) {
         if (!previa.variantes.includes(etiqueta)) previa.variantes.push(etiqueta);
@@ -408,9 +474,15 @@ export function filamentosDeVariantes(receta = [], variantes = []) {
   for (const variante of variantes) {
     for (const linea of consumoDeVariante(receta, variante)) {
       if (linea.incompleta) continue;
-      if (vistos.has(linea.clave)) continue;
-      vistos.add(linea.clave);
-      salida.push({ material: linea.material, color: linea.color });
+      // Uno por CADA material que la línea acepta: si se puede imprimir en PLA
+      // o en PETG, los dos rollos tienen que existir en el inventario, o el
+      // que falte nunca se podría elegir al imprimir.
+      for (const material of linea.materiales) {
+        const clave = claveFilamento(material, linea.color);
+        if (vistos.has(clave)) continue;
+        vistos.add(clave);
+        salida.push({ material, color: linea.color });
+      }
     }
   }
   return salida;

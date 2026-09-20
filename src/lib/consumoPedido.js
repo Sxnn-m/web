@@ -6,6 +6,7 @@
 //      contra las cantidades leídas dentro de la propia transacción.
 
 import { claveFilamento } from './disponibilidad.js';
+import { opcionesDeDescuento } from './opcionesFilamento.js';
 import { claveTipo } from './tiposInsumo.js';
 
 /**
@@ -31,6 +32,48 @@ export function claveConsumoFilamento(linea, asignaciones = {}) {
   if (asignada?.pendiente) return null;
   const base = claveFilamento(linea.material, linea.color);
   return asignada?.id ? `${base}|${asignada.id}` : base;
+}
+
+/** Los materiales que acepta una línea del plan. Siempre al menos uno. */
+export const materialesDe = (linea) =>
+  (Array.isArray(linea?.materiales) && linea.materiales.length > 0)
+    ? linea.materiales
+    : [linea?.material].filter(Boolean);
+
+/**
+ * Los materiales de la línea que ALCANZAN para esta impresión.
+ *
+ * "Alcanza" es contra el consumo real —receta x cantidad + el desperdicio que
+ * se haya tipeado—, no contra el 2x de la vitrina: acá se está imprimiendo, no
+ * decidiendo si mostrar el producto.
+ *
+ * Un material que no llega no se devuelve en absoluto. La idea es que el
+ * selector no lo liste ni en gris: ofrecer algo que nunca se va a poder usar
+ * en esta impresión solo confunde.
+ */
+export function materialesQueAlcanzan(linea, filamentos = [], desperdicios = {}) {
+  const necesita = (Number(linea?.cantidadConsumida) || 0)
+    + (Number(desperdicios?.[linea?.clave]) || 0);
+  return materialesDe(linea).filter(material =>
+    opcionesDeDescuento(filamentos, material, linea.color, necesita)
+      .some(o => o.alcanza));
+}
+
+/**
+ * Deja cada línea del plan con UN material resuelto, que es lo que el resto de
+ * la maquinaria —agrupar, validar, descontar, registrar el gasto— ya sabe
+ * manejar. Así nada de eso tuvo que aprender sobre materiales múltiples.
+ *
+ * Si lo elegido no está entre los que acepta la línea (por ejemplo porque se
+ * editó la receta con el modal abierto) se ignora y manda el primero.
+ */
+export function resolverMateriales(plan = [], elegidos = {}) {
+  return plan.map(linea => {
+    const posibles = materialesDe(linea);
+    const elegido = elegidos?.[linea.clave];
+    const material = posibles.includes(elegido) ? elegido : posibles[0] || "";
+    return material === linea.material ? linea : { ...linea, material };
+  });
 }
 
 /**
