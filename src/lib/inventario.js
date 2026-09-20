@@ -14,6 +14,10 @@ import { COL_INSUMOS } from './insumos.js';
 import {
   agruparConsumo, validarStock, StockInsuficienteError, claveConsumoFilamento,
 } from './consumoPedido.js';
+import {
+  validarTransferencia, buscarDestino, notaDeSalida, notaDeEntrada,
+} from './transferencias.js';
+import { movimientoDeStock } from './historial.js';
 import { tiempoDeProducto, specsDeTiempo } from './tiempoImpresion.js';
 import { calcularPrecioSugerido } from './costos.js';
 import { guardarPrivado } from './productosPrivados.js';
@@ -71,6 +75,93 @@ export async function actualizarFilamento(id, { material, color, marca, owner, c
 
 export async function eliminarFilamento(id) {
   await deleteDoc(doc(db, COL_FILAMENTOS, id));
+}
+
+/**
+ * Mueve gramos del rollo de un owner al del otro.
+ *
+ * Todo en una transacción, con el mismo criterio que marcarPedidoImpreso: si
+ * algo falla no puede quedar el origen descontado y el destino sin acreditar.
+ *
+ * La cantidad se valida contra lo que se acaba de leer DENTRO de la
+ * transacción, no contra el array que tiene la pantalla: entre que se abrió el
+ * modal y se confirmó pudo haberse impreso un pedido, y validar contra el
+ * número viejo dejaría el stock en negativo.
+ *
+ * El destino sale de `filamentos` porque una transacción no puede hacer
+ * queries. Si no existe, se crea con el mismo material, color y marca.
+ *
+ * @param {string} origenId  documento del que sale el filamento
+ * @param {{cantidad: number|string, ownerDestino: string}} datos
+ * @param {Array} filamentos catálogo cargado, para resolver el destino
+ * @returns {Promise<{creado: boolean, destinoId: string, cantidad: number}>}
+ */
+export async function transferirFilamento(origenId, { cantidad, ownerDestino }, filamentos = []) {
+  const origenEnPantalla = filamentos.find(f => f._id === origenId);
+  // Primer filtro con lo que hay en pantalla: da el mensaje bueno antes de
+  // abrir una transacción. El de adentro es el que manda.
+  const previa = validarTransferencia({ origen: origenEnPantalla, ownerDestino, cantidad });
+  if (!previa.ok) throw new Error(previa.error);
+
+  const gramos = previa.cantidad;
+  const destinoExistente = buscarDestino(filamentos, origenEnPantalla, ownerDestino);
+
+  return runTransaction(db, async (tx) => {
+    const refOrigen = doc(db, COL_FILAMENTOS, origenId);
+    // ── 1. Lecturas (todas antes de cualquier escritura) ──
+    const snapOrigen = await tx.get(refOrigen);
+    if (!snapOrigen.exists()) throw new Error("El filamento de origen ya no existe.");
+    const origen = { _id: origenId, ...snapOrigen.data() };
+
+    const refDestino = destinoExistente
+      ? doc(db, COL_FILAMENTOS, destinoExistente._id)
+      : doc(collection(db, COL_FILAMENTOS));   // ref nueva: en una tx no hay addDoc
+    const snapDestino = destinoExistente ? await tx.get(refDestino) : null;
+    if (destinoExistente && !snapDestino.exists()) {
+      throw new Error("El filamento de destino ya no existe. Recargá y probá de nuevo.");
+    }
+
+    // ── 2. Validación contra lo recién leído ──
+    const ahora = validarTransferencia({ origen, ownerDestino, cantidad: gramos });
+    if (!ahora.ok) throw new Error(ahora.error);
+
+    // ── 3. Escrituras ──
+    const disponible = Number(origen.cantidadGramos) || 0;
+    tx.update(refOrigen, {
+      cantidadGramos: disponible - gramos,
+      updatedAt: serverTimestamp(),
+    });
+
+    if (destinoExistente) {
+      tx.update(refDestino, {
+        cantidadGramos: (Number(snapDestino.data().cantidadGramos) || 0) + gramos,
+        updatedAt: serverTimestamp(),
+      });
+    } else {
+      tx.set(refDestino, {
+        material: String(origen.material || "").trim(),
+        color: String(origen.color || "").trim(),
+        marca: String(origen.marca || "").trim(),
+        owner: String(ownerDestino).trim(),
+        cantidadGramos: gramos,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    }
+
+    // El movimiento queda en el historial de los DOS rollos, con signo: sale
+    // de uno y entra en el otro.
+    tx.set(
+      doc(collection(db, COL_FILAMENTOS, origenId, "restocks")),
+      movimientoDeStock(-gramos, notaDeSalida(ownerDestino)),
+    );
+    tx.set(
+      doc(collection(db, COL_FILAMENTOS, refDestino.id, "restocks")),
+      movimientoDeStock(gramos, notaDeEntrada(origen.owner)),
+    );
+
+    return { creado: !destinoExistente, destinoId: refDestino.id, cantidad: gramos };
+  });
 }
 
 /**
