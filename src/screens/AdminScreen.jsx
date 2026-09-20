@@ -2662,9 +2662,11 @@ function SpecCalculada({ label, valor, vacio }) {
 
 // ─── Preview en vivo de la disponibilidad mientras se edita la receta ──
 function DisponibilidadPreview({ receta, variantes = [], filamentos, insumos = [], gruposInsumo = [], catalogoInsumos = [] }) {
-  const limpia = receta
-    .filter(l => String(l.material || "").trim() && (Number(l.gramos) || 0) > 0)
-    .map(l => ({ ...l, material: l.material.trim(), gramos: Number(l.gramos) }));
+  // Mismo criterio que recetaLimpia del formulario: por materiales, no por el
+  // campo viejo. Si no, el preview decía "sin receta" en cuanto una línea
+  // tenía materiales múltiples.
+  const limpia = normalizarReceta(receta)
+    .filter(l => l.materiales.length > 0 && l.gramos > 0);
 
   const aviso = (texto, detalle) => (
     <div style={{ padding: "12px 14px", background: "#c6413812", borderLeft: "3px solid #c64138", fontSize: 12, lineHeight: 1.6 }}>
@@ -2838,12 +2840,22 @@ export function ProductForm({
   const mainImg = images.find(u => u.trim()) || "";
 
   // Líneas de receta válidas — base de las specs derivadas y de lo que se guarda.
-  const recetaLimpia = useMemo(() => receta
-    .filter(l => String(l.material || "").trim() && (Number(l.gramos) || 0) > 0)
+  //
+  // Pasa por normalizarReceta y NO se filtra por l.material: una línea recién
+  // agregada solo tiene "materiales", así que mirando el campo viejo se caía
+  // entera y el producto se guardaba sin receta. Y el objeto se arma con la
+  // lista completa, no campo por campo dejando afuera "materiales", que era
+  // por lo que el segundo material desaparecía al editar una línea vieja.
+  //
+  // "material" se sigue guardando (= materiales[0]) porque es lo que leen los
+  // consumidores que todavía no saben de materiales múltiples.
+  const recetaLimpia = useMemo(() => normalizarReceta(receta)
+    .filter(l => l.materiales.length > 0 && l.gramos > 0)
     .map(l => ({
       id: l.id,
-      material: l.material.trim(),
-      gramos: Number(l.gramos),
+      materiales: l.materiales,
+      material: l.material,
+      gramos: l.gramos,
     })), [receta]);
 
   // Variantes válidas: las que le asignaron color a TODAS las líneas. Una a
