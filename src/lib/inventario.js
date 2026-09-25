@@ -406,7 +406,14 @@ export function normalizarOpcionesInsumo(opciones) {
   return salida;
 }
 
-export async function crearPedido({ numeroOrden, clienteNombre, items }) {
+/**
+ * @param {object} origen  de qué rollo sale cada línea, elegido AL TOMAR el
+ *   pedido: { [clave del plan]: {material, filamentoId, owner} }. Es lo que
+ *   permite reservar sobre un documento concreto en vez de a ojo, y lo que el
+ *   modal de impresión precarga después. La clave es la de planDeConsumo, que
+ *   es reproducible a partir del pedido guardado.
+ */
+export async function crearPedido({ numeroOrden, clienteNombre, items, origen = {} }) {
   const lineas = items.map(i => ({
     productoId: i.productoId,
     // De qué colección salió la línea. Sin esto, al marcar el pedido como
@@ -434,6 +441,7 @@ export async function crearPedido({ numeroOrden, clienteNombre, items }) {
     numeroOrden,
     clienteNombre: String(clienteNombre).trim(),
     items: lineas,
+    origen: origen && typeof origen === "object" ? origen : {},
     precioTotal,
     // Los tres estados son independientes entre sí: se puede cobrar antes de
     // imprimir, o entregar sin haber cobrado.
