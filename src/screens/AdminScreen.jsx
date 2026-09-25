@@ -35,7 +35,9 @@ import { EstadisticasTab } from './admin/EstadisticasTab.jsx';
 import { MensajeriaTab } from './admin/MensajeriaTab.jsx';
 import { cargarMensajes, asignarNumerosFaltantes } from '../lib/mensajes.js';
 import { contarNoLeidos } from '../lib/consultas.js';
-import { reservasDePedidos, filamentosNetos, insumosNetos } from '../lib/reservas.js';
+import {
+  reservasDePedidos, filamentosNetos, insumosNetos, productosAfectados,
+} from '../lib/reservas.js';
 import { leerMantenimiento, guardarMantenimiento } from '../lib/mantenimiento.js';
 import { useFiltrosCategoria, FiltrosCategoria } from '../components/FiltrosCategoria.jsx';
 import { ArchivosDiseno } from './admin/ArchivosDiseno.jsx';
@@ -203,6 +205,22 @@ export function AdminScreen({ go, tab = "dashboard", onTab, onProductsChange, on
   };
 
   /**
+   * El inventario como hay que mirarlo para decidir si se puede OFRECER algo:
+   * el stock real menos lo que los pedidos pendientes ya comprometieron.
+   *
+   * Es el mismo criterio que ya usaba el flag que se publica, pero ahora
+   * también lo usa lo que se ve en el backoffice: con 710 g de los que 560
+   * están reservados, mostrar "disponible" contra los 710 prometía un rollo
+   * que ya tiene dueño.
+   *
+   * El tab Inventario y el modal de impresión siguen con el stock físico: uno
+   * cuenta lo que hay en la bobina y el otro descuenta de ella.
+   */
+  const filamentosDisponibles = useMemo(
+    () => filamentosNetos(filamentos, reservasDePedidos(pedidos, productosFull, personalizados)),
+    [filamentos, pedidos, productosFull, personalizados]);
+
+  /**
    * Punto único donde el catálogo público se entera de un cambio de stock:
    * recalcula el booleano "disponible" de cada producto y lo persiste.
    * Recibe siempre productos ya enriquecidos con su receta privada.
@@ -249,10 +267,13 @@ export function AdminScreen({ go, tab = "dashboard", onTab, onProductsChange, on
    * Se recalcula la disponibilidad pública solo de los productos de ese
    * pedido, no del catálogo entero, para no escribir de más.
    */
-  const handleReservasChange = async (productoIds = []) => {
-    if (productoIds.length === 0) return;
+  const handleReservasChange = async (pedido) => {
     const { prodsFull, films, insus } = await recargarTodo();
-    await sincronizarDisponibilidad(prodsFull, films, insus, null, productoIds);
+    // No solo los productos del pedido: los rollos que reservó le cambian la
+    // disponibilidad a cualquier producto que se imprima en ellos.
+    const afectados = productosAfectados(pedido, prodsFull, films);
+    if (afectados.length === 0) return;
+    await sincronizarDisponibilidad(prodsFull, films, insus, null, afectados);
   };
 
   // Inventario cambió (alta/edición de filamento o restock) → recalcular productos
@@ -497,7 +518,12 @@ export function AdminScreen({ go, tab = "dashboard", onTab, onProductsChange, on
 
       // El catálogo público solo lee este booleano: se recalcula al guardar,
       // porque la receta o las variantes pudieron haber cambiado.
-      const disponible = calcularDisponibilidad(data, films, insumos).disponible;
+      // Contra el neto de reservas, igual que el recálculo automático: si no,
+      // el producto se guardaría "disponible" y el primer recálculo lo daría
+      // de baja sin que nadie haya tocado el stock.
+      const reservas = reservasDePedidos(pedidos, productosFull, personalizados);
+      const disponible = calcularDisponibilidad(
+        data, filamentosNetos(films, reservas), insumos).disponible;
 
       // El doc público NO lleva receta/origenUrl/notas/insumos: van a la
       // subcolección privada, que solo pueden leer los admins.
@@ -679,12 +705,12 @@ export function AdminScreen({ go, tab = "dashboard", onTab, onProductsChange, on
           {tabActivo === "dashboard" && <DashboardTab products={products} users={users} seedProducts={() => {}} categories={propCategories} onCategoriesChange={onCategoriesChange} onProductsChange={onProductsChange} setMsg={setMsg} />}
           {tabActivo === "productos" && (
             showForm
-              ? <ProductForm product={editProduct} onSave={handleSave} onCancel={() => { setShowForm(false); setEditProduct(null); }} categories={propCategories} filamentos={filamentos} costs={costSettings} nextId={siguienteIdProducto(products)} catalogoInsumos={insumos}
+              ? <ProductForm product={editProduct} onSave={handleSave} onCancel={() => { setShowForm(false); setEditProduct(null); }} categories={propCategories} filamentos={filamentos} filamentosDisponibles={filamentosDisponibles} costs={costSettings} nextId={siguienteIdProducto(products)} catalogoInsumos={insumos}
                   tags={tags} onAgregarTag={handleAgregarTag} onEliminarTag={handleEliminarTag}/>
               : <ProductsTab
                   products={productosFull}
                   costs={costSettings}
-                  filamentos={filamentos}
+                  filamentos={filamentosDisponibles}
                   insumos={insumos}
                   categories={propCategories}
                   pendientesDeMigrar={products.filter(p => CAMPOS_PRIVADOS.some(c => p[c] !== undefined)).length}
@@ -713,13 +739,14 @@ export function AdminScreen({ go, tab = "dashboard", onTab, onProductsChange, on
                   onSave={handleSavePersonalizado}
                   onCancel={() => { setShowFormPers(false); setEditPersonalizado(null); }}
                   filamentos={filamentos}
+                  filamentosDisponibles={filamentosDisponibles}
                   costs={costSettings}
                   catalogoInsumos={insumos}
                 />
               : <PersonalizadosTab
                   personalizados={personalizados}
                   costs={costSettings}
-                  filamentos={filamentos}
+                  filamentos={filamentosDisponibles}
                   insumos={insumos}
                   onEdit={(p) => { setEditPersonalizado(p); setShowFormPers(true); }}
                   onDelete={handleDeletePersonalizado}
@@ -1539,14 +1566,15 @@ function DisponibilidadDetalle({ disp, producto, filamentos = [], insumos = [] }
         Cada rollo se evalúa por separado: si dos personas tienen el mismo material y color,
         va <strong>una fila por owner</strong> y alcanza con que <strong>uno solo</strong> llegue
         al {FACTOR_DISPONIBILIDAD}× — el stock no se suma entre owners, porque una pieza sale
-        de un rollo.
+        de un rollo. La cantidad es la <strong>disponible para nuevos pedidos</strong>: el stock
+        real menos lo que los pedidos pendientes ya tienen reservado.
       </div>
       <div style={{
         display: "grid", gridTemplateColumns: COL_INVENTARIO,
         gap: 10, padding: "8px 0", fontSize: 10, textTransform: "uppercase",
         letterSpacing: 1.2, color: "var(--muted)", fontWeight: 700,
       }}>
-        <div>Material</div><div>Color</div><div>Variante(s)</div><div>Por unidad</div><div>Necesario (×{FACTOR_DISPONIBILIDAD})</div><div>Owner</div><div>Cantidad</div><div>Estado</div>
+        <div>Material</div><div>Color</div><div>Variante(s)</div><div>Por unidad</div><div>Necesario (×{FACTOR_DISPONIBILIDAD})</div><div>Owner</div><div>Disponible</div><div>Estado</div>
       </div>
       {filasInventario.map((d, i) => (
         <FilaInventario key={i} d={d}/>
@@ -2768,7 +2796,12 @@ const recetaInput = {
 // ─── Product Form (Create / Edit) ─────────────────────────────
 // Exportado para poder montarlo aislado en las pruebas de navegador.
 export function ProductForm({
-  product, onSave, onCancel, categories = [], filamentos = [], costs = DEFAULT_COSTS,
+  product, onSave, onCancel, categories = [], filamentos = [],
+  // El editor de receta usa `filamentos` (el stock físico) para sus listas de
+  // material y color; el preview de disponibilidad usa el neto, que es contra
+  // lo que se va a decidir al guardar.
+  filamentosDisponibles = null,
+  costs = DEFAULT_COSTS,
   nextId = "", catalogoInsumos = [], modo = "producto",
   tags = [], onAgregarTag, onEliminarTag,
 }) {
@@ -3214,7 +3247,8 @@ export function ProductForm({
             precioBase={Number(precioFinal) || 0}/>
 
           {/* Vista previa de disponibilidad con el inventario actual */}
-          <DisponibilidadPreview receta={receta} variantes={variantesLimpias} filamentos={filamentos}
+          <DisponibilidadPreview receta={receta} variantes={variantesLimpias}
+            filamentos={filamentosDisponibles || filamentos}
             insumos={insumosLimpios} gruposInsumo={gruposLimpios} catalogoInsumos={catalogoInsumos}/>
 
           {/* ── Datos internos: nunca se muestran en el catálogo público ── */}
