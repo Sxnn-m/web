@@ -19,11 +19,29 @@ import { ListaDesplegable } from '../../components/ListaDesplegable.jsx';
 import { usarOrigen } from '../../components/usarOrigen.js';
 import { ModalOrigenPedido, EncabezadoPieza } from './ModalOrigen.jsx';
 import { productosDePedido } from '../../lib/reservas.js';
+import {
+  expandirReparticiones, reparticionesPorDefecto, descuadres, esDividida,
+  plegarOrigen, desplegarOrigen,
+} from '../../lib/reparticiones.js';
 
 const actionBtn = {
   background: "none", border: "1px solid var(--line)", padding: "5px 6px",
   cursor: "pointer", color: "var(--text)", display: "flex", alignItems: "center",
   borderRadius: 4,
+};
+
+// Rótulo de un selector propio, para que se lea parejo con el label de TKInput.
+const labelSelector = {
+  display: "block", fontSize: 11, fontWeight: 600, letterSpacing: 0.8,
+  textTransform: "uppercase", color: "var(--muted)", marginBottom: 6,
+};
+
+// Acción secundaria con forma de link: dividir, quitar, agregar. No compite
+// con el botón de confirmar, que es la única acción que escribe.
+const linkBtn = {
+  background: "none", border: "none", padding: 0, cursor: "pointer",
+  color: "var(--azul, #2f5d8a)", fontSize: 11.5, fontWeight: 600,
+  textDecoration: "underline", fontFamily: "inherit", whiteSpace: "nowrap",
 };
 
 const labelStyle = {
@@ -751,17 +769,154 @@ export function ModalImpresion({ pedido, productos, personalizados = [], filamen
   const [guardando, setGuardando] = useState(false);
   const [errorStock, setErrorStock] = useState("");   // faltante detectado por la transacción
 
+  // Lo que se eligió al tomar el pedido, desplegado: si aquella vez ya quedó
+  // dividido, el modal abre dividido y con cada parte en su lugar.
+  const guardado = useMemo(() => desplegarOrigen(pedido?.origen), [pedido]);
+  // Qué líneas se reparten entre varios owners: clave de la línea → partes.
+  // Ausente = la línea va entera a un rollo, que es el caso de siempre.
+  const [reparticiones, setReparticiones] = useState(guardado.reparticiones);
+
+  // El plan con las líneas divididas abiertas en una línea por parte. Es todo
+  // lo que hace falta para que el resto funcione: el hook, la validación, el
+  // descuento y los gastos ya saben tratar varias líneas del mismo material y
+  // color en rollos distintos.
+  const planExpandido = useMemo(
+    () => expandirReparticiones(plan, reparticiones), [plan, reparticiones]);
+
   // Toda la resolución de material y owner sale del hook, el mismo que usa el
   // paso de tomar el pedido. Acá se evalúa contra el stock FÍSICO, no el neto
   // de reservas: se está imprimiendo, y restar la reserva de este mismo pedido
-  // sería contarla dos veces. Y arranca precargado con lo que se eligió al
-  // tomarlo, así no hay que volver a elegir.
+  // sería contarla dos veces.
   const {
-    planResuelto, piezasDeMaterial, totalPorLinea,
-    materialesPosibles, queAlcanzan, candidatos, asignaciones,
-    faltaElegir, sinOwnerConStock, sinMaterialConStock,
+    planResuelto, totalPorLinea, origen,
+    materialesPosibles, queAlcanzan, candidatos, asignaciones, faltaElegir,
+    sinOwnerConStock, sinMaterialConStock,
     setElegido, setMaterialElegido,
-  } = usarOrigen({ plan, filamentos, desperdicios, inicial: pedido?.origen });
+  } = usarOrigen({ plan: planExpandido, filamentos, desperdicios, inicial: guardado.plano });
+
+  // Las piezas se arman con el plan CRUDO: una línea dividida sigue siendo una
+  // sola línea de la receta, y sus partes van anidadas adentro, no como dos
+  // filas sueltas que parecerían dos materiales distintos.
+  const piezasDeMaterial = useMemo(() => agruparPorPieza(plan), [plan]);
+  /** Las sub-líneas ya resueltas de una línea cruda. Sin dividir, es ella misma. */
+  const partesDe = (clave) =>
+    planResuelto.filter(s => (s.reparticionDe || s.clave) === clave);
+
+  const dividir = (linea) => setReparticiones(r =>
+    ({ ...r, [linea.clave]: reparticionesPorDefecto(linea) }));
+  const unificar = (clave) => setReparticiones(r => {
+    const copia = { ...r }; delete copia[clave]; return copia;
+  });
+  const cambiarParte = (clave, i, gramos) => setReparticiones(r => ({
+    ...r, [clave]: r[clave].map((p, j) => j === i ? { ...p, gramos } : p),
+  }));
+  const agregarParte = (clave) => setReparticiones(r =>
+    ({ ...r, [clave]: [...r[clave], { gramos: 0 }] }));
+  // Quitar hasta quedarse con una sola parte es no estar dividido: se unifica
+  // en vez de dejar una "repartición" que es toda la línea.
+  const quitarParte = (clave, i) => setReparticiones(r => {
+    const quedan = r[clave].filter((_, j) => j !== i);
+    if (quedan.length < 2) { const copia = { ...r }; delete copia[clave]; return copia; }
+    return { ...r, [clave]: quedan };
+  });
+
+  const malRepartidas = useMemo(
+    () => descuadres(plan, reparticiones), [plan, reparticiones]);
+
+  // ── Los controles de UNA parte ────────────────────────────────────────
+  // Los mismos para la línea entera y para cada repartición: son funciones y
+  // no componentes para que compartan el estado del modal sin pasar diez
+  // props, y para que dividir no pueda quedar ofreciendo opciones distintas
+  // de las que ofrece no dividir.
+
+  /** Con qué material se imprimió, cuando la receta acepta varios. */
+  const selectorMaterial = (l, ancho = 300) => materialesPosibles[l.clave] ? (
+    <div style={{ marginBottom: 12, maxWidth: ancho }}>
+      <label style={labelSelector}>Material usado</label>
+      <ListaDesplegable
+        // Se listan TODOS, también los que no llegan: deshabilitados y con el
+        // motivo, que es lo que deja ver de un vistazo qué filamento reponer.
+        opciones={materialesPosibles[l.clave].map(m => ({
+          id: m.material,
+          nombre: m.material,
+          nota: m.alcanza ? ""
+            : m.tiene
+              ? `· ${m.disponible} g disponibles, necesita ${m.necesita} g`
+              : `· no hay ${m.material} ${l.color} en inventario`,
+          deshabilitada: !m.alcanza,
+        }))}
+        valor={queAlcanzan(l.clave).includes(l.material) ? l.material : ""}
+        onElegir={m => setMaterialElegido(e => ({ ...e, [l.clave]: m }))}
+        vacio={queAlcanzan(l.clave).length === 0 ? "— Ninguno alcanza —" : "— Elegir material —"}
+        invalido={queAlcanzan(l.clave).length === 0}
+        titulo={`Con cuál de ${materialesDe(l).join(" o ")} se imprimió`}
+      />
+      {queAlcanzan(l.clave).length === 0 && (
+        <div style={{ fontSize: 11, color: "#c64138", marginTop: 6, lineHeight: 1.5 }}>
+          Ninguno de {materialesDe(l).join(" / ")} en {l.color} llega a los{" "}
+          {totalPorLinea(l)} g que hacen falta.
+        </div>
+      )}
+    </div>
+  ) : null;
+
+  /**
+   * De qué rollo sale. El selector va SIEMPRE, aunque haya un solo owner
+   * posible: de quién sale cada impresión se confirma a mano.
+   */
+  const selectorOwner = (l) => {
+    const opciones = candidatos[l.clave] || [];
+    return (
+      <div>
+        <label style={labelSelector}>Descontar de</label>
+        <ListaDesplegable
+          // Los que no sirven se listan igual, deshabilitados y con el motivo:
+          // saber que Ana no tiene ese filamento es parte de la respuesta.
+          opciones={opciones.map(o => ({
+            id: o.id,
+            nombre: o.tiene ? `${o.owner || "Sin owner"} — ${o.disponible} g`
+                            : `${o.owner} — sin cargar`,
+            nota: o.alcanza ? ""
+              : o.tiene ? `· insuficiente, necesita ${totalPorLinea(l)} g`
+              : "· no tiene este filamento",
+            deshabilitada: !o.alcanza,
+          }))}
+          valor={asignaciones[l.clave]?.id || ""}
+          onElegir={id => setElegido(e => ({ ...e, [l.clave]: id }))}
+          vacio={opciones.length === 0 ? "— Nadie lo tiene cargado —" : "— Elegir owner —"}
+          invalido={Boolean(asignaciones[l.clave]?.pendiente)}
+          deshabilitado={opciones.length === 0}
+          titulo={`De quién se descuenta el ${l.material} ${l.color}`}
+        />
+      </div>
+    );
+  };
+
+  const campoDesperdicio = (l) => (
+    <TKInput
+      label="Desperdicio (g)"
+      type="number"
+      value={desperdicios[l.clave] ?? 0}
+      onChange={e => setDesperdicios(d => ({ ...d, [l.clave]: e.target.value }))}
+    />
+  );
+
+  /** Por qué esta parte todavía no se puede confirmar. */
+  const avisosDeParte = (l) => {
+    const asignada = asignaciones[l.clave];
+    if (asignada?.sinStock) return (
+      <div style={{ fontSize: 11.5, color: "#c64138", marginTop: 8 }}>
+        Ningún owner llega solo a los {totalPorLinea(l)} g de esta parte.
+      </div>
+    );
+    if (asignada?.pendiente) return (
+      <div style={{ fontSize: 11.5, color: "#c64138", marginTop: 8 }}>
+        Hay {(candidatos[l.clave] || []).filter(o => o.alcanza).length} owners que pueden
+        imprimir {l.material} {l.color}: elegí de cuál se descuenta.
+      </div>
+    );
+    return null;
+  };
 
   // Los insumos no pasan por el hook: no tienen ni material alternativo ni
   // owner, se descuentan del catálogo y listo.
@@ -791,7 +946,8 @@ export function ModalImpresion({ pedido, productos, personalizados = [], filamen
   }, [planResuelto, desperdicios, planInsumos, asignaciones, filamentos, insumos]);
 
   const puedeConfirmar = validacion.ok && faltaElegir.length === 0
-    && sinOwnerConStock.length === 0 && sinMaterialConStock.length === 0;
+    && sinOwnerConStock.length === 0 && sinMaterialConStock.length === 0
+    && malRepartidas.length === 0;
 
   const confirmar = async () => {
     if (!puedeConfirmar) return;   // el botón ya está deshabilitado, pero por las dudas
@@ -799,7 +955,11 @@ export function ModalImpresion({ pedido, productos, personalizados = [], filamen
     setErrorStock("");
     try {
       const { advertencias } = await marcarPedidoImpreso(
-        pedido, planResuelto, desperdicios, filamentos, planInsumos, insumos, asignaciones
+        pedido, planResuelto, desperdicios, filamentos, planInsumos, insumos, asignaciones,
+        // Se guarda en el pedido lo que realmente se usó, con la división si
+        // la hubo: la reserva deja de contar porque el pedido pasa a impreso
+        // en esta misma transacción, y el registro queda diciendo la verdad.
+        plegarOrigen(planResuelto, origen)
       );
       const base = `✓ Pedido ${pedido.numeroOrden} marcado como impreso e inventario descontado.`;
       await onDone(advertencias.length ? `${base} Atención: ${advertencias.join(" ")}` : base);
@@ -947,12 +1107,14 @@ export function ModalImpresion({ pedido, productos, personalizados = [], filamen
                 <EncabezadoPieza pieza={pieza}/>
                 <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                   {pieza.lineas.map((l, i) => {
-                    // El selector va SIEMPRE, aunque haya un solo owner posible:
-                    // de quién sale cada impresión se confirma a mano.
-                    const opciones = candidatos[l.clave] || [];
-                    const asignada = asignaciones[l.clave];
-                    const pendiente = Boolean(asignada?.pendiente);
-                    const sinStock = Boolean(asignada?.sinStock);
+                    // Sin dividir hay una sola parte, que es la línea entera:
+                    // el caso de siempre es el caso de una repartición.
+                    const partes = partesDe(l.clave);
+                    const dividida = esDividida(reparticiones, l.clave);
+                    const entera = partes[0] || l;
+                    const descuadre = malRepartidas.find(d => d.clave === l.clave);
+                    const repartido = (reparticiones[l.clave] || [])
+                      .reduce((acc, parte) => acc + (Number(parte.gramos) || 0), 0);
                     return (
                       <div key={l.clave} style={{
                         // Cada material de la pieza se separa del anterior con
@@ -960,117 +1122,112 @@ export function ModalImpresion({ pedido, productos, personalizados = [], filamen
                         borderTop: i > 0 ? "1px solid var(--line)" : "none",
                         paddingTop: i > 0 ? 14 : 0,
                       }}>
-                        <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 10 }}>
-                          {/* Con alternativas se nombran todas y se marca cuál
-                              se va a usar, que es lo que el selector decide. */}
-                          {materialesDe(l).length > 1
-                            ? <>{materialesDe(l).join(" / ")} · {l.color} — usando <strong style={{ color: "var(--text)" }}>{l.material}</strong> —{" "}</>
-                            : <>{l.material} · {l.color} — </>}
-                          {l.gramosPorUnidad} g × {l.cantidad} u ={" "}
-                          <strong style={{ color: "var(--text)" }}>{l.cantidadConsumida} g</strong>
+                        <div style={{
+                          display: "flex", justifyContent: "space-between",
+                          alignItems: "baseline", gap: 12, marginBottom: 10,
+                        }}>
+                          <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                            {/* Con alternativas se nombran todas y se marca cuál
+                                se va a usar, que es lo que el selector decide.
+                                Dividida no se dice: cada parte elige el suyo. */}
+                            {materialesDe(l).length > 1
+                              ? (dividida
+                                  ? <>{materialesDe(l).join(" / ")} · {l.color} — </>
+                                  : <>{materialesDe(l).join(" / ")} · {l.color} — usando <strong style={{ color: "var(--text)" }}>{entera.material}</strong> —{" "}</>)
+                              : <>{l.material} · {l.color} — </>}
+                            {l.gramosPorUnidad} g × {l.cantidad} u ={" "}
+                            <strong style={{ color: "var(--text)" }}>{l.cantidadConsumida} g</strong>
+                          </div>
+                          {/* Con una sola unidad no hay nada que repartir: la
+                              pieza sale entera de un rollo o de ninguno. */}
+                          {l.cantidad > 1 && !l.sinVariante && (
+                            <button type="button" style={linkBtn}
+                              onClick={() => dividida ? unificar(l.clave) : dividir(l)}>
+                              {dividida ? "Unificar en un owner" : "Dividir entre owners"}
+                            </button>
+                          )}
                         </div>
-                        {/* El material se resuelve ANTES que el owner: los
-                            owners de abajo son los de ESTE material+color, así
-                            que cambiar el material cambia esa lista. Al revés no
-                            tendría sentido, un owner no dice nada hasta saber de
-                            qué rollo se habla. */}
-                        {materialesPosibles[l.clave] && (
-                          <div style={{ marginBottom: 12, maxWidth: 300 }}>
-                            <label style={{
-                              display: "block", fontSize: 11, fontWeight: 600, letterSpacing: 0.8,
-                              textTransform: "uppercase", color: "var(--muted)", marginBottom: 6,
+
+                        {!dividida ? (
+                          <>
+                            {selectorMaterial(entera)}
+                            <div style={{
+                              display: "grid", gridTemplateColumns: "150px 250px 1fr",
+                              gap: 14, alignItems: "start",
                             }}>
-                              Material usado
-                            </label>
-                            <ListaDesplegable
-                              // Se listan TODOS, también los que no llegan:
-                              // deshabilitados y con el motivo, que es lo que
-                              // deja ver de un vistazo qué filamento reponer.
-                              opciones={materialesPosibles[l.clave].map(m => ({
-                                id: m.material,
-                                nombre: m.material,
-                                nota: m.alcanza ? ""
-                                  : m.tiene
-                                    ? `· ${m.disponible} g disponibles, necesita ${m.necesita} g`
-                                    : `· no hay ${m.material} ${l.color} en inventario`,
-                                deshabilitada: !m.alcanza,
-                              }))}
-                              valor={queAlcanzan(l.clave).includes(l.material) ? l.material : ""}
-                              onElegir={m => setMaterialElegido(e => ({ ...e, [l.clave]: m }))}
-                              vacio={queAlcanzan(l.clave).length === 0
-                                ? "— Ninguno alcanza —"
-                                : "— Elegir material —"}
-                              invalido={queAlcanzan(l.clave).length === 0}
-                              titulo={`Con cuál de ${materialesDe(l).join(" o ")} se imprimió`}
-                            />
-                            {queAlcanzan(l.clave).length === 0 && (
-                              <div style={{ fontSize: 11, color: "#c64138", marginTop: 6, lineHeight: 1.5 }}>
-                                Ninguno de {materialesDe(l).join(" / ")} en {l.color} llega a los{" "}
-                                {totalPorLinea(l)} g que hacen falta.
+                              {campoDesperdicio(entera)}
+                              {selectorOwner(entera)}
+                              {/* La cantidad va SIEMPRE en su propia línea, no
+                                  cuando no entra: con el ancho justo el número
+                                  caía solo a veces y el corte quedaba distinto. */}
+                              <div style={{ fontSize: 12, color: "var(--muted)", paddingTop: 16 }}>
+                                <div>Total a descontar:</div>
+                                <div style={{ color: "var(--text)", fontWeight: 700, marginTop: 2 }}>
+                                  {totalPorLinea(entera)} g
+                                </div>
+                              </div>
+                            </div>
+                            {avisosDeParte(entera)}
+                          </>
+                        ) : (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                            {partes.map((parte, j) => (
+                              <div key={parte.clave} style={{
+                                padding: 12, background: "var(--bg)",
+                                border: "1px solid var(--line)",
+                              }}>
+                                <div style={{
+                                  display: "flex", justifyContent: "space-between",
+                                  alignItems: "center", marginBottom: 10,
+                                }}>
+                                  <div style={{
+                                    fontSize: 10, fontWeight: 700, letterSpacing: 1.2,
+                                    textTransform: "uppercase", color: "var(--muted)",
+                                  }}>
+                                    Repartición {j + 1} de {partes.length}
+                                  </div>
+                                  <button type="button" style={linkBtn}
+                                    onClick={() => quitarParte(l.clave, j)}>Quitar</button>
+                                </div>
+                                {selectorMaterial(parte, 260)}
+                                {/* El desperdicio es de CADA persona: una puede
+                                    haber tenido una falla y la otra no. */}
+                                <div style={{
+                                  display: "grid", gridTemplateColumns: "minmax(0,1fr) 88px 128px",
+                                  gap: 12, alignItems: "start",
+                                }}>
+                                  {selectorOwner(parte)}
+                                  <TKInput
+                                    label="Gramos"
+                                    type="number"
+                                    value={(reparticiones[l.clave][j] || {}).gramos ?? 0}
+                                    onChange={e => cambiarParte(l.clave, j, e.target.value)}
+                                  />
+                                  {campoDesperdicio(parte)}
+                                </div>
+                                {avisosDeParte(parte)}
+                              </div>
+                            ))}
+                            <div style={{
+                              display: "flex", justifyContent: "space-between",
+                              alignItems: "center", gap: 12,
+                            }}>
+                              <button type="button" style={linkBtn}
+                                onClick={() => agregarParte(l.clave)}>+ Agregar repartición</button>
+                              <div style={{ fontSize: 12, color: descuadre ? "#c64138" : "var(--muted)" }}>
+                                Repartido{" "}
+                                <strong>{repartido} g</strong> de {l.cantidadConsumida} g
+                              </div>
+                            </div>
+                            {descuadre && (
+                              <div style={{ fontSize: 11.5, color: "#c64138", lineHeight: 1.5 }}>
+                                {descuadre.hayCero
+                                  ? "Hay una repartición en 0 g: quitala o ponele los gramos que cubre."
+                                  : repartido > l.cantidadConsumida
+                                    ? `Sobran ${repartido - l.cantidadConsumida} g: la suma tiene que dar exactamente los ${l.cantidadConsumida} g de la receta.`
+                                    : `Faltan ${l.cantidadConsumida - repartido} g por repartir.`}
                               </div>
                             )}
-                          </div>
-                        )}
-                        <div style={{
-                          display: "grid", gridTemplateColumns: "150px 250px 1fr",
-                          gap: 14, alignItems: "start",
-                        }}>
-                          <TKInput
-                            label="Desperdicio (g)"
-                            type="number"
-                            value={desperdicios[l.clave] ?? 0}
-                            onChange={e => setDesperdicios(d => ({ ...d, [l.clave]: e.target.value }))}
-                          />
-                          <div>
-                            {/* Mismo encabezado que el label de TKInput, para
-                                que los dos campos se lean parejos. */}
-                            <label style={{
-                              display: "block", fontSize: 11, fontWeight: 600, letterSpacing: 0.8,
-                              textTransform: "uppercase", color: "var(--muted)", marginBottom: 6,
-                            }}>
-                              Descontar de
-                            </label>
-                            <ListaDesplegable
-                              // Los que no sirven se listan igual, deshabilitados
-                              // y con el motivo: saber que Ana no tiene ese
-                              // filamento es parte de la respuesta.
-                              opciones={opciones.map(o => ({
-                                id: o.id,
-                                nombre: o.tiene
-                                  ? `${o.owner || "Sin owner"} — ${o.disponible} g`
-                                  : `${o.owner} — sin cargar`,
-                                nota: o.alcanza ? ""
-                                  : o.tiene ? `· insuficiente, necesita ${totalPorLinea(l)} g`
-                                  : "· no tiene este filamento",
-                                deshabilitada: !o.alcanza,
-                              }))}
-                              valor={asignada?.id || ""}
-                              onElegir={id => setElegido(e => ({ ...e, [l.clave]: id }))}
-                              vacio={opciones.length === 0 ? "— Nadie lo tiene cargado —" : "— Elegir owner —"}
-                              invalido={pendiente}
-                              deshabilitado={opciones.length === 0}
-                              titulo={`De quién se descuenta el ${l.material} ${l.color}`}
-                            />
-                          </div>
-                          {/* La cantidad va SIEMPRE en su propia línea, no
-                              cuando no entra: con el ancho justo el número caía
-                              solo a veces y el corte quedaba distinto. */}
-                          <div style={{ fontSize: 12, color: "var(--muted)", paddingTop: 16 }}>
-                            <div>Total a descontar:</div>
-                            <div style={{ color: "var(--text)", fontWeight: 700, marginTop: 2 }}>
-                              {totalPorLinea(l)} g
-                            </div>
-                          </div>
-                        </div>
-                        {pendiente && !sinStock && (
-                          <div style={{ fontSize: 11.5, color: "#c64138", marginTop: 8 }}>
-                            Hay {opciones.filter(o => o.alcanza).length} owners que pueden imprimir{" "}
-                            {l.material} {l.color}: elegí de cuál se descuenta.
-                          </div>
-                        )}
-                        {sinStock && (
-                          <div style={{ fontSize: 11.5, color: "#c64138", marginTop: 8 }}>
-                            Ningún owner llega solo a los {totalPorLinea(l)} g de esta línea.
                           </div>
                         )}
                       </div>
@@ -1206,6 +1363,10 @@ export function ModalImpresion({ pedido, productos, personalizados = [], filamen
           <TKButton variant="outline" onClick={onClose}>Cancelar</TKButton>
           <TKButton onClick={confirmar} disabled={guardando || !puedeConfirmar}>
             {guardando ? "Procesando..."
+              // El descuadre va primero: con los gramos mal repartidos la
+              // validación de stock también falla, y "falta stock" mandaría a
+              // reponer filamento cuando lo que falta es cerrar la suma.
+              : malRepartidas.length > 0 ? "Falta repartir los gramos"
               : sinMaterialConStock.length > 0 ? "Falta stock"
               : sinOwnerConStock.length > 0 ? "Falta stock"
               : faltaElegir.length > 0 ? "Falta elegir owner"

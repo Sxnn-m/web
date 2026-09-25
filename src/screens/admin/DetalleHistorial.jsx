@@ -31,6 +31,11 @@ export function RestockBadge({ detalle = "" }) {
   );
 }
 
+// Los dos indicadores comparten tamaño desde una constante y no desde dos
+// literales iguales: así no pueden volver a separarse por descuido.
+const TAM_NUMERO = 28;
+const TAM_ROTULO = 10;
+
 const cardStyle = {
   padding: 20, background: "var(--bg-alt)", border: "1px solid var(--line)",
   marginBottom: 20,
@@ -117,7 +122,10 @@ export function DetalleHistorial({
   const disponibleNuevos = (Number(cantidad) || 0) - totalReservado;
   const sobreReservado = disponibleNuevos < 0;
 
-  const COL_RESERVAS = "1.6fr 100px 100px 1fr";
+  // Mismo reparto que COL_GASTOS para que las dos tablas, apiladas en la
+  // misma columna, se lean como una sola grilla: primera columna elástica,
+  // numéricas de 90 y fecha al final.
+  const COL_RESERVAS = "1.6fr 90px 90px 1fr";
 
   return (
     <>
@@ -131,13 +139,21 @@ export function DetalleHistorial({
         <TKButton variant="ghost" onClick={onBack} icon={<Icon.back size={14}/>}>Volver</TKButton>
       </div>
 
-      <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap", margin: "20px 0 24px" }}>
+      {/* alignItems stretch, no center: las dos tarjetas miden lo mismo y sus
+          números apoyan en la misma base. Centradas, la más baja quedaba
+          desplazada y los dos 28 px se leían como tamaños distintos. */}
+      <div style={{ display: "flex", gap: 16, alignItems: "stretch", flexWrap: "wrap", margin: "20px 0 24px" }}>
         <div style={{ padding: "16px 22px", background: "var(--bg-alt)", borderLeft: `3px solid ${alerta ? "#c64138" : "#4a7a52"}` }}>
-          <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 1.5, color: "var(--muted)", marginBottom: 6 }}>
+          <div style={{ fontSize: TAM_ROTULO, textTransform: "uppercase", letterSpacing: 1.5, color: "var(--muted)", marginBottom: 6 }}>
             En stock
           </div>
-          <div style={{ fontSize: 28, color: alerta ? "#c64138" : "var(--text)" }}>
+          <div style={{ fontSize: TAM_NUMERO, color: alerta ? "#c64138" : "var(--text)" }}>
             {Number(cantidad || 0).toLocaleString("es-AR")} {unidad}
+          </div>
+          {/* El pie existe para que las dos tarjetas tengan las mismas tres
+              filas. Ya que ocupa lugar, que diga en qué se diferencian. */}
+          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
+            Lo que hay en la bobina
           </div>
         </div>
         {/* El segundo número, y deliberadamente distinto del primero: "En
@@ -150,10 +166,10 @@ export function DetalleHistorial({
             padding: "16px 22px", background: "var(--bg-alt)",
             borderLeft: `3px dashed ${sobreReservado ? "#c64138" : "var(--muted)"}`,
           }}>
-            <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 1.5, color: "var(--muted)", marginBottom: 6 }}>
+            <div style={{ fontSize: TAM_ROTULO, textTransform: "uppercase", letterSpacing: 1.5, color: "var(--muted)", marginBottom: 6 }}>
               Disponible para nuevos pedidos
             </div>
-            <div style={{ fontSize: 28, color: sobreReservado ? "#c64138" : "var(--text)" }}>
+            <div style={{ fontSize: TAM_NUMERO, color: sobreReservado ? "#c64138" : "var(--text)" }}>
               {disponibleNuevos.toLocaleString("es-AR")} {unidad}
             </div>
             <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
@@ -230,6 +246,63 @@ export function DetalleHistorial({
             {gastos.length === 0 && (
               <div style={{ padding: 24, color: "var(--muted)", fontSize: 13 }}>Sin gastos registrados.</div>
             )}
+
+            {/* Reservado va debajo de Gastos y en su misma columna: los dos
+                hablan de lo mismo —qué se llevó este rollo— y con anchos
+                distintos parecían tablas de dos cosas sin relación. Sigue
+                siendo una tabla aparte, porque un gasto ya salió del rollo y
+                una reserva todavía no. Sin columna de desperdicio: eso se
+                mide recién al imprimir. */}
+            {reservas && (
+              <div style={{ marginTop: 32 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: "var(--muted)", marginBottom: 4 }}>
+                  Reservado
+                </div>
+                <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 12 }}>
+                  Pedidos tomados y todavía no impresos · {totalReservado.toLocaleString("es-AR")} {unidad} comprometidas.
+                  No se descontaron del stock; se descuentan al marcar el pedido como impreso.
+                </div>
+                <div style={{
+                  display: "grid", gridTemplateColumns: COL_RESERVAS,
+                  gap: 10, padding: "10px 12px", background: "var(--bg-alt)",
+                  fontSize: 10, textTransform: "uppercase", letterSpacing: 1.2,
+                  color: "var(--muted)", fontWeight: 700,
+                }}>
+                  <div>Producto</div><div>Consumido</div><div>Orden</div><div>Fecha</div>
+                </div>
+                {filasReservadas.map(r => (
+                  <div key={r.clave} style={{
+                    display: "grid", gridTemplateColumns: COL_RESERVAS,
+                    gap: 10, padding: "12px", borderBottom: "1px solid var(--line)", fontSize: 12,
+                  }}>
+                    <div>
+                      <span style={{ fontWeight: 600 }}>{r.productoNombre}</span>
+                      {(r.varianteNombre || r.opcionesTexto) && (
+                        <span style={{ color: "var(--muted)" }}>
+                          {" · "}{[r.varianteNombre, r.opcionesTexto].filter(Boolean).join(" · ")}
+                        </span>
+                      )}
+                      {/* Una línea repartida entre dos rollos deja una fila en
+                          cada historial: sin esto, los gramos de la parte se
+                          leerían como el consumo entero de la pieza. */}
+                      {r.reparticion && (
+                        <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>
+                          Repartición {r.reparticion}
+                        </div>
+                      )}
+                    </div>
+                    <div>{r.cantidadConsumida} {unidad}</div>
+                    <div><TKPill variant="outline">{r.numeroOrden}</TKPill></div>
+                    <div style={{ color: "var(--muted)" }}>{fmtFecha(r.createdAt)}</div>
+                  </div>
+                ))}
+                {filasReservadas.length === 0 && (
+                  <div style={{ padding: 24, color: "var(--muted)", fontSize: 13 }}>
+                    Sin reservas: ningún pedido pendiente usa este rollo.
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Restocks */}
@@ -280,51 +353,6 @@ export function DetalleHistorial({
         </div>
       )}
 
-      {/* Reservado. Va aparte de Gastos a propósito: un gasto ya ocurrió y
-          salió del rollo; una reserva todavía no. Sin columna de desperdicio,
-          porque el desperdicio se mide recién al imprimir. */}
-      {reservas && (
-        <div style={{ marginTop: 32 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: "var(--muted)", marginBottom: 4 }}>
-            Reservado
-          </div>
-          <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 12 }}>
-            Pedidos tomados y todavía no impresos · {totalReservado.toLocaleString("es-AR")} {unidad} comprometidas.
-            No se descontaron del stock; se descuentan al marcar el pedido como impreso.
-          </div>
-          <div style={{
-            display: "grid", gridTemplateColumns: COL_RESERVAS,
-            gap: 10, padding: "10px 12px", background: "var(--bg-alt)",
-            fontSize: 10, textTransform: "uppercase", letterSpacing: 1.2,
-            color: "var(--muted)", fontWeight: 700,
-          }}>
-            <div>Producto</div><div>Consumido</div><div>Orden</div><div>Fecha</div>
-          </div>
-          {filasReservadas.map(r => (
-            <div key={r.clave} style={{
-              display: "grid", gridTemplateColumns: COL_RESERVAS,
-              gap: 10, padding: "12px", borderBottom: "1px solid var(--line)", fontSize: 12,
-            }}>
-              <div>
-                <span style={{ fontWeight: 600 }}>{r.productoNombre}</span>
-                {(r.varianteNombre || r.opcionesTexto) && (
-                  <span style={{ color: "var(--muted)" }}>
-                    {" · "}{[r.varianteNombre, r.opcionesTexto].filter(Boolean).join(" · ")}
-                  </span>
-                )}
-              </div>
-              <div>{r.cantidadConsumida} {unidad}</div>
-              <div><TKPill variant="outline">{r.numeroOrden}</TKPill></div>
-              <div style={{ color: "var(--muted)" }}>{fmtFecha(r.createdAt)}</div>
-            </div>
-          ))}
-          {filasReservadas.length === 0 && (
-            <div style={{ padding: 24, color: "var(--muted)", fontSize: 13 }}>
-              Sin reservas: ningún pedido pendiente usa este rollo.
-            </div>
-          )}
-        </div>
-      )}
     </>
   );
 }
