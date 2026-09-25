@@ -13,35 +13,18 @@ import { TKButton, Icon } from '../../components/UI.jsx';
 import { planDeConsumo } from '../../lib/inventario.js';
 import { materialesDe } from '../../lib/consumoPedido.js';
 import { opcionesDeDescuento } from '../../lib/opcionesFilamento.js';
-import { ListaDesplegable } from '../../components/ListaDesplegable.jsx';
 import { usarOrigen } from '../../components/usarOrigen.js';
+import { LineasDeMaterial } from '../../components/LineasDeMaterial.jsx';
 import { reservasDePedidos, filamentosNetos } from '../../lib/reservas.js';
 
-/**
- * El encabezado de una pieza del pedido: el producto y, debajo, qué se eligió.
- * Mismo formato que la fila del pedido en el listado.
- */
-export function EncabezadoPieza({ pieza }) {
-  const elegido = [pieza.varianteNombre, pieza.opcionesTexto].filter(Boolean).join(" · ");
-  return (
-    <div style={{ marginBottom: 10 }}>
-      <div style={{ fontWeight: 700, fontSize: 14 }}>{pieza.productoNombre}</div>
-      {elegido && (
-        <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 2 }}>{elegido}</div>
-      )}
-    </div>
-  );
-}
+// Vivía acá; ahora es del componente compartido. Se reexporta para no romper
+// a quien la importaba desde este archivo.
+export { EncabezadoPieza } from '../../components/LineasDeMaterial.jsx';
 
 const aviso = {
   padding: "14px 16px", background: "#c6413812",
   borderLeft: "3px solid #c64138", marginBottom: 20,
   fontSize: 13, lineHeight: 1.6,
-};
-
-const labelSelector = {
-  display: "block", fontSize: 11, fontWeight: 600, letterSpacing: 0.8,
-  textTransform: "uppercase", color: "var(--muted)", marginBottom: 6,
 };
 
 /**
@@ -66,21 +49,23 @@ export function ModalOrigenPedido({
     return filamentosNetos(filamentos, reservas);
   }, [pedidos, productos, personalizados, filamentos]);
 
+  // El mismo hook que usa el modal de impresión, división entre owners
+  // incluida: lo único distinto es que acá se evalúa contra el stock neto y
+  // que no se pide desperdicio.
+  const o = usarOrigen({ plan, filamentos: netos, inicial: {} });
   const {
-    planResuelto, piezasDeMaterial, totalPorLinea,
-    materialesPosibles, queAlcanzan, candidatos, asignaciones, origen,
-    faltaElegir, sinOwnerConStock, sinMaterialConStock,
-    setElegido, setMaterialElegido,
-  } = usarOrigen({ plan, filamentos: netos, inicial: {} });
+    planResuelto, totalPorLinea, candidatos, origen, origenPlano,
+    faltaElegir, sinOwnerConStock, sinMaterialConStock, malRepartidas,
+  } = o;
 
-  // Las líneas que hay que resolver. Una línea sin variante de color no se
+  // Las partes que hay que resolver. Una línea sin variante de color no se
   // puede imputar a ningún rollo, así que no reserva ni bloquea: es un pedido
   // que va a haber que ajustar a mano, igual que antes de todo esto.
   const aResolver = planResuelto.filter(l => !l.sinVariante);
   // Nadie tiene ese filamento cargado: no aparece ni como owner insuficiente.
   const sinRollo = aResolver.filter(l => (candidatos[l.clave] || []).length === 0);
-  const faltanOrigen = aResolver.filter(l => !origen[l.clave]);
-  const puedeGuardar = faltanOrigen.length === 0 && !guardando;
+  const faltanOrigen = aResolver.filter(l => !origenPlano[l.clave]);
+  const puedeGuardar = faltanOrigen.length === 0 && malRepartidas.length === 0 && !guardando;
 
   return (
     <div
@@ -144,119 +129,7 @@ export function ModalOrigenPedido({
             No hay filamento que reservar en este pedido.
           </div>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 24 }}>
-            {piezasDeMaterial.map(pieza => (
-              <div key={pieza.indice} style={{ padding: 14, background: "var(--bg-alt)", border: "1px solid var(--line)" }}>
-                <EncabezadoPieza pieza={pieza}/>
-                <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                  {pieza.lineas.filter(l => !l.sinVariante).map((l, i) => {
-                    const opciones = candidatos[l.clave] || [];
-                    const asignada = asignaciones[l.clave];
-                    const pendiente = Boolean(asignada?.pendiente);
-                    const sinStock = Boolean(asignada?.sinStock);
-                    return (
-                      <div key={l.clave} style={{
-                        borderTop: i > 0 ? "1px solid var(--line)" : "none",
-                        paddingTop: i > 0 ? 14 : 0,
-                      }}>
-                        <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 10 }}>
-                          {materialesDe(l).length > 1
-                            ? <>{materialesDe(l).join(" / ")} · {l.color} — usando <strong style={{ color: "var(--text)" }}>{l.material}</strong> —{" "}</>
-                            : <>{l.material} · {l.color} — </>}
-                          {l.gramosPorUnidad} g × {l.cantidad} u ={" "}
-                          <strong style={{ color: "var(--text)" }}>{l.cantidadConsumida} g</strong>
-                        </div>
-
-                        {/* Mismo orden que al imprimir: primero el material,
-                            porque los owners de abajo son los de ESE material. */}
-                        {materialesPosibles[l.clave] && (
-                          <div style={{ marginBottom: 12, maxWidth: 300 }}>
-                            <label style={labelSelector}>Material usado</label>
-                            <ListaDesplegable
-                              opciones={materialesPosibles[l.clave].map(m => ({
-                                id: m.material,
-                                nombre: m.material,
-                                nota: m.alcanza ? ""
-                                  : m.tiene
-                                    ? `· ${m.disponible} g libres, necesita ${m.necesita} g`
-                                    : `· no hay ${m.material} ${l.color} en inventario`,
-                                deshabilitada: !m.alcanza,
-                              }))}
-                              valor={queAlcanzan(l.clave).includes(l.material) ? l.material : ""}
-                              onElegir={m => setMaterialElegido(e => ({ ...e, [l.clave]: m }))}
-                              vacio={queAlcanzan(l.clave).length === 0
-                                ? "— Ninguno alcanza —"
-                                : "— Elegir material —"}
-                              invalido={queAlcanzan(l.clave).length === 0}
-                              titulo={`Con cuál de ${materialesDe(l).join(" o ")} se va a imprimir`}
-                            />
-                            {queAlcanzan(l.clave).length === 0 && (
-                              <div style={{ fontSize: 11, color: "#c64138", marginTop: 6, lineHeight: 1.5 }}>
-                                Ninguno de {materialesDe(l).join(" / ")} en {l.color} tiene libres los{" "}
-                                {totalPorLinea(l)} g que hacen falta.
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {/* Sin campo de desperdicio, a propósito: todavía no se
-                            imprimió nada, así que no hay pérdida que declarar. */}
-                        <div style={{
-                          display: "grid", gridTemplateColumns: "250px 1fr",
-                          gap: 14, alignItems: "start",
-                        }}>
-                          <div>
-                            <label style={labelSelector}>Reservar de</label>
-                            <ListaDesplegable
-                              opciones={opciones.map(o => ({
-                                id: o.id,
-                                nombre: o.tiene
-                                  ? `${o.owner || "Sin owner"} — ${o.disponible} g`
-                                  : `${o.owner} — sin cargar`,
-                                nota: o.alcanza ? ""
-                                  : o.tiene ? `· insuficiente, necesita ${totalPorLinea(l)} g`
-                                  : "· no tiene este filamento",
-                                deshabilitada: !o.alcanza,
-                              }))}
-                              valor={asignada?.id || ""}
-                              onElegir={id => setElegido(e => ({ ...e, [l.clave]: id }))}
-                              vacio={opciones.length === 0 ? "— Nadie lo tiene cargado —" : "— Elegir owner —"}
-                              invalido={pendiente || opciones.length === 0}
-                              deshabilitado={opciones.length === 0}
-                              titulo={`De quién se reserva el ${l.material} ${l.color}`}
-                            />
-                          </div>
-                          <div style={{ fontSize: 12, color: "var(--muted)", paddingTop: 16 }}>
-                            <div>A reservar:</div>
-                            <div style={{ color: "var(--text)", fontWeight: 700, marginTop: 2 }}>
-                              {totalPorLinea(l)} g
-                            </div>
-                          </div>
-                        </div>
-
-                        {pendiente && !sinStock && (
-                          <div style={{ fontSize: 11.5, color: "#c64138", marginTop: 8 }}>
-                            Hay {opciones.filter(o => o.alcanza).length} owners con {l.material}{" "}
-                            {l.color} libre: elegí de cuál se reserva.
-                          </div>
-                        )}
-                        {sinStock && (
-                          <div style={{ fontSize: 11.5, color: "#c64138", marginTop: 8 }}>
-                            Ningún owner tiene libres los {totalPorLinea(l)} g de esta línea.
-                          </div>
-                        )}
-                        {opciones.length === 0 && (
-                          <div style={{ fontSize: 11.5, color: "#c64138", marginTop: 8 }}>
-                            No hay ningún rollo de {l.material} {l.color} cargado en inventario.
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
-          </div>
+          <LineasDeMaterial o={o} modo="reservar"/>
         )}
 
         {/* Los mismos tres bloqueos que al imprimir, con el mismo detalle de
@@ -347,6 +220,10 @@ export function ModalOrigenPedido({
           <TKButton variant="outline" onClick={onClose} disabled={guardando}>Cancelar</TKButton>
           <TKButton onClick={() => onConfirmar(origen)} disabled={!puedeGuardar}>
             {guardando ? "Guardando..."
+              // El descuadre va primero: con los gramos mal repartidos también
+              // falla el chequeo de owner, y "falta stock" mandaría a reponer
+              // filamento cuando lo que falta es cerrar la suma.
+              : malRepartidas.length > 0 ? "Falta repartir los gramos"
               : sinMaterialConStock.length > 0 ? "Falta stock"
               : sinOwnerConStock.length > 0 ? "Falta stock"
               : sinRollo.length > 0 ? "Falta stock"
