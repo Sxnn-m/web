@@ -706,12 +706,16 @@ export function opcionesFaltantes(pedido, productos = [], personalizados = []) {
  *
  * @param {object} asignaciones de qué rollo sale cada línea del plan, cuando
  *   hay más de un owner con el mismo material+color. Ver agruparConsumo().
+ * @param {object|null} origen lo que efectivamente se usó, por línea del
+ *   pedido. Se guarda junto con el estado para que el pedido documente lo que
+ *   pasó y no lo que se había planeado al tomarlo: si el consumo se repartió
+ *   entre dos owners acá queda esa división, no el owner único de entonces.
  * @throws {StockInsuficienteError} cuando algún recurso no alcanza
  * @returns {{advertencias: string[]}}
  */
 export async function marcarPedidoImpreso(
   pedido, plan, desperdicios = {}, filamentos = [], planInsumos = [],
-  insumos = [], asignaciones = {}
+  insumos = [], asignaciones = {}, origen = null
 ) {
   const consumo = agruparConsumo(plan, desperdicios, planInsumos, asignaciones);
 
@@ -834,9 +838,15 @@ export async function marcarPedidoImpreso(
       });
     }
 
+    // El pedido pasa a impreso en la MISMA transacción que aplica los
+    // descuentos: la reserva, que se deriva de que el pedido esté pendiente,
+    // deja de contar en el mismo instante en que el stock real baja. No hay
+    // ventana donde el filamento esté descontado y además reservado, ni nada
+    // que liberar aparte.
     tx.update(doc(db, COL_PEDIDOS, pedido._id), {
       estadoImpresion: "impreso",
       impresoAt: serverTimestamp(),
+      ...(origen ? { origen } : {}),
     });
 
     return { advertencias: [] };

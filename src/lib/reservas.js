@@ -15,7 +15,6 @@
 // concreto: no hay que repartir nada entre owners ni suponer de cuál sale.
 
 import { planDeConsumo, planDeInsumos } from './inventario.js';
-import { resolverMateriales } from './consumoPedido.js';
 import { tiposDe, claveTipo } from './tiposInsumo.js';
 
 /** ¿Este pedido todavía tiene su filamento comprometido? */
@@ -24,6 +23,22 @@ export const estaPendiente = (pedido) =>
 
 /** El origen elegido para una línea del plan, si el pedido lo tiene. */
 export const origenDeLinea = (pedido, clave) => pedido?.origen?.[clave] || null;
+
+/**
+ * De qué rollos sale una línea, SIEMPRE como lista.
+ *
+ * Una línea sin dividir es el caso de una sola parte que se lleva todo el
+ * consumo; una dividida trae sus reparticiones con los gramos de cada una.
+ * Verlas igual es lo que deja que reservar, listar y sumar no tengan que
+ * preguntar por el formato.
+ */
+export function partesDeOrigen(origen, cantidadConsumida = 0) {
+  if (!origen) return [];
+  if (Array.isArray(origen.reparticiones)) {
+    return origen.reparticiones.filter(r => r?.filamentoId);
+  }
+  return origen.filamentoId ? [{ ...origen, gramos: cantidadConsumida }] : [];
+}
 
 /**
  * Lo que los pedidos pendientes tienen comprometido, por documento.
@@ -45,19 +60,16 @@ export function reservasDePedidos(pedidos = [], productos = [], personalizados =
   for (const pedido of pedidos) {
     if (!estaPendiente(pedido)) continue;
 
-    const plan = planDeConsumo(pedido, productos, personalizados);
-    // El material elegido manda: con [PLA, PETG] la reserva va sobre el que se
-    // dijo al tomar el pedido, no sobre el primero de la receta.
-    const elegidos = {};
-    for (const linea of plan) {
-      const origen = origenDeLinea(pedido, linea.clave);
-      if (origen?.material) elegidos[linea.clave] = origen.material;
-    }
-    for (const linea of resolverMateriales(plan, elegidos)) {
-      const origen = origenDeLinea(pedido, linea.clave);
-      if (!origen?.filamentoId || linea.sinVariante) continue;
-      porFilamento[origen.filamentoId] =
-        (porFilamento[origen.filamentoId] || 0) + (Number(linea.cantidadConsumida) || 0);
+    // No hace falta resolver el material de la línea: los gramos que se
+    // reservan no dependen de con cuál se imprima, y el rollo viene nombrado
+    // por su id. Con la línea dividida, cada parte tiene su rollo y su cifra.
+    for (const linea of planDeConsumo(pedido, productos, personalizados)) {
+      if (linea.sinVariante) continue;
+      const partes = partesDeOrigen(origenDeLinea(pedido, linea.clave), linea.cantidadConsumida);
+      for (const parte of partes) {
+        porFilamento[parte.filamentoId] =
+          (porFilamento[parte.filamentoId] || 0) + (Number(parte.gramos) || 0);
+      }
     }
 
     for (const linea of planDeInsumos(pedido, productos, personalizados)) {
@@ -134,19 +146,27 @@ export function reservasDeFilamento(filamentoId, pedidos = [], productos = [], p
   const filas = [];
   for (const pedido of pedidos) {
     if (!estaPendiente(pedido)) continue;
-    const plan = planDeConsumo(pedido, productos, personalizados);
-    for (const linea of plan) {
-      const origen = origenDeLinea(pedido, linea.clave);
-      if (origen?.filamentoId !== filamentoId || linea.sinVariante) continue;
-      filas.push({
-        clave: `${pedido._id}|${linea.clave}`,
-        productoNombre: linea.productoNombre,
-        varianteNombre: linea.varianteNombre,
-        opcionesTexto: linea.opcionesTexto,
-        material: origen.material || linea.material,
-        cantidadConsumida: Number(linea.cantidadConsumida) || 0,
-        numeroOrden: pedido.numeroOrden,
-        createdAt: pedido.createdAt,
+    for (const linea of planDeConsumo(pedido, productos, personalizados)) {
+      if (linea.sinVariante) continue;
+      const partes = partesDeOrigen(origenDeLinea(pedido, linea.clave), linea.cantidadConsumida);
+      // Una línea repartida entre dos rollos aporta una fila a cada historial,
+      // con los gramos de SU parte: la suma de la columna tiene que dar lo
+      // reservado sobre este rollo, no el consumo entero de la pieza.
+      partes.forEach((parte, i) => {
+        if (parte.filamentoId !== filamentoId) return;
+        filas.push({
+          clave: `${pedido._id}|${linea.clave}|${i}`,
+          productoNombre: linea.productoNombre,
+          varianteNombre: linea.varianteNombre,
+          opcionesTexto: linea.opcionesTexto,
+          material: parte.material || linea.material,
+          // Con la línea dividida se dice cuál de las partes es, o "450 g" a
+          // secas no explicaría por qué no es el consumo completo.
+          reparticion: partes.length > 1 ? `${i + 1} de ${partes.length}` : "",
+          cantidadConsumida: Number(parte.gramos) || 0,
+          numeroOrden: pedido.numeroOrden,
+          createdAt: pedido.createdAt,
+        });
       });
     }
   }
