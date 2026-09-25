@@ -35,6 +35,7 @@ import { EstadisticasTab } from './admin/EstadisticasTab.jsx';
 import { MensajeriaTab } from './admin/MensajeriaTab.jsx';
 import { cargarMensajes, asignarNumerosFaltantes } from '../lib/mensajes.js';
 import { contarNoLeidos } from '../lib/consultas.js';
+import { reservasDePedidos, filamentosNetos, insumosNetos } from '../lib/reservas.js';
 import { leerMantenimiento, guardarMantenimiento } from '../lib/mantenimiento.js';
 import { useFiltrosCategoria, FiltrosCategoria } from '../components/FiltrosCategoria.jsx';
 import { ArchivosDiseno } from './admin/ArchivosDiseno.jsx';
@@ -206,9 +207,19 @@ export function AdminScreen({ go, tab = "dashboard", onTab, onProductsChange, on
    * recalcula el booleano "disponible" de cada producto y lo persiste.
    * Recibe siempre productos ya enriquecidos con su receta privada.
    */
-  const sincronizarDisponibilidad = async (prodsFull, films, insus, costs = null) => {
+  const sincronizarDisponibilidad = async (prodsFull, films, insus, costs = null, soloIds = null) => {
     try {
-      const resultado = await recalcularDisponibilidad(prodsFull, films, insus, costs);
+      // La disponibilidad que ve el catálogo se calcula contra el stock NETO:
+      // lo que ya comprometieron los pedidos pendientes no se puede volver a
+      // prometer. El inventario sigue mostrando el stock físico; lo que cambia
+      // es contra qué se decide.
+      const pedidos = await cargarPedidos();
+      const reservas = reservasDePedidos(pedidos, prodsFull, personalizados);
+      const objetivo = soloIds
+        ? prodsFull.filter(p => soloIds.includes(p._id))
+        : prodsFull;
+      const resultado = await recalcularDisponibilidad(
+        objetivo, filamentosNetos(films, reservas), insumosNetos(insus, reservas), costs);
       if (resultado.actualizados > 0) {
         await loadProducts();
         onProductsChange?.();
@@ -231,6 +242,17 @@ export function AdminScreen({ go, tab = "dashboard", onTab, onProductsChange, on
     ]);
     const privs = await loadPrivados(prods);
     return { prodsFull: enriquecerProductos(prods, privs), films, insus };
+  };
+
+  /**
+   * Un pedido se creó o se borró: cambió lo RESERVADO, no el stock físico.
+   * Se recalcula la disponibilidad pública solo de los productos de ese
+   * pedido, no del catálogo entero, para no escribir de más.
+   */
+  const handleReservasChange = async (productoIds = []) => {
+    if (productoIds.length === 0) return;
+    const { prodsFull, films, insus } = await recargarTodo();
+    await sincronizarDisponibilidad(prodsFull, films, insus, null, productoIds);
   };
 
   // Inventario cambió (alta/edición de filamento o restock) → recalcular productos
@@ -706,7 +728,13 @@ export function AdminScreen({ go, tab = "dashboard", onTab, onProductsChange, on
           )}
           {tabActivo === "categorias" && <CategoriesTab categories={propCategories} products={products} onCategoriesChange={onCategoriesChange} setMsg={setMsg}/>}
           {tabActivo === "inventario" && (
-            <InventarioTab filamentos={filamentos} onChanged={handleInventarioChange} setMsg={setMsg}/>
+            <InventarioTab
+              filamentos={filamentos}
+              pedidos={pedidos}
+              productos={productosFull}
+              personalizados={personalizados}
+              onChanged={handleInventarioChange}
+              setMsg={setMsg}/>
           )}
           {tabActivo === "insumos" && (
             <InsumosTab insumos={insumos} onChanged={handleInventarioChange} setMsg={setMsg}/>
@@ -720,6 +748,7 @@ export function AdminScreen({ go, tab = "dashboard", onTab, onProductsChange, on
               insumos={insumos}
               onPedidosChange={loadPedidos}
               onInventarioChange={handleInventarioChange}
+              onReservasChange={handleReservasChange}
               setMsg={setMsg}
             />
           )}

@@ -7,8 +7,7 @@ import {
   buscarProductoDeLinea, opcionesFaltantes, agruparPorPieza,
 } from '../../lib/inventario.js';
 import {
-  agruparConsumo, validarStock, textoFaltante,
-  materialesDe, estadoDeMateriales, resolverMateriales,
+  agruparConsumo, validarStock, textoFaltante, materialesDe,
 } from '../../lib/consumoPedido.js';
 import { buscarFilamento } from '../../lib/disponibilidad.js';
 import { opcionesDeDescuento } from '../../lib/opcionesFilamento.js';
@@ -17,6 +16,9 @@ import {
 } from '../../lib/variantesInsumo.js';
 import { tiposDe, claveTipo } from '../../lib/tiposInsumo.js';
 import { ListaDesplegable } from '../../components/ListaDesplegable.jsx';
+import { usarOrigen } from '../../components/usarOrigen.js';
+import { ModalOrigenPedido, EncabezadoPieza } from './ModalOrigen.jsx';
+import { productosDePedido } from '../../lib/reservas.js';
 
 const actionBtn = {
   background: "none", border: "1px solid var(--line)", padding: "5px 6px",
@@ -168,12 +170,14 @@ function BuscadorProducto({ opciones, valorId, onSelect, placeholder }) {
 }
 
 // ─── Tab Pedidos ─────────────────────────────────────────────────────
-export function PedidosTab({ pedidos, productos, personalizados = [], filamentos, insumos = [], onPedidosChange, onInventarioChange, setMsg }) {
+export function PedidosTab({ pedidos, productos, personalizados = [], filamentos, insumos = [], onPedidosChange, onInventarioChange, onReservasChange, setMsg }) {
   const [showForm, setShowForm] = useState(false);
   const [cliente, setCliente] = useState("");
   const [lineas, setLineas] = useState([lineaVacia()]);
   const [expandido, setExpandido] = useState(null);
   const [imprimiendo, setImprimiendo] = useState(null); // pedido en el modal
+  // Pedido armado y esperando que se elija de qué rollo sale cada filamento.
+  const [eligiendoOrigen, setEligiendoOrigen] = useState(null);
   const [guardando, setGuardando] = useState(false);
 
   // Opciones normalizadas del buscador. Cada colección aporta su propio campo
@@ -306,37 +310,63 @@ export function PedidosTab({ pedidos, productos, personalizados = [], filamentos
 
     setGuardando(true);
     try {
+      // El número se toma acá, antes de abrir el panel, para poder mostrarlo
+      // en su encabezado. Si el panel se cancela no se consumió nada: el
+      // número sale de contar los pedidos que existen, no de un contador.
       const frescos = await cargarPedidos();
       const numeroOrden = siguienteNumeroOrden(frescos);
-      await crearPedido({
-        numeroOrden,
-        clienteNombre: cliente,
-        items: validas.map(l => {
-          const o = opcionesDe(l.tipo).find(x => x._id === l.productoId);
-          const variante = (o?.variantes || []).find(v => v.id === l.varianteId);
-          return {
-            productoId: l.productoId,
-            tipo: l.tipo,
-            productoCodigo: o?.codigo || "",
-            productoNombre: o?.nombre || "Producto",
-            // Sin esto el descuento de stock no sabe qué rollo tocar: la
-            // receta ya no lleva color.
-            varianteId: l.varianteId || "",
-            varianteNombre: variante?.nombre || "",
-            // Qué opción se pidió en cada grupo: sin esto el descuento no
-            // sabe qué insumo tocar, y el detalle del pedido no muestra la
-            // combinación que se vendió.
-            opcionesInsumo: { ...(l.opcionesInsumo || {}) },
-            opcionesTexto: etiquetaSeleccion(o?.gruposInsumo || [], l.opcionesInsumo || {},
-              { exigirStock: false }),
-            cantidad: Number(l.cantidad) || 0,
-            precioUnitario: Number(l.precioUnitario) || 0,
-          };
-        }),
+      const items = validas.map(l => {
+        const o = opcionesDe(l.tipo).find(x => x._id === l.productoId);
+        const variante = (o?.variantes || []).find(v => v.id === l.varianteId);
+        return {
+          productoId: l.productoId,
+          tipo: l.tipo,
+          productoCodigo: o?.codigo || "",
+          productoNombre: o?.nombre || "Producto",
+          // Sin esto el descuento de stock no sabe qué rollo tocar: la
+          // receta ya no lleva color.
+          varianteId: l.varianteId || "",
+          varianteNombre: variante?.nombre || "",
+          // Qué opción se pidió en cada grupo: sin esto el descuento no
+          // sabe qué insumo tocar, y el detalle del pedido no muestra la
+          // combinación que se vendió.
+          opcionesInsumo: { ...(l.opcionesInsumo || {}) },
+          opcionesTexto: etiquetaSeleccion(o?.gruposInsumo || [], l.opcionesInsumo || {},
+            { exigirStock: false }),
+          cantidad: Number(l.cantidad) || 0,
+          precioUnitario: Number(l.precioUnitario) || 0,
+        };
       });
-      setMsg(`✓ Pedido ${numeroOrden} creado.`);
+
+      // El pedido NO se guarda todavía: primero hay que decir de qué rollo
+      // sale cada filamento, porque es lo que la reserva necesita para
+      // apuntar a un documento concreto. El panel se encarga, y el guardado
+      // real pasa por confirmarOrigen().
+      setEligiendoOrigen({ numeroOrden, items, pedidosFrescos: frescos });
+    } catch (err) {
+      setMsg("Error: " + err.message);
+    }
+    setGuardando(false);
+  };
+
+  /**
+   * Segundo paso: ya se eligió owner (y material) de cada línea, ahora sí se
+   * guarda. La elección viaja en el pedido, así que la reserva queda imputada
+   * a un rollo puntual y el modal de impresión la encuentra precargada.
+   */
+  const confirmarOrigen = async (origen) => {
+    const { numeroOrden, items } = eligiendoOrigen;
+    setGuardando(true);
+    try {
+      await crearPedido({ numeroOrden, clienteNombre: cliente, items, origen });
+      setMsg(`✓ Pedido ${numeroOrden} creado y filamento reservado.`);
+      setEligiendoOrigen(null);
       resetForm();
       await onPedidosChange();
+      // Lo reservado cambió, así que la disponibilidad pública de estos
+      // productos ya no es la que está publicada. Solo los de este pedido:
+      // el resto del catálogo no se enteró de nada.
+      await onReservasChange?.(productosDePedido({ items }));
     } catch (err) { setMsg("Error: " + err.message); }
     setGuardando(false);
   };
@@ -364,6 +394,9 @@ export function PedidosTab({ pedidos, productos, personalizados = [], filamentos
       await eliminarPedido(pedido._id);
       setMsg("✓ Pedido eliminado.");
       await onPedidosChange();
+      // Un pedido pendiente que desaparece libera lo que tenía reservado: sus
+      // productos vuelven a tener disponibilidad y hay que republicarla.
+      await onReservasChange?.(productosDePedido(pedido));
     } catch (err) { setMsg("Error: " + err.message); }
   };
 
@@ -664,6 +697,24 @@ export function PedidosTab({ pedidos, productos, personalizados = [], filamentos
         </div>
       )}
 
+      {eligiendoOrigen && (
+        <ModalOrigenPedido
+          items={eligiendoOrigen.items}
+          numeroOrden={eligiendoOrigen.numeroOrden}
+          cliente={cliente}
+          productos={productos}
+          personalizados={personalizados}
+          filamentos={filamentos}
+          // Los pedidos recién leídos, no los del render: entre que se abrió
+          // el formulario y se confirma pudo entrar otro pedido que ya reservó
+          // parte de este stock.
+          pedidos={eligiendoOrigen.pedidosFrescos}
+          guardando={guardando}
+          onClose={() => setEligiendoOrigen(null)}
+          onConfirmar={confirmarOrigen}
+        />
+      )}
+
       {imprimiendo && (
         <ModalImpresion
           pedido={imprimiendo}
@@ -684,22 +735,6 @@ export function PedidosTab({ pedidos, productos, personalizados = [], filamentos
   );
 }
 
-/**
- * El encabezado de una pieza del pedido: el producto y, debajo, qué se eligió.
- * Mismo formato que la fila del pedido en el listado.
- */
-function EncabezadoPieza({ pieza }) {
-  const elegido = [pieza.varianteNombre, pieza.opcionesTexto].filter(Boolean).join(" · ");
-  return (
-    <div style={{ marginBottom: 10 }}>
-      <div style={{ fontWeight: 700, fontSize: 14 }}>{pieza.productoNombre}</div>
-      {elegido && (
-        <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 2 }}>{elegido}</div>
-      )}
-    </div>
-  );
-}
-
 // ─── Modal: marcar como impreso + gramos desperdiciados ──────────────
 // Exportado para poder montarlo aislado en las pruebas de navegador.
 export function ModalImpresion({ pedido, productos, personalizados = [], filamentos, insumos = [], onClose, onDone }) {
@@ -713,101 +748,24 @@ export function ModalImpresion({ pedido, productos, personalizados = [], filamen
     () => opcionesFaltantes(pedido, productos, personalizados),
     [pedido, productos, personalizados]);
   const [desperdicios, setDesperdicios] = useState({});
-  // De qué rollo se descuenta cada línea, cuando hay más de un owner con el
-  // mismo material+color: clave de la línea del plan → id del filamento.
-  const [elegido, setElegido] = useState({});
-  // Con qué material se imprimió, cuando la receta acepta varios:
-  // clave de la línea del plan → material.
-  const [materialElegido, setMaterialElegido] = useState({});
   const [guardando, setGuardando] = useState(false);
   const [errorStock, setErrorStock] = useState("");   // faltante detectado por la transacción
 
-  // ── Material usado ────────────────────────────────────────────────────
-  // TODOS los materiales de la línea, con si alcanzan para esta impresión. Los
-  // que no llegan se listan igual, deshabilitados y con el motivo: saber que
-  // falta PETG Verde es justamente lo que hay que ver para reponerlo.
-  const materialesPosibles = useMemo(() => {
-    const mapa = {};
-    for (const l of plan) {
-      if (l.sinVariante) continue;
-      if (materialesDe(l).length <= 1) continue;   // sin alternativas no hay nada que elegir
-      mapa[l.clave] = estadoDeMateriales(l, filamentos, desperdicios);
-    }
-    return mapa;
-  }, [plan, filamentos, desperdicios]);
+  // Toda la resolución de material y owner sale del hook, el mismo que usa el
+  // paso de tomar el pedido. Acá se evalúa contra el stock FÍSICO, no el neto
+  // de reservas: se está imprimiendo, y restar la reserva de este mismo pedido
+  // sería contarla dos veces. Y arranca precargado con lo que se eligió al
+  // tomarlo, así no hay que volver a elegir.
+  const {
+    planResuelto, piezasDeMaterial, totalPorLinea,
+    materialesPosibles, queAlcanzan, candidatos, asignaciones,
+    faltaElegir, sinOwnerConStock, sinMaterialConStock,
+    setElegido, setMaterialElegido,
+  } = usarOrigen({ plan, filamentos, desperdicios, inicial: pedido?.origen });
 
-  /** Los que se pueden elegir de verdad. */
-  const queAlcanzan = (clave) =>
-    (materialesPosibles[clave] || []).filter(m => m.alcanza).map(m => m.material);
-
-  // El material efectivo de cada línea. Lo elegido a mano manda mientras siga
-  // alcanzando; si dejó de alcanzar (subió el desperdicio, se gastó el rollo)
-  // se cae al primero que sí, y si no queda ninguno al primero de la receta,
-  // que es el que después va a reportar cuánto le falta.
-  const planResuelto = useMemo(() => {
-    const eleccion = {};
-    for (const l of plan) {
-      if (!materialesPosibles[l.clave]) continue;
-      const alcanzan = queAlcanzan(l.clave);
-      const aMano = materialElegido[l.clave];
-      eleccion[l.clave] = alcanzan.includes(aMano) ? aMano : alcanzan[0];
-    }
-    return resolverMateriales(plan, eleccion);
-  }, [plan, materialesPosibles, materialElegido]);
-
-  // Líneas con alternativas donde NINGUNA alcanza: bloquean igual que la falta
-  // de owner, y el detalle de cuánto falta sale de la validación de abajo.
-  const sinMaterialConStock = planResuelto.filter(
-    l => materialesPosibles[l.clave] && queAlcanzan(l.clave).length === 0);
-
-  // Las dos listas del modal, agrupadas por pieza: una receta de dos
-  // materiales es UN bloque con dos filas, no dos bloques.
-  const piezasDeMaterial = useMemo(() => agruparPorPieza(planResuelto), [planResuelto]);
+  // Los insumos no pasan por el hook: no tienen ni material alternativo ni
+  // owner, se descuentan del catálogo y listo.
   const piezasDeInsumo = useMemo(() => agruparPorPieza(planInsumos), [planInsumos]);
-
-  const totalPorLinea = (l) => l.cantidadConsumida + (Number(desperdicios[l.clave]) || 0);
-
-  // Todos los owners del sistema, evaluados contra lo que pide CADA línea:
-  // los que tienen ese material+color y les alcanza quedan seleccionables, el
-  // resto se lista deshabilitado con el motivo. Depende del desperdicio, así
-  // que se recalcula con cada tecla.
-  const candidatos = useMemo(() => {
-    const mapa = {};
-    for (const l of planResuelto) {
-      if (l.sinVariante) continue;
-      mapa[l.clave] = opcionesDeDescuento(
-        filamentos, l.material, l.color,
-        l.cantidadConsumida + (Number(desperdicios[l.clave]) || 0));
-    }
-    return mapa;
-  }, [planResuelto, filamentos, desperdicios]);
-
-  // De qué rollo sale cada línea.
-  //
-  // Lo elegido a mano manda SIEMPRE, incluso si dejó de alcanzar al subir el
-  // desperdicio: ahí el bloqueo de falta de stock dice exactamente cuánto le
-  // falta a ese owner, que es más útil que deseleccionarlo en silencio.
-  // Sin elección: con un solo owner posible se pre-selecciona, con varios se
-  // pregunta, y con ninguno la línea queda bloqueada por falta de stock.
-  const asignaciones = useMemo(() => {
-    const mapa = {};
-    for (const l of planResuelto) {
-      const opciones = candidatos[l.clave] || [];
-      if (opciones.length === 0) continue;   // ni un rollo: "no está cargado"
-      const elegida = opciones.find(o => o.id === elegido[l.clave] && o.tiene);
-      const posibles = opciones.filter(o => o.alcanza);
-      if (elegida) mapa[l.clave] = { id: elegida.id, owner: elegida.owner };
-      else if (posibles.length === 1) mapa[l.clave] = { id: posibles[0].id, owner: posibles[0].owner };
-      else if (posibles.length === 0) mapa[l.clave] = { pendiente: true, sinStock: true };
-      else mapa[l.clave] = { pendiente: true };
-    }
-    return mapa;
-  }, [planResuelto, candidatos, elegido]);
-
-  // Lo que el owner elegido efectivamente cubre está en la asignación; estas
-  // dos listas son los bloqueos previos a eso.
-  const faltaElegir = planResuelto.filter(l => asignaciones[l.clave]?.pendiente && !asignaciones[l.clave].sinStock);
-  const sinOwnerConStock = planResuelto.filter(l => asignaciones[l.clave]?.sinStock);
 
   // Validación en vivo, con la MISMA lógica que corre dentro de la transacción:
   // se recalcula con cada cambio de desperdicio o de owner.

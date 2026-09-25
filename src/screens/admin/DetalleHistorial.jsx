@@ -51,10 +51,13 @@ const cardStyle = {
  * @param {string} unidad          "g" | "u."
  * @param {boolean} alerta         si está por debajo del umbral de restock
  * @param {boolean} conDesperdicio si los gastos tienen cantidadDesperdiciada
+ * @param {Array|null} reservas    filas de reservasDeFilamento(). Null en los
+ *   insumos, que no tienen esta vista: entonces no se muestra ni la sección
+ *   "Reservado" ni el segundo indicador.
  */
 export function DetalleHistorial({
   coleccion, item, tipoId = null, titulo, subtitulo, cantidad, unidad,
-  alerta, conDesperdicio = false, onBack, onChanged, setMsg,
+  alerta, conDesperdicio = false, reservas = null, onBack, onChanged, setMsg,
 }) {
   const [gastos, setGastos] = useState([]);
   const [restocks, setRestocks] = useState([]);
@@ -101,6 +104,21 @@ export function DetalleHistorial({
     ? "1.6fr 90px 90px 90px 1fr"
     : "1.8fr 100px 100px 1fr";
 
+  // Lo comprometido por pedidos que todavía no se imprimieron. No salió del
+  // rollo —el stock físico sigue entero— pero ya tiene dueño, así que no se
+  // puede volver a prometer.
+  const filasReservadas = reservas || [];
+  const totalReservado = filasReservadas.reduce(
+    (s, r) => s + (Number(r.cantidadConsumida) || 0), 0);
+  // Puede dar negativo y se muestra así: si hay 500 g y 600 comprometidos,
+  // −100 es el dato que hay que ver para reasignar un pedido o reponer.
+  // Recortarlo en 0 escondería exactamente el problema que este número existe
+  // para mostrar.
+  const disponibleNuevos = (Number(cantidad) || 0) - totalReservado;
+  const sobreReservado = disponibleNuevos < 0;
+
+  const COL_RESERVAS = "1.6fr 100px 100px 1fr";
+
   return (
     <>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
@@ -122,6 +140,29 @@ export function DetalleHistorial({
             {Number(cantidad || 0).toLocaleString("es-AR")} {unidad}
           </div>
         </div>
+        {/* El segundo número, y deliberadamente distinto del primero: "En
+            stock" es lo que hay en la bobina y "Disponible" lo que todavía se
+            puede prometer. Mostrar uno solo obligaba a elegir entre mentirle
+            al depósito o al que toma pedidos. Va en punteado para que no se
+            lea como una segunda medición de lo mismo. */}
+        {reservas && (
+          <div style={{
+            padding: "16px 22px", background: "var(--bg-alt)",
+            borderLeft: `3px dashed ${sobreReservado ? "#c64138" : "var(--muted)"}`,
+          }}>
+            <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 1.5, color: "var(--muted)", marginBottom: 6 }}>
+              Disponible para nuevos pedidos
+            </div>
+            <div style={{ fontSize: 28, color: sobreReservado ? "#c64138" : "var(--text)" }}>
+              {disponibleNuevos.toLocaleString("es-AR")} {unidad}
+            </div>
+            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
+              {totalReservado > 0
+                ? `${totalReservado.toLocaleString("es-AR")} ${unidad} reservadas por pedidos pendientes`
+                : "Sin reservas pendientes"}
+            </div>
+          </div>
+        )}
         {alerta && <RestockBadge/>}
         <div style={{ flex: 1 }}/>
         <TKButton onClick={() => setShowRestock(v => !v)} icon={<Icon.plus size={14}/>}>Registrar restock</TKButton>
@@ -236,6 +277,52 @@ export function DetalleHistorial({
               <div style={{ padding: 24, color: "var(--muted)", fontSize: 13 }}>Sin restocks registrados.</div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* Reservado. Va aparte de Gastos a propósito: un gasto ya ocurrió y
+          salió del rollo; una reserva todavía no. Sin columna de desperdicio,
+          porque el desperdicio se mide recién al imprimir. */}
+      {reservas && (
+        <div style={{ marginTop: 32 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: "var(--muted)", marginBottom: 4 }}>
+            Reservado
+          </div>
+          <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 12 }}>
+            Pedidos tomados y todavía no impresos · {totalReservado.toLocaleString("es-AR")} {unidad} comprometidas.
+            No se descontaron del stock; se descuentan al marcar el pedido como impreso.
+          </div>
+          <div style={{
+            display: "grid", gridTemplateColumns: COL_RESERVAS,
+            gap: 10, padding: "10px 12px", background: "var(--bg-alt)",
+            fontSize: 10, textTransform: "uppercase", letterSpacing: 1.2,
+            color: "var(--muted)", fontWeight: 700,
+          }}>
+            <div>Producto</div><div>Consumido</div><div>Orden</div><div>Fecha</div>
+          </div>
+          {filasReservadas.map(r => (
+            <div key={r.clave} style={{
+              display: "grid", gridTemplateColumns: COL_RESERVAS,
+              gap: 10, padding: "12px", borderBottom: "1px solid var(--line)", fontSize: 12,
+            }}>
+              <div>
+                <span style={{ fontWeight: 600 }}>{r.productoNombre}</span>
+                {(r.varianteNombre || r.opcionesTexto) && (
+                  <span style={{ color: "var(--muted)" }}>
+                    {" · "}{[r.varianteNombre, r.opcionesTexto].filter(Boolean).join(" · ")}
+                  </span>
+                )}
+              </div>
+              <div>{r.cantidadConsumida} {unidad}</div>
+              <div><TKPill variant="outline">{r.numeroOrden}</TKPill></div>
+              <div style={{ color: "var(--muted)" }}>{fmtFecha(r.createdAt)}</div>
+            </div>
+          ))}
+          {filasReservadas.length === 0 && (
+            <div style={{ padding: 24, color: "var(--muted)", fontSize: 13 }}>
+              Sin reservas: ningún pedido pendiente usa este rollo.
+            </div>
+          )}
         </div>
       )}
     </>

@@ -11,6 +11,7 @@ import {
 import { SelectorConAgregar } from '../../components/SelectorConAgregar.jsx';
 import { cargarOcultas, ocultarOpcion, filtrarVisibles } from '../../lib/opcionesOcultas.js';
 import { DetalleHistorial, RestockBadge, fmtFecha } from './DetalleHistorial.jsx';
+import { reservasDeFilamento } from '../../lib/reservas.js';
 
 // Se reexportan para no romper a quien ya los importaba desde acá.
 export { RestockBadge, fmtFecha };
@@ -31,7 +32,9 @@ const cardStyle = {
 };
 
 // ─── Tab Inventario ──────────────────────────────────────────────────
-export function InventarioTab({ filamentos, onChanged, setMsg }) {
+export function InventarioTab({
+  filamentos, pedidos = [], productos = [], personalizados = [], onChanged, setMsg,
+}) {
   const [seleccionado, setSeleccionado] = useState(null); // _id del filamento abierto
   const [showForm, setShowForm] = useState(false);
   const [editando, setEditando] = useState(null);
@@ -131,6 +134,7 @@ export function InventarioTab({ filamentos, onChanged, setMsg }) {
         unidad="g"
         alerta={necesitaRestock(abierto)}
         conDesperdicio
+        reservas={reservasDeFilamento(abierto._id, pedidos, productos, personalizados)}
         onBack={() => setSeleccionado(null)}
         onChanged={onChanged}
         setMsg={setMsg}
