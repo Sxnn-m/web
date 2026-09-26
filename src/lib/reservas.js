@@ -16,6 +16,8 @@
 
 import { planDeConsumo, planDeInsumos } from './inventario.js';
 import { tiposDe, claveTipo } from './tiposInsumo.js';
+import { filamentosDeVariantes } from './variantes.js';
+import { claveFilamento } from './disponibilidad.js';
 
 /** ¿Este pedido todavía tiene su filamento comprometido? */
 export const estaPendiente = (pedido) =>
@@ -173,6 +175,45 @@ export function reservasDeFilamento(filamentoId, pedidos = [], productos = [], p
   return filas.sort((a, b) => (b.numeroOrden || 0) - (a.numeroOrden || 0));
 }
 
-/** Qué productos toca un pedido: para recalcular solo esos, no el catálogo entero. */
+/** Los productos que el pedido nombra en sus líneas. */
 export const productosDePedido = (pedido) =>
   [...new Set((pedido?.items || []).map(i => i.productoId).filter(Boolean))];
+
+/**
+ * Qué productos hay que recalcular cuando este pedido aparece o desaparece.
+ *
+ * NO alcanza con los del propio pedido. Reservar 560 g del PLA Marrón de
+ * Maidi le cambia la disponibilidad a CUALQUIER producto que se imprima en
+ * ese rollo, aunque no tenga nada que ver con este pedido: era el agujero de
+ * recalcular solo `productosDePedido`.
+ *
+ * El criterio es material+color y no el documento puntual porque así se
+ * evalúa la disponibilidad: cada owner por separado, y basta con que alguno
+ * cumpla. Si baja el de Maidi, un producto que solo cumplía por Maidi cambia.
+ *
+ * Se incluyen los del pedido como piso, aunque su receta no toque ninguno de
+ * esos rollos: nunca recalcula menos que antes.
+ */
+export function productosAfectados(pedido, productos = [], filamentos = []) {
+  const claves = new Set();
+  for (const o of Object.values(pedido?.origen || {})) {
+    for (const parte of partesDeOrigen(o, 0)) {
+      const f = filamentos.find(x => x._id === parte.filamentoId);
+      if (f) claves.add(claveFilamento(f.material, f.color));
+    }
+  }
+
+  const ids = new Set(productosDePedido(pedido));
+  if (claves.size > 0) {
+    for (const p of productos) {
+      if (!p?._id || ids.has(p._id)) continue;
+      // Todos los materiales que la receta acepta, no solo el que hoy se usa:
+      // si la línea se puede imprimir en PLA o PETG Marrón, que baje
+      // cualquiera de los dos le cambia la respuesta.
+      const usa = filamentosDeVariantes(p.receta || [], p.variantes || [])
+        .some(f => claves.has(claveFilamento(f.material, f.color)));
+      if (usa) ids.add(p._id);
+    }
+  }
+  return [...ids];
+}

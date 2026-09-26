@@ -19,7 +19,6 @@ import { ListaDesplegable } from '../../components/ListaDesplegable.jsx';
 import { usarOrigen } from '../../components/usarOrigen.js';
 import { ModalOrigenPedido } from './ModalOrigen.jsx';
 import { LineasDeMaterial, EncabezadoPieza } from '../../components/LineasDeMaterial.jsx';
-import { productosDePedido } from '../../lib/reservas.js';
 
 const actionBtn = {
   background: "none", border: "1px solid var(--line)", padding: "5px 6px",
@@ -364,10 +363,9 @@ export function PedidosTab({ pedidos, productos, personalizados = [], filamentos
       setEligiendoOrigen(null);
       resetForm();
       await onPedidosChange();
-      // Lo reservado cambió, así que la disponibilidad pública de estos
-      // productos ya no es la que está publicada. Solo los de este pedido:
-      // el resto del catálogo no se enteró de nada.
-      await onReservasChange?.(productosDePedido({ items }));
+      // Lo reservado cambió: quién se entera lo decide AdminScreen, que es
+      // el que sabe qué productos comparten estos rollos.
+      await onReservasChange?.({ items, origen });
     } catch (err) { setMsg("Error: " + err.message); }
     setGuardando(false);
   };
@@ -395,9 +393,9 @@ export function PedidosTab({ pedidos, productos, personalizados = [], filamentos
       await eliminarPedido(pedido._id);
       setMsg("✓ Pedido eliminado.");
       await onPedidosChange();
-      // Un pedido pendiente que desaparece libera lo que tenía reservado: sus
-      // productos vuelven a tener disponibilidad y hay que republicarla.
-      await onReservasChange?.(productosDePedido(pedido));
+      // Un pedido pendiente que desaparece libera lo que tenía reservado:
+      // vuelve a haber disponibilidad y hay que republicarla.
+      await onReservasChange?.(pedido);
     } catch (err) { setMsg("Error: " + err.message); }
   };
 

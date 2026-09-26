@@ -220,13 +220,18 @@ export function LineasDeMaterial({ o, modo, desperdicios = {}, setDesperdicios }
                   {!dividida ? (
                     <>
                       {selectorMaterial(entera)}
+                      {/* Owner antes que desperdicio: primero se dice de
+                          dónde sale y recién después cuánto se perdió. El
+                          orden inverso pedía un número sobre una impresión que
+                          todavía no tenía dueño, y no coincidía con el de las
+                          reparticiones. */}
                       <div style={{
                         display: "grid",
-                        gridTemplateColumns: t.conDesperdicio ? "150px 250px 1fr" : "250px 1fr",
+                        gridTemplateColumns: t.conDesperdicio ? "250px 150px 1fr" : "250px 1fr",
                         gap: 14, alignItems: "start",
                       }}>
-                        {t.conDesperdicio && campoDesperdicio(entera)}
                         {selectorOwner(entera)}
+                        {t.conDesperdicio && campoDesperdicio(entera)}
                         {/* La cantidad va SIEMPRE en su propia línea, no
                             cuando no entra: con el ancho justo el número caía
                             solo a veces y el corte quedaba distinto. */}
