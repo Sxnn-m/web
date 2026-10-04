@@ -32,6 +32,7 @@ import {
 } from '../lib/personalizados.js';
 import { InsumosTab } from './admin/InsumosTab.jsx';
 import { EstadisticasTab } from './admin/EstadisticasTab.jsx';
+import { FinanzasTab } from './admin/FinanzasTab.jsx';
 import { MensajeriaTab } from './admin/MensajeriaTab.jsx';
 import { cargarMensajes, asignarNumerosFaltantes } from '../lib/mensajes.js';
 import { contarNoLeidos } from '../lib/consultas.js';
@@ -68,7 +69,7 @@ import { aplicarRenumeracionIds } from '../lib/migracionIds.js';
 // implementación para la tabla de Rentabilidad y para la columna "Costo fab.".
 
 // ─── Admin Screen ───────────────────────────────────────────────
-export function AdminScreen({ go, tab = "dashboard", onTab, onProductsChange, onCategoriesChange, categories: propCategories = [], products: propProductsAll = [] }) {
+export function AdminScreen({ go, tab = "dashboard", onTab, gastoId = null, onGasto, onProductsChange, onCategoriesChange, categories: propCategories = [], products: propProductsAll = [] }) {
   // El tab dejó de ser estado propio: ahora sale de la URL (/admin/pedidos) y
   // el que manda es App.jsx, así que cada tab tiene su link y entra en el
   // historial. onTab es opcional para poder montar la pantalla aislada en una
@@ -621,6 +622,7 @@ export function AdminScreen({ go, tab = "dashboard", onTab, onProductsChange, on
     { id: "inventario", label: "Inventario", icon: <Icon.layers size={16}/> },
     { id: "insumos", label: "Insumos", icon: <Icon.grid size={16}/> },
     { id: "pedidos", label: "Pedidos", icon: <Icon.truck size={16}/> },
+    { id: "finanzas", label: "Finanzas", icon: <Icon.spark size={16}/> },
     { id: "estadisticas", label: "Estadísticas", icon: <Icon.list size={16}/> },
     { id: "mensajeria", label: "Mensajería", icon: <Icon.mail size={16}/>, badge: contarNoLeidos(mensajes) },
     { id: "usuarios", label: "Usuarios", icon: <Icon.user size={16}/> },
@@ -776,6 +778,15 @@ export function AdminScreen({ go, tab = "dashboard", onTab, onProductsChange, on
               onPedidosChange={loadPedidos}
               onInventarioChange={handleInventarioChange}
               onReservasChange={handleReservasChange}
+              setMsg={setMsg}
+            />
+          )}
+          {tabActivo === "finanzas" && (
+            <FinanzasTab
+              pedidos={pedidos}
+              gastoId={gastoId}
+              onAbrirGasto={(id) => onGasto?.(id)}
+              onVolver={() => onGasto?.(null)}
               setMsg={setMsg}
             />
           )}

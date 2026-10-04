@@ -170,6 +170,28 @@ service cloud.firestore {
       allow read, write: if esAdmin();
     }
 
+    // ── Finanzas ───────────────────────────────────────────────────────
+    // Ganancias, gastos y el saldo del emprendimiento: montos, fechas y el
+    // detalle de cada compra. Nada de esto sale del backoffice, ni siquiera
+    // de solo lectura: el público no tiene por qué saber cuánto se factura.
+    //
+    // Las ganancias de un pedido se guardan con el ID del pedido como ID del
+    // documento. Eso evita duplicados por construcción, pero no cambia nada
+    // de la seguridad: la colección entera es admin.
+    //
+    // El contador de los gastos (GAS-0001, GAS-0002…) vive en
+    // settings/contadores y YA está cubierto por el match de settings de más
+    // arriba, que es admin para todo lo que no sea 'general'. No lleva match
+    // propio a propósito: uno nuevo se combinaría con OR con aquel y dejaría
+    // sin efecto el hasOnly que protege al único documento público.
+    match /ganancias/{gananciaId} {
+      allow read, write: if esAdmin();
+    }
+
+    match /gastos/{gastoId} {
+      allow read, write: if esAdmin();
+    }
+
     // ── Mensajes del formulario de contacto ────────────────────────────
     // ÚNICA colección con escritura pública del proyecto. Merece leerse con
     // atención, porque una regla de create abierta sin validar deja que

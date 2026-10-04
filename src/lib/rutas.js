@@ -14,7 +14,8 @@
 /** Los tabs del backoffice, en el orden del menú lateral. */
 export const TABS_ADMIN = [
   "dashboard", "productos", "personalizados", "categorias", "inventario",
-  "insumos", "pedidos", "estadisticas", "mensajeria", "usuarios", "costos",
+  "insumos", "pedidos", "finanzas", "estadisticas", "mensajeria", "usuarios",
+  "costos",
 ];
 
 /**
@@ -50,6 +51,12 @@ export function rutaDe(route, data = {}) {
     case "detalle": return data.id ? `/producto/${encodeURIComponent(data.id)}` : "/catalogo";
     case "admin": {
       const tab = data.tab && TABS_ADMIN.includes(data.tab) ? data.tab : "dashboard";
+      // El detalle de un gasto es la única pantalla del backoffice con su
+      // propia URL dentro de un tab: se entra desde la lista, pero el link
+      // tiene que poder guardarse y compartirse como cualquier otro.
+      if (tab === "finanzas" && data.gastoId) {
+        return `/admin/finanzas/gastos/${encodeURIComponent(data.gastoId)}`;
+      }
       return tab === "dashboard" ? "/admin" : `/admin/${tab}`;
     }
     // "buscador" existe en el switch de pantallas pero ya nadie lo llama en el
@@ -87,6 +94,9 @@ export function estadoDe(pathname, categories = []) {
         : { route: "catalogo", routeData: {} };
     case "admin": {
       const tab = partes[1] && TABS_ADMIN.includes(partes[1]) ? partes[1] : "dashboard";
+      if (tab === "finanzas" && partes[2] === "gastos" && partes[3]) {
+        return { route: "admin", routeData: { tab, gastoId: partes[3] } };
+      }
       return { route: "admin", routeData: { tab } };
     }
     case "catalogo": {

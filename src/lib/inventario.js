@@ -3,9 +3,10 @@
 // importa este módulo: lee el booleano "disponible" del propio producto.
 
 import { db } from '../firebase.js';
+import { refGananciaDePedido, datosGananciaDePedido } from './finanzas.js';
 import {
   collection, getDocs, addDoc, updateDoc, deleteDoc, doc,
-  runTransaction, serverTimestamp, deleteField,
+  runTransaction, writeBatch, serverTimestamp, deleteField,
 } from 'firebase/firestore';
 import {
   buscarFilamento, specsDesdeReceta, lineasDeInsumo, claveFilamento,
@@ -457,7 +458,14 @@ export async function crearPedido({ numeroOrden, clienteNombre, items, origen = 
 }
 
 export async function eliminarPedido(id) {
-  await deleteDoc(doc(db, COL_PEDIDOS, id));
+  // En lote con su ganancia automática: si el pedido desaparece pero la
+  // ganancia queda, el saldo cuenta plata de una venta que ya no existe y no
+  // hay forma de borrarla desde Finanzas, porque las automáticas no se tocan
+  // a mano. El delete de una ganancia que no existe es un no-op.
+  const batch = writeBatch(db);
+  batch.delete(doc(db, COL_PEDIDOS, id));
+  batch.delete(refGananciaDePedido(id));
+  await batch.commit();
 }
 
 /** Toggle simple de entrega, independiente del estado de impresión. */
@@ -469,14 +477,35 @@ export async function marcarEntregado(pedido, entregado) {
 }
 
 /**
- * Toggle simple de pago. Sin validación ni efectos: no toca inventario ni
- * depende de impresión ni de entrega. Se puede cobrar una seña antes de
- * imprimir, o entregar sin haber cobrado.
+ * Toggle de pago. No toca inventario ni depende de impresión ni de entrega: se
+ * puede cobrar una seña antes de imprimir, o entregar sin haber cobrado.
+ *
+ * Lo que sí hace es mover la ganancia de Finanzas, y en la MISMA transacción:
+ * un pedido pagado sin su ganancia, o una ganancia de un pedido que volvió a
+ * pendiente, son estados que después hay que descubrir y arreglar a mano.
+ *
+ * El documento de la ganancia se guarda con el ID DEL PEDIDO, así que marcar
+ * pagado dos veces —o recargar en el medio— reescribe el mismo documento. El
+ * duplicado no se evita con un chequeo: no se puede dar.
+ *
+ * La fecha de la ganancia y el pagadoAt salen del mismo serverTimestamp(), o
+ * sea del instante del commit, y no de dos lecturas distintas del reloj.
  */
 export async function marcarPagado(pedido, pagado) {
-  await updateDoc(doc(db, COL_PEDIDOS, pedido._id), {
-    estadoPago: pagado ? "pagado" : "pendiente",
-    pagadoAt: pagado ? serverTimestamp() : null,
+  await runTransaction(db, async (tx) => {
+    const refPedido = doc(db, COL_PEDIDOS, pedido._id);
+    const refGanancia = refGananciaDePedido(pedido._id);
+    // Todas las lecturas antes de cualquier escritura, aunque esta no se use
+    // para decidir: Firestore rechaza la transacción si se invierte el orden.
+    await tx.get(refPedido);
+
+    const cuando = serverTimestamp();
+    tx.update(refPedido, {
+      estadoPago: pagado ? "pagado" : "pendiente",
+      pagadoAt: pagado ? cuando : null,
+    });
+    if (pagado) tx.set(refGanancia, datosGananciaDePedido(pedido, cuando));
+    else tx.delete(refGanancia);
   });
 }
 
