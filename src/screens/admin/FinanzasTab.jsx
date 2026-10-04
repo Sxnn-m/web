@@ -364,19 +364,19 @@ export function FinanzasTab({ pedidos = [], gastoId = null, onAbrirGasto, onVolv
       )}
 
       <div style={{ ...cabecera, display: "grid", gridTemplateColumns: COL_GAS, gap: 10, padding: "10px 12px", background: "var(--bg-alt)" }}>
-        <div>N°</div><div>Fecha</div><div>Descripción</div><div>Monto</div><div/>
+        <div>Fecha</div><div>Gasto</div><div>Descripción</div><div>Monto</div><div/>
       </div>
+      {/* Al detalle se entra SOLO por su botón. Con la fila entera clickeable,
+          apuntar al tacho y errarle por un píxel navegaba a otra pantalla en
+          vez de borrar, y no había forma de seleccionar el texto de una celda. */}
       {gastos.map(g => (
         <div key={g._id} style={{
           display: "grid", gridTemplateColumns: COL_GAS, gap: 10,
           padding: "12px", borderBottom: "1px solid var(--line)", fontSize: 12.5,
-          alignItems: "center", cursor: "pointer",
-        }}
-          onClick={() => onAbrirGasto(g._id)}
-          title="Ver el detalle de la compra"
-        >
-          <div><TKPill variant="outline">{g.numeroGasto || "—"}</TKPill></div>
+          alignItems: "center",
+        }}>
           <div style={{ color: "var(--muted)" }}>{fmtDia(g.fecha)}</div>
+          <div><TKPill variant="outline">{g.numeroGasto || "—"}</TKPill></div>
           <div style={{ fontWeight: 600 }}>
             {g.descripcion || "—"}
             {g.detalle ? (
@@ -384,11 +384,11 @@ export function FinanzasTab({ pedidos = [], gastoId = null, onAbrirGasto, onVolv
             ) : null}
           </div>
           <div style={{ fontWeight: 700, color: "#B56B3E" }}>{fmtARS(g.monto || 0)}</div>
-          {/* stopPropagation: la fila entera abre el detalle, y sin esto
-              borrar también navegaría a un gasto que ya no existe. */}
-          <div style={{ display: "flex", gap: 4 }} onClick={e => e.stopPropagation()}>
+          <div style={{ display: "flex", gap: 4 }}>
+            {/* El mismo Icon.list que abre el detalle de un filamento en
+                Inventario: dos tablas que hacen lo mismo con el mismo ícono. */}
             <button style={actionBtn} title="Ver detalle" onClick={() => onAbrirGasto(g._id)}>
-              <Icon.chevron size={13}/>
+              <Icon.list size={13}/>
             </button>
             <button style={{ ...actionBtn, color: "#c64138" }} title="Eliminar"
               onClick={() => borrarGasto(g)}>

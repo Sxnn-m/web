@@ -19,6 +19,21 @@ const cardStyle = {
   marginBottom: 20,
 };
 
+// El mismo azul que las tarjetas de resumen del tab, y el mismo tamaño en los
+// dos: así se leen como un par y no como dos cosas de distinto peso.
+const AZUL = "#345C83";
+
+function Indicador({ label, valor }) {
+  return (
+    <div style={{ padding: "16px 22px", background: "var(--bg-alt)", borderLeft: `3px solid ${AZUL}` }}>
+      <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 1.5, color: "var(--muted)", marginBottom: 6 }}>
+        {label}
+      </div>
+      <div style={{ fontSize: 28, color: AZUL }}>{valor}</div>
+    </div>
+  );
+}
+
 export function DetalleGasto({ gastoId, onVolver, onCambios, setMsg }) {
   const [gasto, setGasto] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -126,19 +141,12 @@ export function DetalleGasto({ gastoId, onVolver, onCambios, setMsg }) {
         <TKButton variant="ghost" onClick={onVolver} icon={<Icon.back size={14}/>}>Volver</TKButton>
       </div>
 
+      {/* Los dos indicadores van iguales y del mismo azul que las tarjetas de
+          Finanzas: son dos datos del mismo gasto, no dos estados distintos, y
+          un acento por tarjeta solo sugería una jerarquía que no existe. */}
       <div style={{ display: "flex", gap: 16, alignItems: "stretch", flexWrap: "wrap", margin: "20px 0 24px" }}>
-        <div style={{ padding: "16px 22px", background: "var(--bg-alt)", borderLeft: "3px solid #B56B3E" }}>
-          <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 1.5, color: "var(--muted)", marginBottom: 6 }}>
-            Monto
-          </div>
-          <div style={{ fontSize: 28 }}>{fmtARS(gasto.monto || 0)}</div>
-        </div>
-        <div style={{ padding: "16px 22px", background: "var(--bg-alt)", borderLeft: "3px solid var(--line)" }}>
-          <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 1.5, color: "var(--muted)", marginBottom: 6 }}>
-            Fecha
-          </div>
-          <div style={{ fontSize: 28 }}>{fechaTexto}</div>
-        </div>
+        <Indicador label="Fecha" valor={fechaTexto}/>
+        <Indicador label="Monto" valor={fmtARS(gasto.monto || 0)}/>
         <div style={{ flex: 1 }}/>
         <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
           <TKButton variant="outline" onClick={() => setEditando(v => !v)} icon={<Icon.spark size={14}/>}>
