@@ -21,6 +21,21 @@ const ANCHO_CANT = 140;
 
 const celdaTenue = { color: "var(--muted)" };
 
+/** El título y la bajada de una sección. Los tres los escribían igual. */
+function Seccion({ titulo, children, bajada }) {
+  return (
+    <div>
+      <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: "var(--muted)", marginBottom: 4 }}>
+        {titulo}
+      </div>
+      <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 12 }}>
+        {bajada}
+      </div>
+      {children}
+    </div>
+  );
+}
+
 /** Firestore Timestamp | Date | null → "12/03/2026 14:05" */
 export function fmtFecha(valor) {
   if (!valor) return "—";
@@ -228,19 +243,21 @@ export function DetalleHistorial({
         </div>
       )}
 
+      {/* Las tres apiladas a ancho completo, no dos columnas. Con Gastos metido
+          en 1.4fr, su columna de producto quedaba en ~170 px y "Lampara
+          Ondulada" se leía "La…". El orden sigue al tiempo: lo que ya salió
+          del rollo, lo que está comprometido, y lo que entró. */}
       {loading ? (
         <div style={{ padding: 40, color: "var(--muted)" }}>Cargando historiales...</div>
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 32, alignItems: "start" }} className="form-layout">
-          {/* Gastos */}
-          <div>
-            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: "var(--muted)", marginBottom: 4 }}>
-              Gastos
-            </div>
-            <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 12 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 32 }}>
+          <Seccion
+            titulo="Gastos"
+            bajada={<>
               Se generan solos al marcar un pedido como impreso · {totalConsumido} {unidad} consumidas
               {conDesperdicio && ` + ${totalDesperdiciado} ${unidad} desperdiciadas`}
-            </div>
+            </>}
+          >
             <TablaConTope
               filas={FILAS_VISIBLES}
               vacio="Sin gastos registrados."
@@ -268,74 +285,68 @@ export function DetalleHistorial({
                 </tr>
               ))}
             </TablaConTope>
+          </Seccion>
 
-            {/* Reservado va debajo de Gastos y en su misma columna: los dos
-                hablan de lo mismo —qué se llevó este rollo— y con anchos
-                distintos parecían tablas de dos cosas sin relación. Sigue
-                siendo una tabla aparte, porque un gasto ya salió del rollo y
-                una reserva todavía no. Sin columna de desperdicio: eso se
-                mide recién al imprimir. */}
-            {reservas && (
-              <div style={{ marginTop: 32 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: "var(--muted)", marginBottom: 4 }}>
-                  Reservado
-                </div>
-                <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 12 }}>
-                  Pedidos tomados y todavía no impresos · {totalReservado.toLocaleString("es-AR")} {unidad} comprometidas.
-                  No se descontaron del stock; se descuentan al marcar el pedido como impreso.
-                </div>
-                <TablaConTope
-                  filas={FILAS_VISIBLES}
-                  vacio="Sin reservas: ningún pedido pendiente usa este rollo."
-                  columnas={[
-                    { titulo: "Fecha", ancho: ANCHO_FECHA },
-                    { titulo: "Orden", ancho: ANCHO_ORDEN },
-                    { titulo: "Producto" },
-                    { titulo: "Consumido", ancho: ANCHO_CANT, num: true },
-                  ]}
-                >
-                  {filasReservadas.map(r => (
-                    <tr key={r.clave}>
-                      <td style={celdaTenue}>{fmtDia(r.createdAt)}</td>
-                      <td><TKPill variant="outline">{r.numeroOrden}</TKPill></td>
-                      <td title={[r.productoNombre, r.varianteNombre, r.opcionesTexto, r.reparticion && `Repartición ${r.reparticion}`].filter(Boolean).join(" · ")}>
-                        <span style={{ fontWeight: 600 }}>{r.productoNombre}</span>
-                        {(r.varianteNombre || r.opcionesTexto) && (
-                          <span style={{ color: "var(--muted)" }}>
-                            {" · "}{[r.varianteNombre, r.opcionesTexto].filter(Boolean).join(" · ")}
-                          </span>
-                        )}
-                        {/* Una línea repartida entre dos rollos deja una fila
-                            en cada historial: sin esto, los gramos de la parte
-                            se leerían como el consumo entero de la pieza. En
-                            la misma línea, para no agrandar la fila. */}
-                        {r.reparticion && (
-                          <span style={{ color: "var(--muted)", fontSize: 11 }}>
-                            {" · "}Repartición {r.reparticion}
-                          </span>
-                        )}
-                      </td>
-                      <td className="num">{r.cantidadConsumida} {unidad}</td>
-                    </tr>
-                  ))}
-                </TablaConTope>
-              </div>
-            )}
-          </div>
+          {/* Tabla aparte de Gastos y no una columna más: un gasto ya salió
+              del rollo y una reserva todavía no. Sin columna de desperdicio,
+              que se mide recién al imprimir. */}
+          {reservas && (
+            <Seccion
+              titulo="Reservado"
+              bajada={<>
+                Pedidos tomados y todavía no impresos · {totalReservado.toLocaleString("es-AR")} {unidad} comprometidas.
+                No se descontaron del stock; se descuentan al marcar el pedido como impreso.
+              </>}
+            >
+            <TablaConTope
+              filas={FILAS_VISIBLES}
+              vacio="Sin reservas: ningún pedido pendiente usa este rollo."
+              columnas={[
+                { titulo: "Fecha", ancho: ANCHO_FECHA },
+                { titulo: "Orden", ancho: ANCHO_ORDEN },
+                { titulo: "Producto" },
+                { titulo: "Consumido", ancho: ANCHO_CANT, num: true },
+              ]}
+            >
+              {filasReservadas.map(r => (
+                <tr key={r.clave}>
+                  <td style={celdaTenue}>{fmtDia(r.createdAt)}</td>
+                  <td><TKPill variant="outline">{r.numeroOrden}</TKPill></td>
+                  <td title={[r.productoNombre, r.varianteNombre, r.opcionesTexto, r.reparticion && `Repartición ${r.reparticion}`].filter(Boolean).join(" · ")}>
+                    <span style={{ fontWeight: 600 }}>{r.productoNombre}</span>
+                    {(r.varianteNombre || r.opcionesTexto) && (
+                      <span style={{ color: "var(--muted)" }}>
+                        {" · "}{[r.varianteNombre, r.opcionesTexto].filter(Boolean).join(" · ")}
+                      </span>
+                    )}
+                    {/* Una línea repartida entre dos rollos deja una fila
+                        en cada historial: sin esto, los gramos de la parte
+                        se leerían como el consumo entero de la pieza. En
+                        la misma línea, para no agrandar la fila. */}
+                    {r.reparticion && (
+                      <span style={{ color: "var(--muted)", fontSize: 11 }}>
+                        {" · "}Repartición {r.reparticion}
+                      </span>
+                    )}
+                  </td>
+                  <td className="num">{r.cantidadConsumida} {unidad}</td>
+                </tr>
+              ))}
+            </TablaConTope>
+            </Seccion>
+          )}
 
-          {/* Restocks */}
-          <div>
-            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: "var(--muted)", marginBottom: 4 }}>
-              Restocks
-            </div>
-            <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 12 }}>
+          <Seccion
+            titulo="Restocks"
+            bajada={<>
               {/* Con alguna salida la suma ya no es "lo repuesto" sino el
                   neto, y decirle repuesto sería contar una transferencia como
                   si hubiera entrado material nuevo. Sin salidas, el texto de
                   siempre. */}
               Carga manual y movimientos · {totalRepuesto} {unidad}{" "}
               {hayMovimientos ? "netas en total" : "repuestas en total"}
-            </div>
+            </>}
+          >
             <TablaConTope
               filas={FILAS_VISIBLES}
               vacio="Sin restocks registrados."
@@ -363,7 +374,7 @@ export function DetalleHistorial({
                 </tr>
               ))}
             </TablaConTope>
-          </div>
+          </Seccion>
         </div>
       )}
 

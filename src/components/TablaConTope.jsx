@@ -70,7 +70,11 @@ export function TablaConTope({ filas = 10, columnas = [], vacio = "", children }
       ref={ref}
       style={{
         maxHeight: tope ?? undefined,
-        overflowY: tope ? "auto" : "visible",
+        // auto en los dos ejes y siempre. En vertical corta en el tope; en
+        // horizontal, cuando las columnas no entran —mobile— el scroll queda
+        // DENTRO de la tabla en vez de hacer que scrollee la página entera,
+        // que es lo que pasaba antes.
+        overflow: "auto",
         // Sin overscroll-behavior a propósito: el default encadena al llegar
         // al final, que es lo que deja seguir scrolleando la página. Poner
         // "contain" —el reflejo habitual— dejaría el dedo atrapado en la lista.

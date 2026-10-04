@@ -191,3 +191,8 @@ input, select, textarea { font-family: inherit; color: var(--text); }
 /* Las numéricas a la derecha, encabezado incluido: así los gramos y los
    montos se comparan por su magnitud sin leerlos. */
 .tabla-tope .num { text-align: right; }
+
+/* A ancho completo la fila es larga y el número queda lejos del nombre: el
+   resaltado al pasar deja seguirla de punta a punta. Solo al pasar y no un
+   rayado fijo, que agregaría ruido a una tabla que ya tiene separadores. */
+.tabla-tope tbody tr:hover td { background: var(--bg-alt); }
