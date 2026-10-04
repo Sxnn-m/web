@@ -16,6 +16,12 @@ import {
   crearGasto, eliminarGasto, esAutomatica, validarMovimiento,
 } from '../../lib/finanzas.js';
 import { DetalleGasto } from './DetalleGasto.jsx';
+import { ListaConTope } from '../../components/ListaConTope.jsx';
+
+// Diez filas por lista antes del scroll interno. Es su propio tope: las listas
+// de Finanzas tienen menos competencia por la pantalla que las tres del
+// detalle de un filamento, que se cortan en ocho.
+const FILAS_VISIBLES = 10;
 
 const AZUL = "#345C83";
 
@@ -33,6 +39,10 @@ const cabecera = {
   fontSize: 10, textTransform: "uppercase", letterSpacing: 1.2,
   color: "var(--muted)", fontWeight: 700,
 };
+
+// Una fecha partida en dos líneas hace que esa fila mida distinto de las
+// demás, y el tope de diez filas deja de ser diez.
+const celdaFecha = { color: "var(--muted)", whiteSpace: "nowrap" };
 
 const actionBtn = {
   background: "none", border: "1px solid var(--line)", padding: "4px 6px",
@@ -286,16 +296,18 @@ export function FinanzasTab({ pedidos = [], gastoId = null, onAbrirGasto, onVolv
         />
       )}
 
-      <div style={{ ...cabecera, display: "grid", gridTemplateColumns: COL_GAN, gap: 10, padding: "10px 12px", background: "var(--bg-alt)" }}>
-        <div>Fecha</div><div>Pedido</div><div>Monto</div><div/>
-      </div>
+      <ListaConTope filas={FILAS_VISIBLES} cabecera={
+        <div style={{ ...cabecera, display: "grid", gridTemplateColumns: COL_GAN, gap: 10, padding: "10px 12px", background: "var(--bg-alt)" }}>
+          <div>Fecha</div><div>Pedido</div><div>Monto</div><div/>
+        </div>
+      }>
       {ganancias.map(g => (
         <div key={g._id} style={{
           display: "grid", gridTemplateColumns: COL_GAN, gap: 10,
           padding: "12px", borderBottom: "1px solid var(--line)", fontSize: 12.5,
           alignItems: "center",
         }}>
-          <div style={{ color: "var(--muted)" }}>{fmtDia(g.fecha)}</div>
+          <div style={celdaFecha}>{fmtDia(g.fecha)}</div>
           <div>
             {esAutomatica(g) ? (
               <span style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -339,6 +351,7 @@ export function FinanzasTab({ pedidos = [], gastoId = null, onAbrirGasto, onVolv
           Todavía no hay ganancias registradas.
         </div>
       )}
+      </ListaConTope>
 
       {/* ── Gastos ── */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "32px 0 12px" }}>
@@ -363,9 +376,11 @@ export function FinanzasTab({ pedidos = [], gastoId = null, onAbrirGasto, onVolv
         />
       )}
 
-      <div style={{ ...cabecera, display: "grid", gridTemplateColumns: COL_GAS, gap: 10, padding: "10px 12px", background: "var(--bg-alt)" }}>
-        <div>Fecha</div><div>Gasto</div><div>Descripción</div><div>Monto</div><div/>
-      </div>
+      <ListaConTope filas={FILAS_VISIBLES} cabecera={
+        <div style={{ ...cabecera, display: "grid", gridTemplateColumns: COL_GAS, gap: 10, padding: "10px 12px", background: "var(--bg-alt)" }}>
+          <div>Fecha</div><div>Gasto</div><div>Descripción</div><div>Monto</div><div/>
+        </div>
+      }>
       {/* Al detalle se entra SOLO por su botón. Con la fila entera clickeable,
           apuntar al tacho y errarle por un píxel navegaba a otra pantalla en
           vez de borrar, y no había forma de seleccionar el texto de una celda. */}
@@ -375,7 +390,7 @@ export function FinanzasTab({ pedidos = [], gastoId = null, onAbrirGasto, onVolv
           padding: "12px", borderBottom: "1px solid var(--line)", fontSize: 12.5,
           alignItems: "center",
         }}>
-          <div style={{ color: "var(--muted)" }}>{fmtDia(g.fecha)}</div>
+          <div style={celdaFecha}>{fmtDia(g.fecha)}</div>
           <div><TKPill variant="outline">{g.numeroGasto || "—"}</TKPill></div>
           <div style={{ fontWeight: 600 }}>
             {g.descripcion || "—"}
@@ -402,6 +417,7 @@ export function FinanzasTab({ pedidos = [], gastoId = null, onAbrirGasto, onVolv
           Todavía no hay gastos registrados.
         </div>
       )}
+      </ListaConTope>
 
       {loading && (
         <div style={{ padding: 40, color: "var(--muted)" }}>Cargando finanzas...</div>

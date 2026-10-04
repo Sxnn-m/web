@@ -1,6 +1,17 @@
 import { useState, useEffect } from 'react';
 import { TKButton, TKInput, TKPill, Icon } from '../../components/UI.jsx';
 import { cargarGastosDe, cargarRestocksDe, registrarRestockEn } from '../../lib/historial.js';
+import { ListaConTope } from '../../components/ListaConTope.jsx';
+
+// Ocho filas antes de que la lista empiece a scrollear por dentro. Son tres
+// listas en la misma pantalla: sin tope, una sola con historial largo deja a
+// las otras dos abajo de todo.
+const FILAS_VISIBLES = 8;
+
+// La fecha completa ("19/09/2026, 09:21 p. m.") se partía en dos líneas y esa
+// fila medía 53 px contra 39 de las demás. Además de verse desparejo, hacía
+// que el tope de ocho filas no fuera ocho.
+const celdaFecha = { color: "var(--muted)", whiteSpace: "nowrap" };
 
 /** Firestore Timestamp | Date | null → "12/03/2026 14:05" */
 export function fmtFecha(valor) {
@@ -215,18 +226,20 @@ export function DetalleHistorial({
               Se generan solos al marcar un pedido como impreso · {totalConsumido} {unidad} consumidas
               {conDesperdicio && ` + ${totalDesperdiciado} ${unidad} desperdiciadas`}
             </div>
-            <div style={{
-              display: "grid", gridTemplateColumns: COL_GASTOS,
-              gap: 10, padding: "10px 12px", background: "var(--bg-alt)",
-              fontSize: 10, textTransform: "uppercase", letterSpacing: 1.2,
-              color: "var(--muted)", fontWeight: 700,
-            }}>
-              <div>Producto</div>
-              <div>Consumido</div>
-              {conDesperdicio && <div>Desperdicio</div>}
-              <div>Orden</div>
-              <div>Fecha</div>
-            </div>
+            <ListaConTope filas={FILAS_VISIBLES} cabecera={
+              <div style={{
+                display: "grid", gridTemplateColumns: COL_GASTOS,
+                gap: 10, padding: "10px 12px", background: "var(--bg-alt)",
+                fontSize: 10, textTransform: "uppercase", letterSpacing: 1.2,
+                color: "var(--muted)", fontWeight: 700,
+              }}>
+                <div>Producto</div>
+                <div>Consumido</div>
+                {conDesperdicio && <div>Desperdicio</div>}
+                <div>Orden</div>
+                <div>Fecha</div>
+              </div>
+            }>
             {gastos.map(g => (
               <div key={g._id} style={{
                 display: "grid", gridTemplateColumns: COL_GASTOS,
@@ -240,12 +253,13 @@ export function DetalleHistorial({
                   </div>
                 )}
                 <div><TKPill variant="outline">{g.numeroOrden}</TKPill></div>
-                <div style={{ color: "var(--muted)" }}>{fmtFecha(g.fecha)}</div>
+                <div style={celdaFecha}>{fmtFecha(g.fecha)}</div>
               </div>
             ))}
             {gastos.length === 0 && (
               <div style={{ padding: 24, color: "var(--muted)", fontSize: 13 }}>Sin gastos registrados.</div>
             )}
+            </ListaConTope>
 
             {/* Reservado va debajo de Gastos y en su misma columna: los dos
                 hablan de lo mismo —qué se llevó este rollo— y con anchos
@@ -262,14 +276,16 @@ export function DetalleHistorial({
                   Pedidos tomados y todavía no impresos · {totalReservado.toLocaleString("es-AR")} {unidad} comprometidas.
                   No se descontaron del stock; se descuentan al marcar el pedido como impreso.
                 </div>
-                <div style={{
-                  display: "grid", gridTemplateColumns: COL_RESERVAS,
-                  gap: 10, padding: "10px 12px", background: "var(--bg-alt)",
-                  fontSize: 10, textTransform: "uppercase", letterSpacing: 1.2,
-                  color: "var(--muted)", fontWeight: 700,
-                }}>
-                  <div>Producto</div><div>Consumido</div><div>Orden</div><div>Fecha</div>
-                </div>
+                <ListaConTope filas={FILAS_VISIBLES} cabecera={
+                  <div style={{
+                    display: "grid", gridTemplateColumns: COL_RESERVAS,
+                    gap: 10, padding: "10px 12px", background: "var(--bg-alt)",
+                    fontSize: 10, textTransform: "uppercase", letterSpacing: 1.2,
+                    color: "var(--muted)", fontWeight: 700,
+                  }}>
+                    <div>Producto</div><div>Consumido</div><div>Orden</div><div>Fecha</div>
+                  </div>
+                }>
                 {filasReservadas.map(r => (
                   <div key={r.clave} style={{
                     display: "grid", gridTemplateColumns: COL_RESERVAS,
@@ -293,7 +309,7 @@ export function DetalleHistorial({
                     </div>
                     <div>{r.cantidadConsumida} {unidad}</div>
                     <div><TKPill variant="outline">{r.numeroOrden}</TKPill></div>
-                    <div style={{ color: "var(--muted)" }}>{fmtFecha(r.createdAt)}</div>
+                    <div style={celdaFecha}>{fmtFecha(r.createdAt)}</div>
                   </div>
                 ))}
                 {filasReservadas.length === 0 && (
@@ -301,6 +317,7 @@ export function DetalleHistorial({
                     Sin reservas: ningún pedido pendiente usa este rollo.
                   </div>
                 )}
+                </ListaConTope>
               </div>
             )}
           </div>
@@ -318,14 +335,16 @@ export function DetalleHistorial({
               Carga manual y movimientos · {totalRepuesto} {unidad}{" "}
               {hayMovimientos ? "netas en total" : "repuestas en total"}
             </div>
-            <div style={{
-              display: "grid", gridTemplateColumns: "100px 1fr 1fr",
-              gap: 10, padding: "10px 12px", background: "var(--bg-alt)",
-              fontSize: 10, textTransform: "uppercase", letterSpacing: 1.2,
-              color: "var(--muted)", fontWeight: 700,
-            }}>
-              <div>Agregado</div><div>Fecha</div><div>Nota</div>
-            </div>
+            <ListaConTope filas={FILAS_VISIBLES} cabecera={
+              <div style={{
+                display: "grid", gridTemplateColumns: "100px 1fr 1fr",
+                gap: 10, padding: "10px 12px", background: "var(--bg-alt)",
+                fontSize: 10, textTransform: "uppercase", letterSpacing: 1.2,
+                color: "var(--muted)", fontWeight: 700,
+              }}>
+                <div>Agregado</div><div>Fecha</div><div>Nota</div>
+              </div>
+            }>
             {restocks.map(r => (
               <div key={r._id} style={{
                 display: "grid", gridTemplateColumns: "100px 1fr 1fr",
@@ -342,13 +361,14 @@ export function DetalleHistorial({
                   {(Number(r.cantidadAgregada) || 0) < 0 ? "−" : "+"}
                   {Math.abs(Number(r.cantidadAgregada) || 0)} {unidad}
                 </div>
-                <div style={{ color: "var(--muted)" }}>{fmtFecha(r.fecha)}</div>
+                <div style={celdaFecha}>{fmtFecha(r.fecha)}</div>
                 <div style={{ color: "var(--muted)" }}>{r.nota || "—"}</div>
               </div>
             ))}
             {restocks.length === 0 && (
               <div style={{ padding: 24, color: "var(--muted)", fontSize: 13 }}>Sin restocks registrados.</div>
             )}
+            </ListaConTope>
           </div>
         </div>
       )}
