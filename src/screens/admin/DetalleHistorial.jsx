@@ -55,6 +55,12 @@ export function RestockBadge({ detalle = "" }) {
 const TAM_NUMERO = 28;
 const TAM_ROTULO = 10;
 
+// Las barras de los dos indicadores van del mismo azul que las tarjetas del
+// Dashboard, Estadísticas y Finanzas: son dos lecturas del mismo rollo, no dos
+// estados. El verde de antes prometía "todo bien" sin que nadie lo decidiera.
+const AZUL = "#345C83";
+const ROJO = "#c64138";
+
 const cardStyle = {
   padding: 20, background: "var(--bg-alt)", border: "1px solid var(--line)",
   marginBottom: 20,
@@ -153,11 +159,11 @@ export function DetalleHistorial({
           números apoyan en la misma base. Centradas, la más baja quedaba
           desplazada y los dos 28 px se leían como tamaños distintos. */}
       <div style={{ display: "flex", gap: 16, alignItems: "stretch", flexWrap: "wrap", margin: "20px 0 24px" }}>
-        <div style={{ padding: "16px 22px", background: "var(--bg-alt)", borderLeft: `3px solid ${alerta ? "#c64138" : "#4a7a52"}` }}>
+        <div style={{ padding: "16px 22px", background: "var(--bg-alt)", borderLeft: `3px solid ${alerta ? ROJO : AZUL}` }}>
           <div style={{ fontSize: TAM_ROTULO, textTransform: "uppercase", letterSpacing: 1.5, color: "var(--muted)", marginBottom: 6 }}>
             En stock
           </div>
-          <div style={{ fontSize: TAM_NUMERO, color: alerta ? "#c64138" : "var(--text)" }}>
+          <div style={{ fontSize: TAM_NUMERO, color: alerta ? ROJO : "var(--text)" }}>
             {Number(cantidad || 0).toLocaleString("es-AR")} {unidad}
           </div>
           {/* El pie existe para que las dos tarjetas tengan las mismas tres
@@ -174,12 +180,17 @@ export function DetalleHistorial({
         {reservas && (
           <div style={{
             padding: "16px 22px", background: "var(--bg-alt)",
-            borderLeft: `3px dashed ${sobreReservado ? "#c64138" : "var(--muted)"}`,
+            // Roja cuando hay que reponer, igual que la de al lado: el rollo
+            // está en falta y las dos lo dicen. Y también cuando este número
+            // quedó negativo, que es el problema propio de esta tarjeta y ya
+            // la pintaba antes. Punteada y no sólida, para que se siga
+            // leyendo como una medición distinta de la primera.
+            borderLeft: `3px dashed ${(alerta || sobreReservado) ? ROJO : AZUL}`,
           }}>
             <div style={{ fontSize: TAM_ROTULO, textTransform: "uppercase", letterSpacing: 1.5, color: "var(--muted)", marginBottom: 6 }}>
               Disponible para nuevos pedidos
             </div>
-            <div style={{ fontSize: TAM_NUMERO, color: sobreReservado ? "#c64138" : "var(--text)" }}>
+            <div style={{ fontSize: TAM_NUMERO, color: sobreReservado ? ROJO : "var(--text)" }}>
               {disponibleNuevos.toLocaleString("es-AR")} {unidad}
             </div>
             <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
@@ -189,7 +200,12 @@ export function DetalleHistorial({
             </div>
           </div>
         )}
-        {alerta && <RestockBadge/>}
+        {/* alignSelf center porque la fila es stretch —así las dos tarjetas
+            miden lo mismo— y sin esto el cartel se estiraba a esa altura, con
+            dos palabras flotando en un cuadrado. */}
+        {alerta && (
+          <div style={{ alignSelf: "center" }}><RestockBadge/></div>
+        )}
         <div style={{ flex: 1 }}/>
         <TKButton onClick={() => setShowRestock(v => !v)} icon={<Icon.plus size={14}/>}>Registrar restock</TKButton>
       </div>
