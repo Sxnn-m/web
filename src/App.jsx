@@ -501,6 +501,8 @@ function AppInterna() {
       // en el tab que había pedido.
       case "admin": return isAdmin
         ? <AdminScreen go={go} tab={routeData.tab} onTab={t => go("admin", { tab: t })}
+            gastoId={routeData.gastoId || null}
+            onGasto={id => go("admin", { tab: "finanzas", ...(id ? { gastoId: id } : {}) })}
             onProductsChange={loadProducts} onCategoriesChange={loadCategories}
             categories={categories} products={products}/>
         : <AuthScreen go={go} onLogin={setUser}/>;
