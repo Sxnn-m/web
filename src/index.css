@@ -150,3 +150,44 @@ input, select, textarea { font-family: inherit; color: var(--text); }
 .frame-mobile-sim .cart-head { display: none !important; }
 .frame-mobile-sim h1 { font-size: clamp(32px, 8vw, 48px) !important; }
 
+
+/* ─── Tablas con tope de filas (TablaConTope) ──────────────────────────
+   Encabezado y celdas comparten padding y alineación desde acá: tenerlos en
+   dos objetos de estilo distintos es lo que había dejado los títulos corridos
+   respecto de sus datos. table-layout: fixed hace que los anchos salgan solo
+   del colgroup, así que el contenido no puede mover una columna. */
+.tabla-tope {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+.tabla-tope th,
+.tabla-tope td {
+  padding: 12px;
+  text-align: left;
+  vertical-align: middle;
+  /* Una celda que parte en dos líneas agranda su fila y el tope de 8 filas
+     deja de ser 8. Lo que no entra se recorta y se lee completo en el title. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tabla-tope thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-alt);
+  padding: 10px 12px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.tabla-tope tbody td {
+  font-size: 12.5px;
+  border-bottom: 1px solid var(--line);
+}
+/* Las numéricas a la derecha, encabezado incluido: así los gramos y los
+   montos se comparan por su magnitud sin leerlos. */
+.tabla-tope .num { text-align: right; }

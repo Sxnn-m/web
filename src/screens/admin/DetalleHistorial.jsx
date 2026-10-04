@@ -1,17 +1,25 @@
 import { useState, useEffect } from 'react';
 import { TKButton, TKInput, TKPill, Icon } from '../../components/UI.jsx';
 import { cargarGastosDe, cargarRestocksDe, registrarRestockEn } from '../../lib/historial.js';
-import { ListaConTope } from '../../components/ListaConTope.jsx';
+import { TablaConTope } from '../../components/TablaConTope.jsx';
+import { fmtDia } from '../../lib/fechas.js';
 
 // Ocho filas antes de que la lista empiece a scrollear por dentro. Son tres
 // listas en la misma pantalla: sin tope, una sola con historial largo deja a
 // las otras dos abajo de todo.
 const FILAS_VISIBLES = 8;
 
-// La fecha completa ("19/09/2026, 09:21 p. m.") se partía en dos líneas y esa
-// fila medía 53 px contra 39 de las demás. Además de verse desparejo, hacía
-// que el tope de ocho filas no fuera ocho.
-const celdaFecha = { color: "var(--muted)", whiteSpace: "nowrap" };
+// Anchos fijos para lo que tiene largo conocido; la columna sin ancho —el
+// producto, la nota— se queda con lo que sobra. En table-layout: fixed esto
+// es lo único que define las columnas, y vale igual para el encabezado.
+const ANCHO_FECHA = 104;
+const ANCHO_ORDEN = 108;
+// 140 y no 104: el ancho lo manda el TÍTULO, no el dato. "45 g" entra en
+// cualquier lado, pero "DESPERDICIO" en mayúsculas con letter-spacing mide
+// 137, y una columna más angosta recortaba el título con puntos suspensivos.
+const ANCHO_CANT = 140;
+
+const celdaTenue = { color: "var(--muted)" };
 
 /** Firestore Timestamp | Date | null → "12/03/2026 14:05" */
 export function fmtFecha(valor) {
@@ -116,10 +124,6 @@ export function DetalleHistorial({
   const totalRepuesto = restocks.reduce((s, r) => s + (Number(r.cantidadAgregada) || 0), 0);
   const hayMovimientos = restocks.some(r => (Number(r.cantidadAgregada) || 0) < 0);
 
-  const COL_GASTOS = conDesperdicio
-    ? "1.6fr 90px 90px 90px 1fr"
-    : "1.8fr 100px 100px 1fr";
-
   // Lo comprometido por pedidos que todavía no se imprimieron. No salió del
   // rollo —el stock físico sigue entero— pero ya tiene dueño, así que no se
   // puede volver a prometer.
@@ -132,11 +136,6 @@ export function DetalleHistorial({
   // para mostrar.
   const disponibleNuevos = (Number(cantidad) || 0) - totalReservado;
   const sobreReservado = disponibleNuevos < 0;
-
-  // Mismo reparto que COL_GASTOS para que las dos tablas, apiladas en la
-  // misma columna, se lean como una sola grilla: primera columna elástica,
-  // numéricas de 90 y fecha al final.
-  const COL_RESERVAS = "1.6fr 90px 90px 1fr";
 
   return (
     <>
@@ -226,40 +225,33 @@ export function DetalleHistorial({
               Se generan solos al marcar un pedido como impreso · {totalConsumido} {unidad} consumidas
               {conDesperdicio && ` + ${totalDesperdiciado} ${unidad} desperdiciadas`}
             </div>
-            <ListaConTope filas={FILAS_VISIBLES} cabecera={
-              <div style={{
-                display: "grid", gridTemplateColumns: COL_GASTOS,
-                gap: 10, padding: "10px 12px", background: "var(--bg-alt)",
-                fontSize: 10, textTransform: "uppercase", letterSpacing: 1.2,
-                color: "var(--muted)", fontWeight: 700,
-              }}>
-                <div>Producto</div>
-                <div>Consumido</div>
-                {conDesperdicio && <div>Desperdicio</div>}
-                <div>Orden</div>
-                <div>Fecha</div>
-              </div>
-            }>
-            {gastos.map(g => (
-              <div key={g._id} style={{
-                display: "grid", gridTemplateColumns: COL_GASTOS,
-                gap: 10, padding: "12px", borderBottom: "1px solid var(--line)", fontSize: 12,
-              }}>
-                <div style={{ fontWeight: 600 }}>{g.producto}</div>
-                <div>{g.cantidadConsumida} {unidad}</div>
-                {conDesperdicio && (
-                  <div style={{ color: (g.cantidadDesperdiciada || 0) > 0 ? "#B56B3E" : "var(--muted)" }}>
-                    {g.cantidadDesperdiciada || 0} {unidad}
-                  </div>
-                )}
-                <div><TKPill variant="outline">{g.numeroOrden}</TKPill></div>
-                <div style={celdaFecha}>{fmtFecha(g.fecha)}</div>
-              </div>
-            ))}
-            {gastos.length === 0 && (
-              <div style={{ padding: 24, color: "var(--muted)", fontSize: 13 }}>Sin gastos registrados.</div>
-            )}
-            </ListaConTope>
+            <TablaConTope
+              filas={FILAS_VISIBLES}
+              vacio="Sin gastos registrados."
+              columnas={[
+                { titulo: "Fecha", ancho: ANCHO_FECHA },
+                { titulo: "Orden", ancho: ANCHO_ORDEN },
+                { titulo: "Producto" },
+                { titulo: "Consumido", ancho: ANCHO_CANT, num: true },
+                ...(conDesperdicio ? [{ titulo: "Desperdicio", ancho: ANCHO_CANT, num: true }] : []),
+              ]}
+            >
+              {gastos.map(g => (
+                <tr key={g._id}>
+                  <td style={celdaTenue}>{fmtDia(g.fecha)}</td>
+                  <td><TKPill variant="outline">{g.numeroOrden}</TKPill></td>
+                  {/* title con el nombre entero: la celda lo recorta para que
+                      todas las filas midan lo mismo, pero el dato no se pierde. */}
+                  <td style={{ fontWeight: 600 }} title={g.producto}>{g.producto}</td>
+                  <td className="num">{g.cantidadConsumida} {unidad}</td>
+                  {conDesperdicio && (
+                    <td className="num" style={{ color: (g.cantidadDesperdiciada || 0) > 0 ? "#B56B3E" : "var(--muted)" }}>
+                      {g.cantidadDesperdiciada || 0} {unidad}
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </TablaConTope>
 
             {/* Reservado va debajo de Gastos y en su misma columna: los dos
                 hablan de lo mismo —qué se llevó este rollo— y con anchos
@@ -276,48 +268,41 @@ export function DetalleHistorial({
                   Pedidos tomados y todavía no impresos · {totalReservado.toLocaleString("es-AR")} {unidad} comprometidas.
                   No se descontaron del stock; se descuentan al marcar el pedido como impreso.
                 </div>
-                <ListaConTope filas={FILAS_VISIBLES} cabecera={
-                  <div style={{
-                    display: "grid", gridTemplateColumns: COL_RESERVAS,
-                    gap: 10, padding: "10px 12px", background: "var(--bg-alt)",
-                    fontSize: 10, textTransform: "uppercase", letterSpacing: 1.2,
-                    color: "var(--muted)", fontWeight: 700,
-                  }}>
-                    <div>Producto</div><div>Consumido</div><div>Orden</div><div>Fecha</div>
-                  </div>
-                }>
-                {filasReservadas.map(r => (
-                  <div key={r.clave} style={{
-                    display: "grid", gridTemplateColumns: COL_RESERVAS,
-                    gap: 10, padding: "12px", borderBottom: "1px solid var(--line)", fontSize: 12,
-                  }}>
-                    <div>
-                      <span style={{ fontWeight: 600 }}>{r.productoNombre}</span>
-                      {(r.varianteNombre || r.opcionesTexto) && (
-                        <span style={{ color: "var(--muted)" }}>
-                          {" · "}{[r.varianteNombre, r.opcionesTexto].filter(Boolean).join(" · ")}
-                        </span>
-                      )}
-                      {/* Una línea repartida entre dos rollos deja una fila en
-                          cada historial: sin esto, los gramos de la parte se
-                          leerían como el consumo entero de la pieza. */}
-                      {r.reparticion && (
-                        <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>
-                          Repartición {r.reparticion}
-                        </div>
-                      )}
-                    </div>
-                    <div>{r.cantidadConsumida} {unidad}</div>
-                    <div><TKPill variant="outline">{r.numeroOrden}</TKPill></div>
-                    <div style={celdaFecha}>{fmtFecha(r.createdAt)}</div>
-                  </div>
-                ))}
-                {filasReservadas.length === 0 && (
-                  <div style={{ padding: 24, color: "var(--muted)", fontSize: 13 }}>
-                    Sin reservas: ningún pedido pendiente usa este rollo.
-                  </div>
-                )}
-                </ListaConTope>
+                <TablaConTope
+                  filas={FILAS_VISIBLES}
+                  vacio="Sin reservas: ningún pedido pendiente usa este rollo."
+                  columnas={[
+                    { titulo: "Fecha", ancho: ANCHO_FECHA },
+                    { titulo: "Orden", ancho: ANCHO_ORDEN },
+                    { titulo: "Producto" },
+                    { titulo: "Consumido", ancho: ANCHO_CANT, num: true },
+                  ]}
+                >
+                  {filasReservadas.map(r => (
+                    <tr key={r.clave}>
+                      <td style={celdaTenue}>{fmtDia(r.createdAt)}</td>
+                      <td><TKPill variant="outline">{r.numeroOrden}</TKPill></td>
+                      <td title={[r.productoNombre, r.varianteNombre, r.opcionesTexto, r.reparticion && `Repartición ${r.reparticion}`].filter(Boolean).join(" · ")}>
+                        <span style={{ fontWeight: 600 }}>{r.productoNombre}</span>
+                        {(r.varianteNombre || r.opcionesTexto) && (
+                          <span style={{ color: "var(--muted)" }}>
+                            {" · "}{[r.varianteNombre, r.opcionesTexto].filter(Boolean).join(" · ")}
+                          </span>
+                        )}
+                        {/* Una línea repartida entre dos rollos deja una fila
+                            en cada historial: sin esto, los gramos de la parte
+                            se leerían como el consumo entero de la pieza. En
+                            la misma línea, para no agrandar la fila. */}
+                        {r.reparticion && (
+                          <span style={{ color: "var(--muted)", fontSize: 11 }}>
+                            {" · "}Repartición {r.reparticion}
+                          </span>
+                        )}
+                      </td>
+                      <td className="num">{r.cantidadConsumida} {unidad}</td>
+                    </tr>
+                  ))}
+                </TablaConTope>
               </div>
             )}
           </div>
@@ -335,40 +320,33 @@ export function DetalleHistorial({
               Carga manual y movimientos · {totalRepuesto} {unidad}{" "}
               {hayMovimientos ? "netas en total" : "repuestas en total"}
             </div>
-            <ListaConTope filas={FILAS_VISIBLES} cabecera={
-              <div style={{
-                display: "grid", gridTemplateColumns: "100px 1fr 1fr",
-                gap: 10, padding: "10px 12px", background: "var(--bg-alt)",
-                fontSize: 10, textTransform: "uppercase", letterSpacing: 1.2,
-                color: "var(--muted)", fontWeight: 700,
-              }}>
-                <div>Agregado</div><div>Fecha</div><div>Nota</div>
-              </div>
-            }>
-            {restocks.map(r => (
-              <div key={r._id} style={{
-                display: "grid", gridTemplateColumns: "100px 1fr 1fr",
-                gap: 10, padding: "12px", borderBottom: "1px solid var(--line)", fontSize: 12,
-              }}>
-                {/* Con signo y con color propio: una transferencia sale del
-                    rollo con cantidad negativa, y el "+" fijo en verde de
-                    antes la mostraba como "+-40 g", leyéndose como si hubiera
-                    entrado material. */}
-                <div style={{
-                  fontWeight: 700,
-                  color: (Number(r.cantidadAgregada) || 0) < 0 ? "#B56B3E" : "#4a7a52",
-                }}>
-                  {(Number(r.cantidadAgregada) || 0) < 0 ? "−" : "+"}
-                  {Math.abs(Number(r.cantidadAgregada) || 0)} {unidad}
-                </div>
-                <div style={celdaFecha}>{fmtFecha(r.fecha)}</div>
-                <div style={{ color: "var(--muted)" }}>{r.nota || "—"}</div>
-              </div>
-            ))}
-            {restocks.length === 0 && (
-              <div style={{ padding: 24, color: "var(--muted)", fontSize: 13 }}>Sin restocks registrados.</div>
-            )}
-            </ListaConTope>
+            <TablaConTope
+              filas={FILAS_VISIBLES}
+              vacio="Sin restocks registrados."
+              columnas={[
+                { titulo: "Fecha", ancho: ANCHO_FECHA },
+                { titulo: "Nota" },
+                { titulo: "Agregado", ancho: ANCHO_CANT, num: true },
+              ]}
+            >
+              {restocks.map(r => (
+                <tr key={r._id}>
+                  <td style={celdaTenue}>{fmtDia(r.fecha)}</td>
+                  <td style={celdaTenue} title={r.nota || ""}>{r.nota || "—"}</td>
+                  {/* Con signo y con color propio: una transferencia sale del
+                      rollo con cantidad negativa, y el "+" fijo en verde de
+                      antes la mostraba como "+-40 g", leyéndose como si
+                      hubiera entrado material. */}
+                  <td className="num" style={{
+                    fontWeight: 700,
+                    color: (Number(r.cantidadAgregada) || 0) < 0 ? "#B56B3E" : "#4a7a52",
+                  }}>
+                    {(Number(r.cantidadAgregada) || 0) < 0 ? "−" : "+"}
+                    {Math.abs(Number(r.cantidadAgregada) || 0)} {unidad}
+                  </td>
+                </tr>
+              ))}
+            </TablaConTope>
           </div>
         </div>
       )}

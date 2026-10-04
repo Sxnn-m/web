@@ -16,7 +16,8 @@ import {
   crearGasto, eliminarGasto, esAutomatica, validarMovimiento,
 } from '../../lib/finanzas.js';
 import { DetalleGasto } from './DetalleGasto.jsx';
-import { ListaConTope } from '../../components/ListaConTope.jsx';
+import { TablaConTope } from '../../components/TablaConTope.jsx';
+import { fmtDia } from '../../lib/fechas.js';
 
 // Diez filas por lista antes del scroll interno. Es su propio tope: las listas
 // de Finanzas tienen menos competencia por la pantalla que las tres del
@@ -35,28 +36,20 @@ const tituloBloque = {
   textTransform: "uppercase", color: "var(--muted)",
 };
 
-const cabecera = {
-  fontSize: 10, textTransform: "uppercase", letterSpacing: 1.2,
-  color: "var(--muted)", fontWeight: 700,
-};
+// Anchos fijos para lo de largo conocido; la columna sin ancho se queda con
+// lo que sobra. En table-layout: fixed es lo único que define las columnas.
+const ANCHO_FECHA = 104;
+const ANCHO_NUMERO = 112;
+const ANCHO_MONTO = 140;
+const ANCHO_ACCIONES = 76;
 
-// Una fecha partida en dos líneas hace que esa fila mida distinto de las
-// demás, y el tope de diez filas deja de ser diez.
-const celdaFecha = { color: "var(--muted)", whiteSpace: "nowrap" };
+const celdaTenue = { color: "var(--muted)" };
 
 const actionBtn = {
   background: "none", border: "1px solid var(--line)", padding: "4px 6px",
   cursor: "pointer", color: "var(--text)", display: "flex", alignItems: "center",
   borderRadius: 4,
 };
-
-/** Fecha corta: en una tabla la hora no aporta y gasta una columna entera. */
-export function fmtDia(valor) {
-  if (!valor) return "—";
-  const d = typeof valor?.toDate === "function" ? valor.toDate() : new Date(valor);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric" });
-}
 
 /**
  * Las tres tarjetas de arriba. Mismo azul que Estadísticas y el Dashboard: son
@@ -226,10 +219,6 @@ export function FinanzasTab({ pedidos = [], gastoId = null, onAbrirGasto, onVolv
     );
   }
 
-  // 994 px de columna de contenido. Acciones lleva dos botones de 27 + gap.
-  const COL_GAN = "110px 1fr 150px 70px";
-  const COL_GAS = "110px 110px 1fr 150px 70px";
-
   return (
     <>
       <h2 style={{ fontSize: 28, margin: "0 0 20px" }}>Finanzas</h2>
@@ -296,62 +285,58 @@ export function FinanzasTab({ pedidos = [], gastoId = null, onAbrirGasto, onVolv
         />
       )}
 
-      <ListaConTope filas={FILAS_VISIBLES} cabecera={
-        <div style={{ ...cabecera, display: "grid", gridTemplateColumns: COL_GAN, gap: 10, padding: "10px 12px", background: "var(--bg-alt)" }}>
-          <div>Fecha</div><div>Pedido</div><div>Monto</div><div/>
-        </div>
-      }>
-      {ganancias.map(g => (
-        <div key={g._id} style={{
-          display: "grid", gridTemplateColumns: COL_GAN, gap: 10,
-          padding: "12px", borderBottom: "1px solid var(--line)", fontSize: 12.5,
-          alignItems: "center",
-        }}>
-          <div style={celdaFecha}>{fmtDia(g.fecha)}</div>
-          <div>
-            {esAutomatica(g) ? (
-              <span style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                <TKPill variant="outline">{g.numeroOrden || "—"}</TKPill>
-                {/* Decir que es automática es lo que explica por qué no tiene
-                    botones: si no, la fila parece rota. */}
-                <span style={{
-                  fontSize: 10, fontWeight: 700, letterSpacing: 0.8, textTransform: "uppercase",
-                  color: AZUL, background: `${AZUL}18`, border: `1px solid ${AZUL}44`,
-                  padding: "2px 7px", borderRadius: 2,
-                }}>
-                  Automática
+      <TablaConTope
+        filas={FILAS_VISIBLES}
+        vacio={loading ? "" : "Todavía no hay ganancias registradas."}
+        columnas={[
+          { titulo: "Fecha", ancho: ANCHO_FECHA },
+          { titulo: "Pedido" },
+          { titulo: "Monto", ancho: ANCHO_MONTO, num: true },
+          { titulo: "", ancho: ANCHO_ACCIONES },
+        ]}
+      >
+        {ganancias.map(g => (
+          <tr key={g._id}>
+            <td style={celdaTenue}>{fmtDia(g.fecha)}</td>
+            <td title={esAutomatica(g) ? `${g.numeroOrden || ""} · automática` : (g.descripcion || "")}>
+              {esAutomatica(g) ? (
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                  <TKPill variant="outline">{g.numeroOrden || "—"}</TKPill>
+                  {/* Decir que es automática es lo que explica por qué no
+                      tiene botones: si no, la fila parece rota. */}
+                  <span style={{
+                    fontSize: 10, fontWeight: 700, letterSpacing: 0.8, textTransform: "uppercase",
+                    color: AZUL, background: `${AZUL}18`, border: `1px solid ${AZUL}44`,
+                    padding: "2px 7px", borderRadius: 2,
+                  }}>
+                    Automática
+                  </span>
                 </span>
-              </span>
-            ) : (
-              <span style={{ fontWeight: 600 }}>{g.descripcion || "—"}</span>
-            )}
-          </div>
-          <div style={{ fontWeight: 700, color: "#4a7a52" }}>{fmtARS(g.monto || 0)}</div>
-          <div style={{ display: "flex", gap: 4 }}>
-            {!esAutomatica(g) && (
-              <>
-                <button style={actionBtn} title="Editar"
-                  onClick={() => setFormGanancia({
-                    id: g._id, fecha: inputDesdeFecha(g.fecha),
-                    descripcion: g.descripcion || "", monto: String(g.monto ?? ""),
-                  })}>
-                  <Icon.spark size={13}/>
-                </button>
-                <button style={{ ...actionBtn, color: "#c64138" }} title="Eliminar"
-                  onClick={() => borrarGanancia(g)}>
-                  <Icon.trash size={13}/>
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      ))}
-      {!loading && ganancias.length === 0 && (
-        <div style={{ padding: 24, color: "var(--muted)", fontSize: 13 }}>
-          Todavía no hay ganancias registradas.
-        </div>
-      )}
-      </ListaConTope>
+              ) : (
+                <span style={{ fontWeight: 600 }}>{g.descripcion || "—"}</span>
+              )}
+            </td>
+            <td className="num" style={{ fontWeight: 700, color: "#4a7a52" }}>{fmtARS(g.monto || 0)}</td>
+            <td>
+              {!esAutomatica(g) && (
+                <span style={{ display: "flex", gap: 4 }}>
+                  <button style={actionBtn} title="Editar"
+                    onClick={() => setFormGanancia({
+                      id: g._id, fecha: inputDesdeFecha(g.fecha),
+                      descripcion: g.descripcion || "", monto: String(g.monto ?? ""),
+                    })}>
+                    <Icon.spark size={13}/>
+                  </button>
+                  <button style={{ ...actionBtn, color: "#c64138" }} title="Eliminar"
+                    onClick={() => borrarGanancia(g)}>
+                    <Icon.trash size={13}/>
+                  </button>
+                </span>
+              )}
+            </td>
+          </tr>
+        ))}
+      </TablaConTope>
 
       {/* ── Gastos ── */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "32px 0 12px" }}>
@@ -376,48 +361,47 @@ export function FinanzasTab({ pedidos = [], gastoId = null, onAbrirGasto, onVolv
         />
       )}
 
-      <ListaConTope filas={FILAS_VISIBLES} cabecera={
-        <div style={{ ...cabecera, display: "grid", gridTemplateColumns: COL_GAS, gap: 10, padding: "10px 12px", background: "var(--bg-alt)" }}>
-          <div>Fecha</div><div>Gasto</div><div>Descripción</div><div>Monto</div><div/>
-        </div>
-      }>
       {/* Al detalle se entra SOLO por su botón. Con la fila entera clickeable,
           apuntar al tacho y errarle por un píxel navegaba a otra pantalla en
           vez de borrar, y no había forma de seleccionar el texto de una celda. */}
-      {gastos.map(g => (
-        <div key={g._id} style={{
-          display: "grid", gridTemplateColumns: COL_GAS, gap: 10,
-          padding: "12px", borderBottom: "1px solid var(--line)", fontSize: 12.5,
-          alignItems: "center",
-        }}>
-          <div style={celdaFecha}>{fmtDia(g.fecha)}</div>
-          <div><TKPill variant="outline">{g.numeroGasto || "—"}</TKPill></div>
-          <div style={{ fontWeight: 600 }}>
-            {g.descripcion || "—"}
-            {g.detalle ? (
-              <span style={{ color: "var(--muted)", fontWeight: 400 }}> · con detalle</span>
-            ) : null}
-          </div>
-          <div style={{ fontWeight: 700, color: "#B56B3E" }}>{fmtARS(g.monto || 0)}</div>
-          <div style={{ display: "flex", gap: 4 }}>
-            {/* El mismo Icon.list que abre el detalle de un filamento en
-                Inventario: dos tablas que hacen lo mismo con el mismo ícono. */}
-            <button style={actionBtn} title="Ver detalle" onClick={() => onAbrirGasto(g._id)}>
-              <Icon.list size={13}/>
-            </button>
-            <button style={{ ...actionBtn, color: "#c64138" }} title="Eliminar"
-              onClick={() => borrarGasto(g)}>
-              <Icon.trash size={13}/>
-            </button>
-          </div>
-        </div>
-      ))}
-      {!loading && gastos.length === 0 && (
-        <div style={{ padding: 24, color: "var(--muted)", fontSize: 13 }}>
-          Todavía no hay gastos registrados.
-        </div>
-      )}
-      </ListaConTope>
+      <TablaConTope
+        filas={FILAS_VISIBLES}
+        vacio={loading ? "" : "Todavía no hay gastos registrados."}
+        columnas={[
+          { titulo: "Fecha", ancho: ANCHO_FECHA },
+          { titulo: "Gasto", ancho: ANCHO_NUMERO },
+          { titulo: "Descripción" },
+          { titulo: "Monto", ancho: ANCHO_MONTO, num: true },
+          { titulo: "", ancho: ANCHO_ACCIONES },
+        ]}
+      >
+        {gastos.map(g => (
+          <tr key={g._id}>
+            <td style={celdaTenue}>{fmtDia(g.fecha)}</td>
+            <td><TKPill variant="outline">{g.numeroGasto || "—"}</TKPill></td>
+            <td title={g.descripcion || ""}>
+              <span style={{ fontWeight: 600 }}>{g.descripcion || "—"}</span>
+              {g.detalle ? (
+                <span style={{ color: "var(--muted)", fontWeight: 400 }}> · con detalle</span>
+              ) : null}
+            </td>
+            <td className="num" style={{ fontWeight: 700, color: "#B56B3E" }}>{fmtARS(g.monto || 0)}</td>
+            <td>
+              <span style={{ display: "flex", gap: 4 }}>
+                {/* El mismo Icon.list que abre el detalle de un filamento en
+                    Inventario: dos tablas que hacen lo mismo con el mismo ícono. */}
+                <button style={actionBtn} title="Ver detalle" onClick={() => onAbrirGasto(g._id)}>
+                  <Icon.list size={13}/>
+                </button>
+                <button style={{ ...actionBtn, color: "#c64138" }} title="Eliminar"
+                  onClick={() => borrarGasto(g)}>
+                  <Icon.trash size={13}/>
+                </button>
+              </span>
+            </td>
+          </tr>
+        ))}
+      </TablaConTope>
 
       {loading && (
         <div style={{ padding: 40, color: "var(--muted)" }}>Cargando finanzas...</div>
