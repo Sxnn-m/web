@@ -432,14 +432,10 @@ export function FinanzasTab({
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
                   <TKPill variant="outline">{g.numeroOrden || "—"}</TKPill>
                   {/* Decir que es automática es lo que explica por qué no
-                      tiene botones: si no, la fila parece rota. */}
-                  <span style={{
-                    fontSize: 10, fontWeight: 700, letterSpacing: 0.8, textTransform: "uppercase",
-                    color: AZUL, background: `${AZUL}18`, border: `1px solid ${AZUL}44`,
-                    padding: "2px 7px", borderRadius: 2,
-                  }}>
-                    Automática
-                  </span>
+                      tiene botones: si no, la fila parece rota. El beige es
+                      el mismo que los carteles de categoría de Productos: el
+                      número de orden, al lado, queda con su contorno. */}
+                  <TKPill>Automática</TKPill>
                 </span>
               ) : (
                 <span style={{ fontWeight: 600 }}>{g.descripcion || "—"}</span>

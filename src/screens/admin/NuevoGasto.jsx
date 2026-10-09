@@ -131,7 +131,9 @@ export function NuevoGasto({
         </div>
       </div>
 
-      <div style={cardStyle}>
+      {/* Sin tarjeta alrededor: la tabla va directamente sobre el fondo de la
+          página, igual que la de Productos. */}
+      <div style={{ marginBottom: 24 }}>
         <ItemsDeGasto
           items={items}
           modo="alta"
