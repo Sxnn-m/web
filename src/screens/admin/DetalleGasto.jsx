@@ -12,11 +12,12 @@ import { useState, useEffect } from 'react';
 import { TKButton, TKInput, TKPill, Icon, fmtARS } from '../../components/UI.jsx';
 import {
   cargarGasto, actualizarGasto, guardarDetalleGasto, eliminarGasto,
-  inputDesdeFecha, validarMovimiento,
+  inputDesdeFecha, validarGasto,
 } from '../../lib/finanzas.js';
-import { montoDeGasto, tieneItems, usosDeInsumo } from '../../lib/gastoItems.js';
+import { montoDeGasto, esMontoManual, totalDeItems } from '../../lib/gastoItems.js';
 import { aplicarItem, previsualizarBorrado, revertirItemsDeGasto } from '../../lib/comprasInventario.js';
 import { ItemsDeGasto } from './ItemsDeGasto.jsx';
+import { MontoDeGasto } from './MontoDeGasto.jsx';
 
 const cardStyle = {
   padding: 20, background: "var(--bg-alt)", border: "1px solid var(--line)",
@@ -49,6 +50,7 @@ export function DetalleGasto({
   const [detalle, setDetalle] = useState("");
   const [editando, setEditando] = useState(false);
   const [form, setForm] = useState({ fecha: "", descripcion: "", monto: "" });
+  const [montoManual, setMontoManual] = useState(false);
   const [errores, setErrores] = useState({});
 
   const cargar = async () => {
@@ -56,11 +58,14 @@ export function DetalleGasto({
       const g = await cargarGasto(gastoId);
       setGasto(g);
       setDetalle(g?.detalle || "");
-      if (g) setForm({
-        fecha: inputDesdeFecha(g.fecha),
-        descripcion: g.descripcion || "",
-        monto: String(g.monto ?? ""),
-      });
+      if (g) {
+        setForm({
+          fecha: inputDesdeFecha(g.fecha),
+          descripcion: g.descripcion || "",
+          monto: String(g.monto ?? ""),
+        });
+        setMontoManual(esMontoManual(g));
+      }
     } catch (err) {
       setMsg("Error al cargar el gasto: " + err.message);
     }
@@ -112,13 +117,25 @@ export function DetalleGasto({
     setGuardando(false);
   };
 
+  /**
+   * Apagar el modo manual descarta lo escrito a mano y vuelve a la suma;
+   * prenderlo arranca desde el monto que está valiendo hoy. Mismo criterio
+   * que en el alta.
+   */
+  const cambiarModoMonto = (manual) => {
+    setMontoManual(manual);
+    setForm(f => ({ ...f, monto: manual ? String(montoDeGasto(gasto) || "") : "" }));
+    setErrores(e => ({ ...e, monto: "", items: "" }));
+  };
+
   const guardarDatos = async () => {
-    const { valido, errores: errs } = validarMovimiento(form);
+    const items = gasto.items || [];
+    const { valido, errores: errs } = validarGasto({ ...form, montoManual, items });
     setErrores(errs);
     if (!valido) return;
     setGuardando(true);
     try {
-      await actualizarGasto(gastoId, form, { conMonto: !tieneItems(gasto) });
+      await actualizarGasto(gastoId, { ...form, montoManual }, { items });
       setEditando(false);
       setMsg("✓ Gasto actualizado.");
       await cargar();
@@ -208,12 +225,15 @@ export function DetalleGasto({
           un acento por tarjeta solo sugería una jerarquía que no existe. */}
       <div style={{ display: "flex", gap: 16, alignItems: "stretch", flexWrap: "wrap", margin: "20px 0 24px" }}>
         <Indicador label="Fecha" valor={fechaTexto}/>
-        {/* El monto que vale es el de los ítems cuando los hay: tener los dos
-            conviviendo haría que el saldo dependa de cuál se leyó. */}
+        {/* El monto efectivo: la suma de los ítems, o el escrito a mano. */}
         <Indicador label="Monto" valor={fmtARS(montoDeGasto(gasto))}/>
         <div style={{ flex: 1 }}/>
         <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-          <TKButton variant="outline" onClick={() => setEditando(v => !v)} icon={<Icon.spark size={14}/>}>
+          {/* Cerrar la edición DESCARTA lo tocado, el interruptor del monto
+              incluido: si no, reabrirla mostraría un estado que nunca se
+              guardó como si fuera el del gasto. */}
+          <TKButton variant="outline" onClick={() => { if (editando) cargar(); setErrores({}); setEditando(v => !v); }}
+            icon={<Icon.spark size={14}/>}>
             {editando ? "Cancelar edición" : "Editar datos"}
           </TKButton>
           <TKButton variant="outline" onClick={borrar} disabled={guardando}>Eliminar gasto</TKButton>
@@ -228,27 +248,22 @@ export function DetalleGasto({
           <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 16 }}>
             El número {gasto.numeroGasto} no se puede cambiar: es el correlativo.
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "170px 1fr 170px", gap: 16, marginBottom: 16 }} className="form-layout">
+          {/* La tercera columna lleva el monto con su interruptor al lado:
+              "Editar monto manualmente" necesita 260px para no desbordar. */}
+          <div style={{ display: "grid", gridTemplateColumns: "170px 1fr 260px", gap: 16, marginBottom: 16 }} className="form-layout">
             <TKInput label="Fecha" type="date" value={form.fecha}
               onChange={e => setForm(f => ({ ...f, fecha: e.target.value }))} error={errores.fecha}/>
             <TKInput label="Descripción" value={form.descripcion}
               onChange={e => setForm(f => ({ ...f, descripcion: e.target.value }))} error={errores.descripcion}/>
-            {tieneItems(gasto) ? (
-              <div>
-                <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: 0.8, textTransform: "uppercase", color: "var(--muted)", marginBottom: 6 }}>
-                  Monto
-                </div>
-                <div style={{ padding: "12px 14px", background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 4, fontSize: 14 }}>
-                  {fmtARS(montoDeGasto(gasto))}
-                </div>
-                <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 6, lineHeight: 1.4 }}>
-                  Sale de la suma de los ítems. Para cambiarlo, editá los ítems.
-                </div>
-              </div>
-            ) : (
-              <TKInput label="Monto" type="number" value={form.monto}
-                onChange={e => setForm(f => ({ ...f, monto: e.target.value }))} error={errores.monto}/>
-            )}
+            <MontoDeGasto
+              manual={montoManual}
+              valor={form.monto}
+              suma={totalDeItems(gasto.items || [])}
+              hayItems={(gasto.items || []).length > 0}
+              error={errores.monto || errores.items}
+              onToggle={cambiarModoMonto}
+              onChange={v => setForm(f => ({ ...f, monto: v }))}
+            />
           </div>
           {Object.values(errores).filter(Boolean).length > 0 && (
             <div style={{ fontSize: 12, color: "#c64138", marginBottom: 12 }}>
@@ -263,7 +278,8 @@ export function DetalleGasto({
 
       <div style={cardStyle}>
         <ItemsDeGasto
-          gasto={gasto}
+          items={gasto.items || []}
+          modo="detalle"
           filamentos={filamentos}
           insumos={insumos}
           productos={productos}

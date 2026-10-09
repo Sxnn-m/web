@@ -12,12 +12,38 @@ import { TKButton, TKInput, Icon, fmtARS } from '../../components/UI.jsx';
 import { SelectorConAgregar } from '../../components/SelectorConAgregar.jsx';
 import { ListaDesplegable } from '../../components/ListaDesplegable.jsx';
 import {
-  CATEGORIAS, itemVacio, cambiarCategoria, validarItem, normalizarItem,
-  totalDeItem, totalDeItems, mueveStock, usosDeInsumo,
+  CATEGORIAS, itemVacio, cambiarCategoria, pierdeLink, aceptaLink,
+  validarItem, normalizarItem, totalDeItem, totalDeItems, mueveStock, usosDeInsumo,
 } from '../../lib/gastoItems.js';
 import { tiposDe } from '../../lib/tiposInsumo.js';
 
 const AZUL = "#345C83";
+
+// Las mismas columnas para el encabezado y para cada fila. La del detalle va
+// en minmax(0, 1fr) y no en 1fr: un track "fr" no puede achicarse por debajo
+// de su contenido mínimo, así que con un texto largo se ensancharía y correría
+// las demás, dejando los encabezados desalineados con los datos.
+const COLUMNAS = "104px minmax(0, 1fr) 54px 130px 70px";
+
+// Qué cambia entre cargar un gasto nuevo y editar uno ya guardado: en el alta
+// los ítems viven en memoria hasta que se guarda el gasto, así que prometer
+// que se va a mover inventario sería mentira.
+const TEXTOS = {
+  alta: {
+    ayuda: "Los de filamento y de insumo van a sumar stock y a dejar un restock cuando guardes el gasto. " +
+      "Los de envío solo suman al total.",
+    vacio: "Todavía no hay ítems. Agregá uno para registrar qué se compró.",
+    borrar: () => "¿Sacar este ítem de la compra?",
+  },
+  detalle: {
+    ayuda: "Los de filamento y de insumo suman stock al guardarlos y dejan un restock en el " +
+      "historial. Los de envío solo suman al total.",
+    vacio: "Todavía no hay ítems. Agregá uno para registrar qué se compró.",
+    borrar: (item) => mueveStock(item)
+      ? `¿Eliminar este ítem? Se van a restar ${item.cantidad} ${item.categoria === "filamento" ? "g" : "u."} del inventario y se va a borrar su restock.`
+      : "¿Eliminar este ítem?",
+  },
+};
 
 const actionBtn = {
   background: "none", border: "1px solid var(--line)", padding: "4px 6px",
@@ -54,11 +80,33 @@ function resumen(item) {
   return "Costo de envío";
 }
 
+/**
+ * Dónde se compró. Solo en filamento e insumo: el costo de envío no se compra
+ * en ningún lado. El https:// se agrega solo al guardar, así que la ayuda lo
+ * dice en vez de hacer que el usuario lo descubra.
+ */
+function CampoLink({ item, error, up }) {
+  if (!aceptaLink(item.categoria)) return null;
+  return (
+    <div>
+      <TKInput label="Link (opcional)" value={item.link || ""}
+        onChange={e => up({ link: e.target.value })} error={error}
+        placeholder="mercadolibre.com.ar/..."/>
+      {!error && (
+        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 6 }}>
+          Dónde se compró. Si no ponés https://, se agrega solo.
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ItemsDeGasto({
-  gasto, filamentos = [], insumos = [], productos = [], personalizados = [], gastos = [],
+  items = [], modo = "detalle",
+  filamentos = [], insumos = [], productos = [], personalizados = [], gastos = [],
   listas, onGuardar, onBorrar, onCrearInsumo, onBorrarInsumo, guardando,
 }) {
-  const items = gasto?.items || [];
+  const textos = TEXTOS[modo] || TEXTOS.detalle;
   const [borrador, setBorrador] = useState(null);   // {item, esNuevo}
   const [errores, setErrores] = useState({});
 
@@ -67,6 +115,16 @@ export function ItemsDeGasto({
   const abrirNuevo = () => { setErrores({}); setBorrador({ item: itemVacio("filamento"), esNuevo: true }); };
   const editar = (item) => { setErrores({}); setBorrador({ item: { ...item }, esNuevo: false }); };
   const up = (patch) => setBorrador(b => ({ ...b, item: { ...b.item, ...patch } }));
+
+  /** Cambiar de categoría rehace el borrador: los campos son otros. */
+  const cambiarCat = (c) => {
+    // Pasar a Envío se lleva el link puesto, porque ahí no existe. Avisarlo
+    // antes es más barato que que el usuario lo descubra al volver.
+    if (pierdeLink(borrador.item, c) &&
+        !confirm("Los ítems de Envío no llevan link. Se va a descartar el que cargaste. ¿Seguir?")) return;
+    setErrores({});
+    setBorrador(b => ({ ...b, item: cambiarCategoria(b.item, c) }));
+  };
 
   // El nombre se guarda junto al id para que el ítem siga leyéndose si después
   // el insumo se borra del catálogo. El tipo se reinicia porque los tipos de un
@@ -88,10 +146,7 @@ export function ItemsDeGasto({
   };
 
   const borrar = async (item) => {
-    const aviso = mueveStock(item)
-      ? `¿Eliminar este ítem? Se van a restar ${item.cantidad} ${item.categoria === "filamento" ? "g" : "u."} del inventario y se va a borrar su restock.`
-      : "¿Eliminar este ítem?";
-    if (!confirm(aviso)) return;
+    if (!confirm(textos.borrar(item))) return;
     await onBorrar(item);
   };
 
@@ -107,13 +162,29 @@ export function ItemsDeGasto({
         )}
       </div>
       <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 14, lineHeight: 1.5 }}>
-        Los de filamento y de insumo suman stock al guardarlos y dejan un restock en el
-        historial. Los de envío solo suman al total.
+        {textos.ayuda}
       </div>
 
       {items.length === 0 && !borrador && (
         <div style={{ padding: 20, color: "var(--muted)", fontSize: 13, border: "1px dashed var(--line)" }}>
-          Todavía no hay ítems. Agregá uno para registrar qué se compró.
+          {textos.vacio}
+        </div>
+      )}
+
+      {/* Los encabezados no son una tabla aparte: comparten la misma plantilla
+          de columnas que las filas, así no hay dos definiciones de ancho que
+          puedan separarse. */}
+      {items.length > 0 && (
+        <div style={{
+          display: "grid", gridTemplateColumns: COLUMNAS, gap: 12,
+          padding: "0 12px 8px", fontSize: 10, fontWeight: 700, letterSpacing: 0.8,
+          textTransform: "uppercase", color: "var(--muted)",
+        }} className="items-head">
+          <span>Categoría</span>
+          <span>Detalle</span>
+          <span>Link</span>
+          <span style={{ textAlign: "right" }}>Total</span>
+          <span/>
         </div>
       )}
 
@@ -121,7 +192,7 @@ export function ItemsDeGasto({
         {items.map(item => (
           borrador && !borrador.esNuevo && borrador.item.itemId === item.itemId ? null : (
             <div key={item.itemId} style={{
-              display: "grid", gridTemplateColumns: "104px 1fr 130px 70px",
+              display: "grid", gridTemplateColumns: COLUMNAS,
               gap: 12, alignItems: "center",
               padding: "10px 12px", background: "var(--bg)", border: "1px solid var(--line)",
             }} className="form-layout">
@@ -135,6 +206,18 @@ export function ItemsDeGasto({
               <span style={{ fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
                 title={resumen(item)}>
                 {resumen(item)}
+              </span>
+              {/* Envío no tiene link: su celda es un guion, sin ancla. */}
+              <span style={{ fontSize: 12.5, overflow: "hidden" }}>
+                {aceptaLink(item.categoria) && item.link ? (
+                  <a href={item.link} target="_blank" rel="noopener noreferrer"
+                    title={item.link}
+                    style={{ color: "var(--accent)", textDecoration: "underline" }}>
+                    Link
+                  </a>
+                ) : (
+                  <span style={{ color: "var(--muted)" }}>—</span>
+                )}
               </span>
               <span style={{ fontSize: 12.5, fontWeight: 700, textAlign: "right" }}>
                 {fmtARS(totalDeItem(item))}
@@ -159,7 +242,7 @@ export function ItemsDeGasto({
               <ListaDesplegable
                 opciones={CATEGORIAS.map(c => ({ id: c.id, nombre: c.nombre }))}
                 valor={borrador.item.categoria}
-                onElegir={(c) => { setErrores({}); setBorrador(b => ({ ...b, item: cambiarCategoria(b.item, c) })); }}
+                onElegir={cambiarCat}
                 titulo="Qué se compró"
               />
             </div>
@@ -191,7 +274,7 @@ export function ItemsDeGasto({
                     onChange={e => up({ cantidad: e.target.value })} error={errores.cantidad} placeholder="1000"/>
                   <TKInput label="Precio total" type="number" value={borrador.item.precioTotal}
                     onChange={e => up({ precioTotal: e.target.value })} error={errores.precioTotal} placeholder="18000"/>
-                  <div/>
+                  <CampoLink item={borrador.item} error={errores.link} up={up}/>
                 </div>
               </>
             )}
@@ -260,6 +343,9 @@ export function ItemsDeGasto({
                     <div style={{ fontSize: 11, color: "var(--muted)" }}>Precio total</div>
                     <div style={{ fontSize: 16, fontWeight: 700 }}>{fmtARS(totalDeItem(borrador.item))}</div>
                   </div>
+                </div>
+                <div style={{ marginBottom: 14 }}>
+                  <CampoLink item={borrador.item} error={errores.link} up={up}/>
                 </div>
               </>
             )}

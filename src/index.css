@@ -100,7 +100,7 @@ input, select, textarea { font-family: inherit; color: var(--text); }
   .about-grid { grid-template-columns: 1fr !important; }
   .about-stats { grid-template-columns: repeat(2, 1fr) !important; }
   .cart-row { grid-template-columns: 80px 1fr auto !important; }
-  .cart-head { display: none !important; }
+  .cart-head, .items-head { display: none !important; }
   .carousel-slide-grid { grid-template-columns: 1fr !important; gap: 24px !important; }
 }
 
@@ -147,7 +147,8 @@ input, select, textarea { font-family: inherit; color: var(--text); }
 .frame-mobile-sim .cat-sidebar { order: 2; border-top: 1px solid var(--line); padding-top: 20px; }
 .frame-mobile-sim .about-stats { grid-template-columns: repeat(2, 1fr) !important; }
 .frame-mobile-sim .cart-row { grid-template-columns: 70px 1fr auto !important; }
-.frame-mobile-sim .cart-head { display: none !important; }
+.frame-mobile-sim .cart-head,
+.frame-mobile-sim .items-head { display: none !important; }
 .frame-mobile-sim h1 { font-size: clamp(32px, 8vw, 48px) !important; }
 
 

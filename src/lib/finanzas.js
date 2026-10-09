@@ -14,17 +14,26 @@
 
 import {
   collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, deleteDoc,
-  runTransaction, writeBatch, serverTimestamp,
+  writeBatch, serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '../firebase.js';
-import { montoDeGasto } from './gastoItems.js';
+import { montoDeGasto, totalDeItems } from './gastoItems.js';
 
 export const COL_GANANCIAS = "ganancias";
 export const COL_GASTOS = "gastos";
 export const PREFIJO_GASTO = "GAS";
 
+/**
+ * El id reservado para "estoy cargando un gasto nuevo", en la misma ranura de
+ * la URL donde va el id de un gasto existente: /admin/finanzas/gastos/nuevo.
+ *
+ * No colisiona con ningún documento real: los gastos se crean siempre con id
+ * automático de Firestore, que son 20 caracteres.
+ */
+export const GASTO_NUEVO = "nuevo";
+
 /** El documento que lleva los correlativos. Vive en settings, ya admin-only. */
-const refContadores = () => doc(db, "settings", "contadores");
+export const refContadores = () => doc(db, "settings", "contadores");
 
 // ── Fechas ────────────────────────────────────────────────────────────
 // El input date da "2026-10-04". `new Date("2026-10-04")` lo lee como
@@ -91,6 +100,49 @@ export function validarMovimiento({ fecha, monto, descripcion }, { pideDescripci
     valido: Object.keys(errores).length === 0,
     errores,
     datos: { fecha: f, monto: n, descripcion: desc },
+  };
+}
+
+/**
+ * Un gasto, que ya no es solo un monto: puede valer la suma de sus ítems.
+ *
+ * La regla de fondo es que no se guarden gastos de $0, pero el número puede
+ * venir de dos lados, así que el chequeo no puede ser solo "monto > 0":
+ *   - en manual lo escribe una persona y tiene que ser un número mayor a 0;
+ *   - en automático sale de los ítems, y entonces lo que falta cuando da 0 no
+ *     es el monto sino un ítem. Decirle "el monto tiene que ser mayor a 0" a
+ *     alguien que no tiene dónde escribirlo no ayuda en nada.
+ *
+ * @returns {{valido, errores, datos: {fecha, descripcion, monto}}}
+ */
+export function validarGasto({ fecha, descripcion, monto, montoManual = false, items = [] }) {
+  const errores = {};
+  const f = fechaDesdeInput(fecha);
+  if (!f) errores.fecha = "Poné una fecha válida.";
+
+  const desc = String(descripcion || "").trim();
+  if (desc.length === 0) errores.descripcion = "Escribí una descripción.";
+
+  const lista = Array.isArray(items) ? items : [];
+  let efectivo;
+  if (montoManual) {
+    const texto = String(monto ?? "").trim();
+    const n = texto === "" ? NaN : Number(texto);
+    if (!Number.isFinite(n) || n <= 0) errores.monto = "El monto tiene que ser un número mayor a 0.";
+    efectivo = Number.isFinite(n) ? n : 0;
+  } else {
+    efectivo = totalDeItems(lista);
+    if (lista.length === 0) {
+      errores.items = "Agregá al menos un ítem, o activá el monto manual y escribilo.";
+    } else if (efectivo <= 0) {
+      errores.items = "Los ítems suman $0: revisá sus precios.";
+    }
+  }
+
+  return {
+    valido: Object.keys(errores).length === 0,
+    errores,
+    datos: { fecha: f, descripcion: desc, monto: efectivo },
   };
 }
 
@@ -229,45 +281,31 @@ export const formatearNumeroGasto = (n) =>
  * siguiente reuse su número. Para un comprobante de compra eso es peor que
  * saltearse uno, porque dos papeles distintos terminan con el mismo número.
  *
- * El incremento va en la MISMA transacción que escribe el gasto: dos altas a
- * la vez leen el mismo valor, pero solo una commitea y la otra reintenta.
+ * El incremento va en la MISMA transacción que escribe el gasto, junto con el
+ * stock de sus ítems y sus restocks. Esa transacción vive en
+ * comprasInventario.js (crearGastoConItems), que es el único lugar que crea
+ * gastos: dos caminos de alta serían dos formas de gastar el contador.
+ *
+ * Dos altas a la vez leen el mismo valor, pero solo una commitea y la otra
+ * reintenta.
  */
-export async function crearGasto({ fecha, descripcion, monto, detalle = "" }) {
-  const { valido, errores, datos } = validarMovimiento({ fecha, monto, descripcion });
-  if (!valido) throw new Error(Object.values(errores).join(" "));
 
-  return runTransaction(db, async (tx) => {
-    const snap = await tx.get(refContadores());
-    const siguiente = (Number(snap.exists() ? snap.data().gastos : 0) || 0) + 1;
-    const numeroGasto = formatearNumeroGasto(siguiente);
-
-    // merge para no pisar otros contadores que puedan vivir en el documento.
-    tx.set(refContadores(), { gastos: siguiente }, { merge: true });
-    tx.set(doc(collection(db, COL_GASTOS)), {
-      numeroGasto,
-      fecha: datos.fecha,
-      descripcion: datos.descripcion,
-      monto: datos.monto,
-      detalle: String(detalle || ""),
-      createdAt: serverTimestamp(),
-    });
-    return numeroGasto;
-  });
-}
-
-/** El número NO se toca: es el correlativo, y editarlo rompería su sentido. */
-export async function actualizarGasto(id, { fecha, descripcion, monto }, { conMonto = true } = {}) {
-  // Con ítems el monto no se edita a mano: lo manda su suma. Y tampoco se
-  // vuelve a escribir el viejo, que quedaría como un segundo número guardado
-  // peleado con el que se muestra.
-  const { valido, errores, datos } = conMonto
-    ? validarMovimiento({ fecha, monto, descripcion })
-    : validarMovimiento({ fecha, monto: "1", descripcion });
+/**
+ * El número NO se toca: es el correlativo, y editarlo rompería su sentido.
+ *
+ * Los ítems tampoco: los cambia la transacción que mueve el inventario. Acá
+ * solo entran los datos de cabecera y el monto, que con el interruptor en
+ * manual lo escribe una persona y en automático sale de los ítems que ya
+ * tiene el gasto.
+ */
+export async function actualizarGasto(id, { fecha, descripcion, monto, montoManual = false }, { items = [] } = {}) {
+  const { valido, errores, datos } = validarGasto({ fecha, descripcion, monto, montoManual, items });
   if (!valido) throw new Error(Object.values(errores).join(" "));
   await updateDoc(doc(db, COL_GASTOS, id), {
     fecha: datos.fecha,
     descripcion: datos.descripcion,
-    ...(conMonto ? { monto: datos.monto } : {}),
+    monto: datos.monto,
+    montoManual: Boolean(montoManual),
   });
 }
 
