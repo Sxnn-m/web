@@ -8,22 +8,33 @@
 // escribir —un 5 camino a 500— ya habría movido el inventario.
 
 import { useState, useMemo } from 'react';
-import { TKButton, TKInput, Icon, fmtARS } from '../../components/UI.jsx';
+import { TKButton, TKInput, TKPill, Icon, fmtARS } from '../../components/UI.jsx';
 import { SelectorConAgregar } from '../../components/SelectorConAgregar.jsx';
 import { ListaDesplegable } from '../../components/ListaDesplegable.jsx';
+import {
+  envolturaTabla, encabezadoTabla, filaTabla, bordeFila, botonAccion, botonBorrar, CLASE_FILA,
+} from '../../components/tablaAdmin.js';
 import {
   CATEGORIAS, itemVacio, cambiarCategoria, pierdeLink, aceptaLink,
   validarItem, normalizarItem, totalDeItem, totalDeItems, mueveStock, usosDeInsumo,
 } from '../../lib/gastoItems.js';
 import { tiposDe } from '../../lib/tiposInsumo.js';
 
+// El azul de Finanzas. Lo usa el total de abajo, que es un número del mismo
+// peso que los de las tarjetas del tab. Los carteles de categoría ya NO: esos
+// son el beige de TKPill, el mismo que los de Productos.
 const AZUL = "#345C83";
 
 // Las mismas columnas para el encabezado y para cada fila. La del detalle va
 // en minmax(0, 1fr) y no en 1fr: un track "fr" no puede achicarse por debajo
 // de su contenido mínimo, así que con un texto largo se ensancharía y correría
 // las demás, dejando los encabezados desalineados con los datos.
-const COLUMNAS = "104px minmax(0, 1fr) 54px 130px 70px";
+const COLUMNAS = "116px minmax(0, 1fr) 54px 130px 74px";
+
+// El ancho con el que la tabla deja de comprimirse y aparece su scroll
+// horizontal, igual que en Productos y Pedidos: a partir de ahí, achicar más
+// las columnas no las hace legibles, solo las corta.
+const ANCHO_MINIMO = 620;
 
 // Qué cambia entre cargar un gasto nuevo y editar uno ya guardado: en el alta
 // los ítems viven en memoria hasta que se guarda el gasto, así que prometer
@@ -43,12 +54,6 @@ const TEXTOS = {
       ? `¿Eliminar este ítem? Se van a restar ${item.cantidad} ${item.categoria === "filamento" ? "g" : "u."} del inventario y se va a borrar su restock.`
       : "¿Eliminar este ítem?",
   },
-};
-
-const actionBtn = {
-  background: "none", border: "1px solid var(--line)", padding: "4px 6px",
-  cursor: "pointer", color: "var(--text)", display: "flex", alignItems: "center",
-  borderRadius: 4,
 };
 
 const rotulo = {
@@ -150,8 +155,18 @@ export function ItemsDeGasto({
     await onBorrar(item);
   };
 
-  const insumoElegido = insumos.find(i => i._id === borrador?.item?.insumoId) || null;
-  const tiposDelInsumo = insumoElegido ? tiposDe(insumoElegido) : [];
+  // El mismo formulario para las dos cosas: editar reemplaza la fila del ítem,
+  // agregar lo pone al final. Se arma una vez y se renderiza donde toque.
+  const formulario = borrador && (
+    <FormularioItem
+      borrador={borrador} errores={errores} guardando={guardando}
+      insumos={insumos} listas={listas}
+      up={up} cambiarCat={cambiarCat} elegirInsumo={elegirInsumo}
+      onCrearInsumo={onCrearInsumo} onBorrarInsumo={onBorrarInsumo}
+      onGuardar={guardar}
+      onCancelar={() => { setBorrador(null); setErrores({}); }}
+    />
+  );
 
   return (
     <div>
@@ -171,72 +186,108 @@ export function ItemsDeGasto({
         </div>
       )}
 
-      {/* Los encabezados no son una tabla aparte: comparten la misma plantilla
-          de columnas que las filas, así no hay dos definiciones de ancho que
-          puedan separarse. */}
-      {items.length > 0 && (
-        <div style={{
-          display: "grid", gridTemplateColumns: COLUMNAS, gap: 12,
-          padding: "0 12px 8px", fontSize: 10, fontWeight: 700, letterSpacing: 0.8,
-          textTransform: "uppercase", color: "var(--muted)",
-        }} className="items-head">
-          <span>Categoría</span>
-          <span>Detalle</span>
-          <span>Link</span>
-          <span style={{ textAlign: "right" }}>Total</span>
-          <span/>
+      {/* Misma tabla que Productos y Pedidos: banda gris de encabezado, filas
+          separadas por una línea, y su propio scroll horizontal cuando la
+          pantalla no da. Encabezado y filas comparten COLUMNAS, así no hay
+          dos definiciones de ancho que puedan separarse. */}
+      {(items.length > 0 || borrador) && (
+        <div style={envolturaTabla}>
+          <div style={{ minWidth: ANCHO_MINIMO }}>
+            <div style={{ ...encabezadoTabla, gridTemplateColumns: COLUMNAS }}>
+              <div>Categoría</div>
+              <div>Detalle</div>
+              <div>Link</div>
+              <div style={{ textAlign: "right" }}>Total</div>
+              <div>Acciones</div>
+            </div>
+
+            {items.map(item => (
+              <div key={item.itemId} style={bordeFila}>
+                {/* Editar un ítem reemplaza SU fila, no abre un bloque abajo:
+                    así la lista no se reordena mientras se edita. */}
+                {borrador && !borrador.esNuevo && borrador.item.itemId === item.itemId ? formulario : (
+                  <div className={CLASE_FILA} style={{ ...filaTabla, gridTemplateColumns: COLUMNAS }}>
+                    <div>
+                      <TKPill>{nombreCategoria(item.categoria)}</TKPill>
+                    </div>
+                    <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                      title={resumen(item)}>
+                      {resumen(item)}
+                    </div>
+                    {/* Envío no tiene link: su celda es un guion, sin ancla. */}
+                    <div style={{ overflow: "hidden" }}>
+                      {aceptaLink(item.categoria) && item.link ? (
+                        <a href={item.link} target="_blank" rel="noopener noreferrer"
+                          title={item.link} style={{ color: "var(--accent)" }}>
+                          Link
+                        </a>
+                      ) : (
+                        <span style={{ color: "var(--muted)" }}>—</span>
+                      )}
+                    </div>
+                    <div style={{ fontWeight: 700, textAlign: "right" }}>
+                      {fmtARS(totalDeItem(item))}
+                    </div>
+                    <div style={{ display: "flex", gap: 4 }}>
+                      <button style={botonAccion} title="Editar" onClick={() => editar(item)} disabled={guardando}>
+                        <Icon.spark size={14}/>
+                      </button>
+                      <button style={botonBorrar} title="Eliminar"
+                        onClick={() => borrar(item)} disabled={guardando}>
+                        <Icon.trash size={14}/>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+
+            {/* Un ítem nuevo va al final, que es donde va a quedar. */}
+            {borrador?.esNuevo && <div style={bordeFila}>{formulario}</div>}
+
+          </div>
         </div>
       )}
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {items.map(item => (
-          borrador && !borrador.esNuevo && borrador.item.itemId === item.itemId ? null : (
-            <div key={item.itemId} style={{
-              display: "grid", gridTemplateColumns: COLUMNAS,
-              gap: 12, alignItems: "center",
-              padding: "10px 12px", background: "var(--bg)", border: "1px solid var(--line)",
-            }} className="form-layout">
-              <span style={{
-                fontSize: 10, fontWeight: 700, letterSpacing: 0.8, textTransform: "uppercase",
-                color: AZUL, background: `${AZUL}18`, border: `1px solid ${AZUL}44`,
-                padding: "3px 8px", borderRadius: 2, textAlign: "center",
-              }}>
-                {nombreCategoria(item.categoria)}
-              </span>
-              <span style={{ fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-                title={resumen(item)}>
-                {resumen(item)}
-              </span>
-              {/* Envío no tiene link: su celda es un guion, sin ancla. */}
-              <span style={{ fontSize: 12.5, overflow: "hidden" }}>
-                {aceptaLink(item.categoria) && item.link ? (
-                  <a href={item.link} target="_blank" rel="noopener noreferrer"
-                    title={item.link}
-                    style={{ color: "var(--accent)", textDecoration: "underline" }}>
-                    Link
-                  </a>
-                ) : (
-                  <span style={{ color: "var(--muted)" }}>—</span>
-                )}
-              </span>
-              <span style={{ fontSize: 12.5, fontWeight: 700, textAlign: "right" }}>
-                {fmtARS(totalDeItem(item))}
-              </span>
-              <span style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
-                <button style={actionBtn} title="Editar" onClick={() => editar(item)} disabled={guardando}>
-                  <Icon.spark size={13}/>
-                </button>
-                <button style={{ ...actionBtn, color: "#c64138" }} title="Eliminar"
-                  onClick={() => borrar(item)} disabled={guardando}>
-                  <Icon.trash size={13}/>
-                </button>
-              </span>
-            </div>
-          )
-        ))}
+      {/* El total va FUERA del contenedor que scrollea: adentro quedaría
+          alineado al ancho mínimo de la tabla y en el teléfono habría que
+          arrastrar a la derecha para ver el número más importante. La línea
+          que lo separa es el borde de la última fila. */}
+      {items.length > 0 && (
+        <div style={{
+          display: "flex", justifyContent: "flex-end", gap: 12,
+          alignItems: "baseline", padding: "14px 10px 0",
+        }}>
+          <span style={{ fontSize: 11.5, color: "var(--muted)" }}>
+            Total de {items.length} ítem{items.length === 1 ? "" : "s"}
+          </span>
+          <span style={{ fontSize: 20, fontWeight: 700, color: AZUL }}>{fmtARS(total)}</span>
+        </div>
+      )}
+    </div>
+  );
+}
 
-        {borrador && (
-          <div style={{ padding: 14, background: "var(--bg-alt)", border: `1px solid ${AZUL}55` }}>
+/** El formulario del ítem, el mismo para alta y edición. */
+function FormularioItem({
+  borrador, errores, guardando, insumos, listas,
+  up, cambiarCat, elegirInsumo, onCrearInsumo, onBorrarInsumo, onGuardar, onCancelar,
+}) {
+  const insumoElegido = insumos.find(i => i._id === borrador.item.insumoId) || null;
+  const tiposDelInsumo = insumoElegido ? tiposDe(insumoElegido) : [];
+
+  // Apenas más oscuro que la página y sin borde: tiene que leerse como la
+  // misma fila en otro estado, no como una caja encima de la tabla.
+  //
+  // La línea de arriba es necesaria porque la banda del encabezado usa ese
+  // mismo gris: sin ella, editar la PRIMERA fila hace que el formulario y el
+  // encabezado se lean como un solo bloque. El margen negativo la monta sobre
+  // la línea de la fila anterior, para que no queden dos de 1px juntas.
+  return (
+          <div style={{
+            padding: "14px 10px", background: "var(--bg-alt)",
+            borderTop: "1px solid var(--line-strong)", marginTop: -1,
+          }}>
             <div style={{ maxWidth: 220, marginBottom: 14 }}>
               <label style={rotulo}>Categoría</label>
               <ListaDesplegable
@@ -365,29 +416,14 @@ export function ItemsDeGasto({
             )}
 
             <div style={{ display: "flex", gap: 12 }}>
-              <TKButton onClick={guardar} disabled={guardando}>
+              <TKButton onClick={onGuardar} disabled={guardando}>
                 {guardando ? "Guardando..." : "Guardar ítem"}
               </TKButton>
-              <TKButton variant="outline" onClick={() => { setBorrador(null); setErrores({}); }} disabled={guardando}>
+              <TKButton variant="outline" onClick={onCancelar} disabled={guardando}>
                 Cancelar
               </TKButton>
             </div>
           </div>
-        )}
-      </div>
-
-      {items.length > 0 && (
-        <div style={{
-          display: "flex", justifyContent: "flex-end", gap: 12, alignItems: "baseline",
-          marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--line)",
-        }}>
-          <span style={{ fontSize: 11.5, color: "var(--muted)" }}>
-            Total de {items.length} ítem{items.length === 1 ? "" : "s"}
-          </span>
-          <span style={{ fontSize: 20, fontWeight: 700, color: AZUL }}>{fmtARS(total)}</span>
-        </div>
-      )}
-    </div>
   );
 }
 

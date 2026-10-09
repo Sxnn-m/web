@@ -1,5 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import { TKButton, TKInput, TKPill, Icon, fmtARS } from '../components/UI.jsx';
+import {
+  envolturaTabla, encabezadoTabla, filaTabla, bordeFila, botonAccion, CLASE_FILA,
+} from '../components/tablaAdmin.js';
 import { db } from '../firebase.js';
 import {
   collection, getDocs, addDoc, updateDoc, deleteDoc, doc,
@@ -1081,15 +1084,11 @@ export function ProductsTab({
       )}
 
       {/* Table container with horizontal scroll for mobile */}
-      <div style={{ overflowX: "auto", margin: "0 -16px", padding: "0 16px" }}>
+      <div style={envolturaTabla}>
         <div style={{ minWidth: 962 }}>
-          {/* Table header */}
-          <div style={{
-            display: "grid", gridTemplateColumns: COL,
-            gap: 10, padding: "9px 10px", background: "var(--bg-alt)",
-            fontSize: 9.5, textTransform: "uppercase",
-            letterSpacing: 1.2, color: "var(--muted)", fontWeight: 700,
-          }}>
+          {/* Table header. Los valores salen de tablaAdmin.js: esta tabla,
+              Pedidos y los ítems de un gasto tienen que verse igual. */}
+          <div style={{ ...encabezadoTabla, gridTemplateColumns: COL }}>
             <div>ID</div><div>Nombre</div><div>Categoría</div><div>Precio</div><div>Costo fab.</div><div>Disponible</div><div>Origen</div><div>Visible</div><div>Acciones</div>
           </div>
 
@@ -1098,12 +1097,10 @@ export function ProductsTab({
             const disp = calcularDisponibilidad(p, filamentos, insumos);
             const abierto = expandido === p._id;
             return (
-              <div key={p._id} style={{ borderBottom: "1px solid var(--line)", opacity: p.visible === false ? 0.5 : 1 }}>
-                <div style={{
-                  display: "grid", gridTemplateColumns: COL,
-                  gap: 10, padding: "12px 10px",
-                  fontSize: 12.5, alignItems: "center",
-                }}>
+              <div key={p._id} style={{ ...bordeFila, opacity: p.visible === false ? 0.5 : 1 }}>
+                {/* El resaltado va en la fila y no en el contenedor, para que
+                    pasar el mouse no pinte también el detalle desplegado. */}
+                <div className={CLASE_FILA} style={{ ...filaTabla, gridTemplateColumns: COL }}>
                   <div
                     style={{
                       fontSize: 11,
@@ -1206,11 +1203,8 @@ export function ProductsTab({
   );
 }
 
-const actionBtn = {
-  background: "none", border: "1px solid var(--line)", padding: "5px 7px",
-  cursor: "pointer", color: "var(--text)", display: "flex", alignItems: "center",
-  borderRadius: 4,
-};
+// El mismo botón chico que usan Pedidos y los ítems de un gasto.
+const actionBtn = botonAccion;
 
 
 // ─── Personalizados: listado ─────────────────────────────────────────
