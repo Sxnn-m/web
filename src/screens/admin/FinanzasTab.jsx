@@ -13,12 +13,14 @@ import {
   cargarGanancias, cargarGastos, totales, hoyEnInput, inputDesdeFecha,
   gananciasFaltantes, crearGananciasFaltantes, crearGananciaDePedidoConFecha,
   crearGananciaManual, actualizarGananciaManual, eliminarGanancia,
-  crearGasto, eliminarGasto, esAutomatica, validarMovimiento,
+  eliminarGasto, esAutomatica, validarMovimiento, GASTO_NUEVO,
 } from '../../lib/finanzas.js';
 import { DetalleGasto } from './DetalleGasto.jsx';
+import { NuevoGasto } from './NuevoGasto.jsx';
 import { TablaConTope } from '../../components/TablaConTope.jsx';
 import { fmtDia } from '../../lib/fechas.js';
 import { montoDeGasto, usosDeInsumo } from '../../lib/gastoItems.js';
+import { previsualizarBorrado, revertirItemsDeGasto } from '../../lib/comprasInventario.js';
 import { crearInsumo, eliminarInsumo } from '../../lib/insumos.js';
 import { ID_TIPO_BASE, NOMBRE_TIPO_BASE } from '../../lib/tiposInsumo.js';
 import {
@@ -133,7 +135,6 @@ export function FinanzasTab({
   const [loading, setLoading] = useState(true);
   const [guardando, setGuardando] = useState(false);
   const [formGanancia, setFormGanancia] = useState(null);   // null | {id?, ...}
-  const [formGasto, setFormGasto] = useState(null);
   // Pedidos pagados sin pagadoAt: no se les inventa la fecha, se piden.
   const [sinFecha, setSinFecha] = useState([]);
   const [fechasAMano, setFechasAMano] = useState({});
@@ -279,17 +280,32 @@ export function FinanzasTab({
     setMsg("✓ Ganancia eliminada.");
   });
 
-  const guardarGasto = conError(async (form) => {
-    const numero = await crearGasto(form);
-    setFormGasto(null);
-    await recargar();
-    setMsg(`✓ Gasto ${numero} registrado.`);
-  });
-
+  /**
+   * Borrar desde la lista revierte el inventario igual que desde el detalle.
+   * Son el mismo borrado: que uno de los dos caminos dejara el stock sumado
+   * sin el gasto que lo explica sería un agujero que depende de por dónde se
+   * entró.
+   */
   const borrarGasto = conError(async (g) => {
-    if (!confirm(`¿Eliminar el gasto ${g.numeroGasto} (${g.descripcion})?`)) return;
+    const { aRevertir, bloqueos } = previsualizarBorrado(g, { filamentos, insumos });
+    if (bloqueos.length > 0) {
+      alert(
+        `No se puede eliminar ${g.numeroGasto}: hay ítems que no se pueden revertir ` +
+        `porque el stock ya se consumió.\n\n${bloqueos.join("\n")}\n\n` +
+        `Ajustá esas cantidades desde Inventario o Insumos y volvé a intentar.`
+      );
+      return;
+    }
+    const detalle = aRevertir.length > 0
+      ? `\n\nSe van a revertir ${aRevertir.length} ítem(s) del inventario.`
+      : "";
+    if (!confirm(`¿Eliminar el gasto ${g.numeroGasto} (${g.descripcion})?${detalle}`)) return;
+    // Primero revertir, después borrar: si la reversión falla a mitad, el
+    // gasto sigue existiendo con lo que queda y se puede reintentar.
+    await revertirItemsDeGasto(g, { filamentos });
     await eliminarGasto(g._id);
     await recargar();
+    if (aRevertir.length > 0) await onInventarioChange?.();
     setMsg("✓ Gasto eliminado.");
   });
 
@@ -300,25 +316,35 @@ export function FinanzasTab({
     setMsg(`✓ Ganancia de ${pedido.numeroOrden} incorporada.`);
   });
 
+  // Lo que las dos vistas de gasto necesitan para armar un ítem. Son las
+  // mismas listas y los mismos handlers: cargar una compra nueva y corregir
+  // una vieja piden exactamente lo mismo.
+  const propsDeItems = {
+    filamentos, insumos, productos, personalizados, gastos, listas,
+    onCrearInsumo: crearInsumoDesdeGasto,
+    onBorrarInsumo: borrarInsumoDesdeGasto,
+    onInventarioChange,
+    onCambios: recargar,
+    setMsg,
+  };
+
+  // El alta se monta en lugar de la lista, no encima: lleva la lista de ítems
+  // entera y no entra en un modal.
+  if (gastoId === GASTO_NUEVO) {
+    return (
+      <NuevoGasto
+        {...propsDeItems}
+        onVolver={onVolver}
+        onGuardado={() => onVolver()}
+      />
+    );
+  }
+
   // La vista de detalle se monta en lugar de la lista, no encima: tiene su
   // propia URL y el botón Volver vuelve al tab.
   if (gastoId) {
     return (
-      <DetalleGasto
-        gastoId={gastoId}
-        filamentos={filamentos}
-        insumos={insumos}
-        productos={productos}
-        personalizados={personalizados}
-        gastos={gastos}
-        listas={listas}
-        onCrearInsumo={crearInsumoDesdeGasto}
-        onBorrarInsumo={borrarInsumoDesdeGasto}
-        onInventarioChange={onInventarioChange}
-        onVolver={onVolver}
-        onCambios={recargar}
-        setMsg={setMsg}
-      />
+      <DetalleGasto gastoId={gastoId} {...propsDeItems} onVolver={onVolver}/>
     );
   }
 
@@ -446,23 +472,12 @@ export function FinanzasTab({
         <div>
           <div style={tituloBloque}>Gastos</div>
           <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 4 }}>
-            Todos de carga manual. Abrí uno para escribir el detalle de la compra.
+            Todos de carga manual. Los ítems de filamento e insumo suman stock y dejan su restock.
           </div>
         </div>
-        <TKButton onClick={() => setFormGasto({ fecha: hoyEnInput(), descripcion: "", monto: "" })}
+        <TKButton onClick={() => onAbrirGasto(GASTO_NUEVO)}
           icon={<Icon.plus size={14}/>}>Agregar gasto</TKButton>
       </div>
-
-      {formGasto && (
-        <FormMovimiento
-          titulo="Nuevo gasto"
-          inicial={formGasto}
-          textoDescripcion="Descripción"
-          guardando={guardando}
-          onGuardar={guardarGasto}
-          onCancelar={() => setFormGasto(null)}
-        />
-      )}
 
       {/* Al detalle se entra SOLO por su botón. Con la fila entera clickeable,
           apuntar al tacho y errarle por un píxel navegaba a otra pantalla en

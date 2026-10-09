@@ -11,6 +11,7 @@
 // transaccional está en comprasInventario.js.
 
 import { claveDeRollo } from './transferencias.js';
+import { normalizarUrl } from './url.js';
 
 export const CATEGORIAS = [
   { id: "filamento", nombre: "Filamento" },
@@ -22,13 +23,23 @@ export const CATEGORIAS = [
 export const mueveStock = (item) =>
   item?.categoria === "filamento" || item?.categoria === "insumo";
 
+/**
+ * ¿Esta categoría guarda el link de dónde se compró?
+ *
+ * Envío no: el costo de envío no se compra en ningún lado, es lo que cuesta
+ * que llegue lo que sí se compró. Un campo que nunca se llena es peor que no
+ * tenerlo.
+ */
+export const aceptaLink = (categoria) =>
+  categoria === "filamento" || categoria === "insumo";
+
 /** Id propio de cada ítem: sin él, editar el 3º no se distingue de editar otro. */
 export const nuevoItemId = () =>
   `it_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
 
 /** Un ítem recién agregado, en borrador. */
 export function itemVacio(categoria = "filamento") {
-  const base = { itemId: nuevoItemId(), categoria };
+  const base = { itemId: nuevoItemId(), categoria, ...(aceptaLink(categoria) ? { link: "" } : {}) };
   if (categoria === "filamento") {
     return { ...base, material: "", color: "", marca: "", owner: "", cantidad: "", precioTotal: "" };
   }
@@ -38,9 +49,24 @@ export function itemVacio(categoria = "filamento") {
   return { ...base, precioTotal: "" };
 }
 
-/** Cambiar de categoría rehace el borrador: los campos son otros. */
-export const cambiarCategoria = (item, categoria) =>
-  ({ ...itemVacio(categoria), itemId: item?.itemId || nuevoItemId() });
+/**
+ * Cambiar de categoría rehace el borrador: los campos son otros.
+ *
+ * El link sobrevive entre filamento e insumo porque en los dos significa lo
+ * mismo —dónde se compró— y volver a pegarlo sería un castigo por haberse
+ * equivocado de categoría. Hacia envío se descarta: ahí no existe.
+ */
+export const cambiarCategoria = (item, categoria) => ({
+  ...itemVacio(categoria),
+  itemId: item?.itemId || nuevoItemId(),
+  ...(aceptaLink(categoria) && aceptaLink(item?.categoria) && item?.link
+    ? { link: item.link }
+    : {}),
+});
+
+/** ¿Pasar a esta categoría se lleva puesto un link ya cargado? */
+export const pierdeLink = (item, categoria) =>
+  Boolean(item?.link) && aceptaLink(item?.categoria) && !aceptaLink(categoria);
 
 const num = (v) => {
   const t = String(v ?? "").trim();
@@ -62,20 +88,36 @@ export function totalDeItem(item) {
 export const totalDeItems = (items = []) =>
   items.reduce((acc, i) => acc + totalDeItem(i), 0);
 
-/**
- * El monto que vale un gasto.
- *
- * Con ítems lo manda la suma, y el campo manual deja de usarse: tener los dos
- * conviviendo haría que el saldo dependa de cuál se leyó. Sin ítems —los
- * gastos anteriores a esta pantalla— sigue valiendo el monto cargado a mano.
- */
-export function montoDeGasto(gasto) {
-  const items = Array.isArray(gasto?.items) ? gasto.items : [];
-  return items.length > 0 ? totalDeItems(items) : (Number(gasto?.monto) || 0);
-}
-
 export const tieneItems = (gasto) =>
   Array.isArray(gasto?.items) && gasto.items.length > 0;
+
+/**
+ * ¿El monto de este gasto lo escribió una persona, o sale de los ítems?
+ *
+ * El campo manda cuando está. Cuando no está —los gastos cargados antes de
+ * que existiera el interruptor— se deduce: sin ítems, el número lo escribió
+ * alguien; con ítems, valía su suma. Deducirlo en vez de asumir un default
+ * evita que un gasto viejo cambie de monto solo por haber agregado el campo.
+ *
+ * Que un gasto viejo no se vuelva automático al recibir su primer ítem no
+ * depende de esta función: al guardarlo, la transacción le sella el campo.
+ */
+export function esMontoManual(gasto) {
+  if (typeof gasto?.montoManual === "boolean") return gasto.montoManual;
+  return !tieneItems(gasto);
+}
+
+/**
+ * El monto que vale un gasto: el que usan el saldo y los totales.
+ *
+ * En automático lo manda la suma de los ítems y el campo guardado se ignora,
+ * aunque la escritura lo mantenga al día: si alguna vez quedaran peleados,
+ * gana lo que el usuario ve en la lista de ítems.
+ */
+export function montoDeGasto(gasto) {
+  if (esMontoManual(gasto)) return Number(gasto?.monto) || 0;
+  return totalDeItems(Array.isArray(gasto?.items) ? gasto.items : []);
+}
 
 /**
  * Qué le falta a un ítem para poder guardarse.
@@ -113,6 +155,14 @@ export function validarItem(item, { insumos = [] } = {}) {
     exigeNumero("precioTotal", "El precio");
   }
 
+  // El link es opcional, pero si está escrito tiene que poder abrirse: un
+  // href roto se descubre recién al hacer clic, cuando ya no está el contexto
+  // de qué se quiso pegar.
+  if (aceptaLink(item?.categoria)) {
+    const { valida, error } = normalizarUrl(item?.link);
+    if (!valida) errores.link = error;
+  }
+
   return { valido: Object.keys(errores).length === 0, errores };
 }
 
@@ -133,6 +183,8 @@ export function normalizarItem(item, { insumos = [] } = {}) {
       // que son justo los campos que la edición puede cambiar.
       filamentoId: item.filamentoId || null,
       restockId: item.restockId || null,
+      // Ya normalizado: lo que se guarda es lo que se va a poner en el href.
+      link: normalizarUrl(item.link).url,
     };
   }
   if (item.categoria === "insumo") {
@@ -155,9 +207,31 @@ export function normalizarItem(item, { insumos = [] } = {}) {
       precioUnitario: num(item.precioUnitario) || 0,
       cantidad: num(item.cantidad) || 0,
       restockId: item.restockId || null,
+      link: normalizarUrl(item.link).url,
     };
   }
+  // Envío no lleva link: no se escribe el campo, ni siquiera vacío.
   return { ...base, precioTotal: num(item.precioTotal) || 0 };
+}
+
+/**
+ * Qué documento de inventario toca este ítem, como clave agrupable.
+ *
+ * Es lo que permite que dos ítems del mismo rollo se sumen sobre un solo
+ * documento en vez de pisarse, y que un rollo que todavía no existe se cree
+ * UNA vez para los dos. Un ítem que no mueve stock no tiene destino.
+ *
+ * Para el filamento la clave son sus características, no su id: en un gasto
+ * recién cargado todavía no hay id, y dos ítems iguales tienen que caer en el
+ * mismo grupo igual.
+ */
+export function claveDeDestino(item) {
+  if (!mueveStock(item)) return null;
+  if (item.categoria === "filamento") {
+    if (item.filamentoId) return `f:${item.filamentoId}`;
+    return `f?:${claveDeRollo(item)}|${String(item.owner || "").trim().toLowerCase()}`;
+  }
+  return `i:${item.insumoId}|${item.tipoId || ""}`;
 }
 
 /** ¿Los dos ítems apuntan al MISMO lugar del inventario? */
