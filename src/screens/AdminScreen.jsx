@@ -784,6 +784,11 @@ export function AdminScreen({ go, tab = "dashboard", onTab, gastoId = null, onGa
           {tabActivo === "finanzas" && (
             <FinanzasTab
               pedidos={pedidos}
+              filamentos={filamentos}
+              insumos={insumos}
+              productos={productosFull}
+              personalizados={personalizados}
+              onInventarioChange={handleInventarioChange}
               gastoId={gastoId}
               onAbrirGasto={(id) => onGasto?.(id)}
               onVolver={() => onGasto?.(null)}

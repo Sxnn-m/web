@@ -3,9 +3,10 @@
 // el link se puede guardar y abrir directo: no depende de que la lista esté
 // cargada ni de haber pasado por ella.
 //
-// El campo grande es el motivo de que esta vista exista: la descripción de la
-// lista tiene que entrar en una fila, y lo que se compró de verdad —marcas,
-// cantidades, de dónde— no entra ahí.
+// La lista de ítems es el motivo de que esta vista exista: la descripción de
+// la lista de Finanzas tiene que entrar en una fila, y lo que se compró de
+// verdad —qué filamento, de qué marca, cuántos gramos— no entra ahí. Y además
+// esos ítems mueven el inventario.
 
 import { useState, useEffect } from 'react';
 import { TKButton, TKInput, TKPill, Icon, fmtARS } from '../../components/UI.jsx';
@@ -13,6 +14,9 @@ import {
   cargarGasto, actualizarGasto, guardarDetalleGasto, eliminarGasto,
   inputDesdeFecha, validarMovimiento,
 } from '../../lib/finanzas.js';
+import { montoDeGasto, tieneItems, usosDeInsumo } from '../../lib/gastoItems.js';
+import { aplicarItem, previsualizarBorrado, revertirItemsDeGasto } from '../../lib/comprasInventario.js';
+import { ItemsDeGasto } from './ItemsDeGasto.jsx';
 
 const cardStyle = {
   padding: 20, background: "var(--bg-alt)", border: "1px solid var(--line)",
@@ -34,7 +38,11 @@ function Indicador({ label, valor }) {
   );
 }
 
-export function DetalleGasto({ gastoId, onVolver, onCambios, setMsg }) {
+export function DetalleGasto({
+  gastoId, filamentos = [], insumos = [], productos = [], personalizados = [], gastos = [],
+  listas, onCrearInsumo, onBorrarInsumo, onInventarioChange,
+  onVolver, onCambios, setMsg,
+}) {
   const [gasto, setGasto] = useState(null);
   const [loading, setLoading] = useState(true);
   const [guardando, setGuardando] = useState(false);
@@ -72,13 +80,45 @@ export function DetalleGasto({ gastoId, onVolver, onCambios, setMsg }) {
     setGuardando(false);
   };
 
+  /** Guardar un ítem: la transacción mueve stock y reescribe el array. */
+  const guardarItem = async (nuevo, anterior) => {
+    setGuardando(true);
+    let ok = false;
+    try {
+      const r = await aplicarItem({ gasto, anterior, nuevo, filamentos });
+      setMsg(r.creoFilamento
+        ? `✓ Ítem guardado. Se creó el rollo ${nuevo.material} ${nuevo.color} de ${nuevo.owner} en Inventario.`
+        : "✓ Ítem guardado.");
+      await cargar();
+      await onCambios?.();
+      // Más stock puede dejar productos disponibles: el mismo recálculo que
+      // dispara un restock cargado a mano.
+      if (r.movioStock) await onInventarioChange?.();
+      ok = true;
+    } catch (err) { setMsg("Error: " + err.message); }
+    setGuardando(false);
+    return ok;
+  };
+
+  const borrarItem = async (item) => {
+    setGuardando(true);
+    try {
+      await aplicarItem({ gasto, anterior: item, nuevo: null, filamentos });
+      setMsg("✓ Ítem eliminado y stock revertido.");
+      await cargar();
+      await onCambios?.();
+      await onInventarioChange?.();
+    } catch (err) { setMsg("Error: " + err.message); }
+    setGuardando(false);
+  };
+
   const guardarDatos = async () => {
     const { valido, errores: errs } = validarMovimiento(form);
     setErrores(errs);
     if (!valido) return;
     setGuardando(true);
     try {
-      await actualizarGasto(gastoId, form);
+      await actualizarGasto(gastoId, form, { conMonto: !tieneItems(gasto) });
       setEditando(false);
       setMsg("✓ Gasto actualizado.");
       await cargar();
@@ -88,12 +128,34 @@ export function DetalleGasto({ gastoId, onVolver, onCambios, setMsg }) {
   };
 
   const borrar = async () => {
-    if (!confirm(`¿Eliminar el gasto ${gasto.numeroGasto} (${gasto.descripcion})?`)) return;
+    // Qué se va a revertir se consulta ANTES: avisar después de haber borrado
+    // la mitad no sirve de nada.
+    const { aRevertir, bloqueos } = previsualizarBorrado(gasto, { filamentos, insumos });
+    if (bloqueos.length > 0) {
+      alert(
+        `No se puede eliminar ${gasto.numeroGasto}: hay ítems que no se pueden revertir ` +
+        `porque el stock ya se consumió.\n\n${bloqueos.join("\n")}\n\n` +
+        `Ajustá esas cantidades desde Inventario o Insumos y volvé a intentar.`
+      );
+      return;
+    }
+    const detalleItems = aRevertir.length > 0
+      ? `\n\nSe van a revertir ${aRevertir.length} ítem(s) del inventario:\n` +
+        aRevertir.map(i => `· ${i.categoria === "filamento"
+          ? `${i.material} ${i.color} de ${i.owner}: −${i.cantidad} g`
+          : `${i.insumoNombre}: −${i.cantidad} u.`}`).join("\n")
+      : "";
+    if (!confirm(`¿Eliminar el gasto ${gasto.numeroGasto} (${gasto.descripcion})?${detalleItems}`)) return;
+
     setGuardando(true);
     try {
+      // Primero revertir, después borrar: si la reversión falla a mitad, el
+      // gasto sigue existiendo con los ítems que quedan y se puede reintentar.
+      await revertirItemsDeGasto(gasto, { filamentos });
       await eliminarGasto(gastoId);
       setMsg("✓ Gasto eliminado.");
       await onCambios?.();
+      if (aRevertir.length > 0) await onInventarioChange?.();
       onVolver();
     } catch (err) {
       setMsg("Error: " + err.message);
@@ -146,7 +208,9 @@ export function DetalleGasto({ gastoId, onVolver, onCambios, setMsg }) {
           un acento por tarjeta solo sugería una jerarquía que no existe. */}
       <div style={{ display: "flex", gap: 16, alignItems: "stretch", flexWrap: "wrap", margin: "20px 0 24px" }}>
         <Indicador label="Fecha" valor={fechaTexto}/>
-        <Indicador label="Monto" valor={fmtARS(gasto.monto || 0)}/>
+        {/* El monto que vale es el de los ítems cuando los hay: tener los dos
+            conviviendo haría que el saldo dependa de cuál se leyó. */}
+        <Indicador label="Monto" valor={fmtARS(montoDeGasto(gasto))}/>
         <div style={{ flex: 1 }}/>
         <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
           <TKButton variant="outline" onClick={() => setEditando(v => !v)} icon={<Icon.spark size={14}/>}>
@@ -169,8 +233,22 @@ export function DetalleGasto({ gastoId, onVolver, onCambios, setMsg }) {
               onChange={e => setForm(f => ({ ...f, fecha: e.target.value }))} error={errores.fecha}/>
             <TKInput label="Descripción" value={form.descripcion}
               onChange={e => setForm(f => ({ ...f, descripcion: e.target.value }))} error={errores.descripcion}/>
-            <TKInput label="Monto" type="number" value={form.monto}
-              onChange={e => setForm(f => ({ ...f, monto: e.target.value }))} error={errores.monto}/>
+            {tieneItems(gasto) ? (
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: 0.8, textTransform: "uppercase", color: "var(--muted)", marginBottom: 6 }}>
+                  Monto
+                </div>
+                <div style={{ padding: "12px 14px", background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 4, fontSize: 14 }}>
+                  {fmtARS(montoDeGasto(gasto))}
+                </div>
+                <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 6, lineHeight: 1.4 }}>
+                  Sale de la suma de los ítems. Para cambiarlo, editá los ítems.
+                </div>
+              </div>
+            ) : (
+              <TKInput label="Monto" type="number" value={form.monto}
+                onChange={e => setForm(f => ({ ...f, monto: e.target.value }))} error={errores.monto}/>
+            )}
           </div>
           {Object.values(errores).filter(Boolean).length > 0 && (
             <div style={{ fontSize: 12, color: "#c64138", marginBottom: 12 }}>
@@ -184,35 +262,57 @@ export function DetalleGasto({ gastoId, onVolver, onCambios, setMsg }) {
       )}
 
       <div style={cardStyle}>
-        <div style={{ fontSize: 18, marginBottom: 4 }}>Detalle de la compra</div>
-        <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 12 }}>
-          Qué se compró, cuánto de cada cosa y dónde. Texto libre, para lo que no entra
-          en la descripción de la lista.
-        </div>
-        <textarea
-          value={detalle}
-          onChange={e => setDetalle(e.target.value)}
-          rows={12}
-          placeholder={"2 rollos PLA negro Grilon3 — $ 18.000 c/u\n1 kg PETG verde — $ 24.000\nComprado en ..."}
-          style={{
-            width: "100%", padding: "12px 14px", background: "var(--bg)",
-            border: "1px solid var(--line)", borderRadius: 4, resize: "vertical",
-            fontFamily: "'DM Sans', system-ui, sans-serif", fontSize: 14,
-            color: "var(--text)", outline: "none", lineHeight: 1.6,
-            boxSizing: "border-box",
-          }}
+        <ItemsDeGasto
+          gasto={gasto}
+          filamentos={filamentos}
+          insumos={insumos}
+          productos={productos}
+          personalizados={personalizados}
+          gastos={gastos}
+          listas={listas}
+          guardando={guardando}
+          onGuardar={guardarItem}
+          onBorrar={borrarItem}
+          onCrearInsumo={onCrearInsumo}
+          onBorrarInsumo={onBorrarInsumo}
         />
-        <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 14 }}>
-          <TKButton onClick={guardarDetalle} disabled={guardando}>
-            {guardando ? "Guardando..." : "Guardar detalle"}
-          </TKButton>
-          {/* El aviso de guardado sale por el banner del backoffice, el mismo
-              que usa el resto. Acá solo se marca si quedó algo sin guardar. */}
-          {detalle !== (gasto.detalle || "") && (
-            <span style={{ fontSize: 12, color: "#B56B3E" }}>Hay cambios sin guardar.</span>
-          )}
-        </div>
       </div>
+
+      {/* El texto libre de los gastos anteriores a los ítems. No se convierte
+          ni se interpreta: no hay forma de saber si esas compras ya se
+          cargaron a mano al inventario, y leerlas como ítems sumaría stock que
+          quizá ya está. Se muestra solo si tiene algo, para que no quede una
+          caja vacía en los gastos nuevos. */}
+      {(gasto.detalle || "").trim() !== "" && (
+        <div style={cardStyle}>
+          <div style={{ fontSize: 18, marginBottom: 4 }}>Detalle anterior (texto)</div>
+          <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 12, lineHeight: 1.5 }}>
+            Lo que estaba escrito antes de que existieran los ítems. No afecta al inventario
+            ni al monto: está acá para no perderlo. Vaciándolo desaparece esta sección.
+          </div>
+          <textarea
+            value={detalle}
+            onChange={e => setDetalle(e.target.value)}
+            rows={8}
+            style={{
+              width: "100%", padding: "12px 14px", background: "var(--bg)",
+              border: "1px solid var(--line)", borderRadius: 4, resize: "vertical",
+              fontFamily: "'DM Sans', system-ui, sans-serif", fontSize: 14,
+              color: "var(--text)", outline: "none", lineHeight: 1.6,
+              boxSizing: "border-box",
+            }}
+          />
+          <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 14 }}>
+            <TKButton onClick={guardarDetalle} disabled={guardando}>
+              {guardando ? "Guardando..." : "Guardar texto"}
+            </TKButton>
+            {detalle !== (gasto.detalle || "") && (
+              <span style={{ fontSize: 12, color: "#B56B3E" }}>Hay cambios sin guardar.</span>
+            )}
+          </div>
+        </div>
+      )}
+
     </>
   );
 }
