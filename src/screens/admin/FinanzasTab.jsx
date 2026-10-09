@@ -18,6 +18,13 @@ import {
 import { DetalleGasto } from './DetalleGasto.jsx';
 import { TablaConTope } from '../../components/TablaConTope.jsx';
 import { fmtDia } from '../../lib/fechas.js';
+import { montoDeGasto, usosDeInsumo } from '../../lib/gastoItems.js';
+import { crearInsumo, eliminarInsumo } from '../../lib/insumos.js';
+import { ID_TIPO_BASE, NOMBRE_TIPO_BASE } from '../../lib/tiposInsumo.js';
+import {
+  materialesUsados, coloresUsados, marcasUsadas, ownersUsados,
+} from '../../lib/opcionesFilamento.js';
+import { cargarOcultas, ocultarOpcion, filtrarVisibles } from '../../lib/opcionesOcultas.js';
 
 // Diez filas por lista antes del scroll interno. Es su propio tope: las listas
 // de Finanzas tienen menos competencia por la pantalla que las tres del
@@ -117,7 +124,10 @@ function FormMovimiento({ titulo, inicial, textoDescripcion, onGuardar, onCancel
   );
 }
 
-export function FinanzasTab({ pedidos = [], gastoId = null, onAbrirGasto, onVolver, setMsg }) {
+export function FinanzasTab({
+  pedidos = [], filamentos = [], insumos = [], productos = [], personalizados = [],
+  gastoId = null, onAbrirGasto, onVolver, onInventarioChange, setMsg,
+}) {
   const [ganancias, setGanancias] = useState([]);
   const [gastos, setGastos] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -162,6 +172,90 @@ export function FinanzasTab({ pedidos = [], gastoId = null, onAbrirGasto, onVolv
   useEffect(() => { sincronizar(); /* eslint-disable-next-line */ }, [pedidos]);
 
   const t = useMemo(() => totales(ganancias, gastos), [ganancias, gastos]);
+
+  // ── Las mismas listas que el formulario de "Nuevo filamento" ──────────
+  // Salen de los filamentos que existen, no de una colección aparte, así que
+  // una marca agregada acá aparece allá sin sincronizar nada. Lo único
+  // guardado es qué opciones dejaron de sugerirse.
+  const [ocultas, setOcultas] = useState({ material: [], color: [], marca: [], owner: [] });
+  useEffect(() => { cargarOcultas().then(setOcultas); }, []);
+
+  const listas = useMemo(() => ({
+    materiales: filtrarVisibles(materialesUsados(filamentos), ocultas.material),
+    colores: filtrarVisibles(coloresUsados(filamentos), ocultas.color),
+    marcas: filtrarVisibles(marcasUsadas(filamentos), ocultas.marca),
+    owners: filtrarVisibles(ownersUsados(filamentos), ocultas.owner),
+    eliminar: async (campo, valor) => {
+      const enUso = filamentos.filter(
+        f => String(f?.[campo] || "").trim().toLowerCase() === valor.trim().toLowerCase()).length;
+      const detalle = enUso > 0
+        ? `\n\n${enUso} filamento(s) lo usan: van a conservarlo, solo deja de sugerirse.`
+        : "";
+      if (!confirm(`¿Eliminar "${valor}" de las opciones de ${campo}?${detalle}`)) return;
+      try {
+        setOcultas(await ocultarOpcion(campo, valor, ocultas));
+        setMsg(`✓ "${valor}" ya no se sugiere como ${campo}.`);
+      } catch (err) { setMsg("No se pudo eliminar la opción: " + err.message); }
+    },
+  }), [filamentos, ocultas]);
+
+  /**
+   * Crear un insumo desde el selector del ítem. Nace con UN tipo —el mismo
+   * criterio de nombre que usa la migración— precio 0 y stock 0: el stock lo
+   * suma recién el ítem al guardarse, no el alta.
+   */
+  /**
+   * Devuelve el id del insumo que hay que quedar elegido: el del recién creado,
+   * o el del que ya existía con ese nombre. El selector guarda ids, así que sin
+   * este valor de vuelta el ítem quedaría apuntando al texto tipeado.
+   */
+  const crearInsumoDesdeGasto = async (nombre) => {
+    const limpio = String(nombre || "").trim();
+    if (!limpio) return null;
+    const ya = insumos.find(i => (i.nombre || "").trim().toLowerCase() === limpio.toLowerCase());
+    if (ya) {
+      setMsg(`Ya existe un insumo llamado "${ya.nombre}": se eligió ese.`);
+      return ya._id;
+    }
+    try {
+      const id = await crearInsumo({
+        nombre: limpio,
+        tipos: [{ tipoId: ID_TIPO_BASE, nombre: NOMBRE_TIPO_BASE, precioUnidad: 0, cantidadDisponible: 0 }],
+      });
+      setMsg(`✓ "${limpio}" creado en el catálogo de Insumos.`);
+      await onInventarioChange?.();
+      return id;
+    } catch (err) { setMsg("Error: " + err.message); return null; }
+  };
+
+  /**
+   * Borrarlo del catálogo. Se revisan los TRES lugares donde puede estar
+   * referenciado antes de tocar nada: un insumo que no está en ninguna receta
+   * igual puede figurar en una compra ya cargada.
+   */
+  const borrarInsumoDesdeGasto = async (insumoId) => {
+    const insumo = insumos.find(i => i._id === insumoId);
+    const nombre = insumo?.nombre || "este insumo";
+    const usos = usosDeInsumo(insumoId, { productos, personalizados, gastos });
+    if (usos.length > 0) {
+      alert(
+        `No se puede borrar "${nombre}": está en uso en ${usos.length} lugar(es).\n\n` +
+        usos.map(u => `· ${u.donde}`).join("\n") +
+        `\n\nSacalo de ahí primero.`
+      );
+      return false;
+    }
+    if (!confirm(
+      `¿Borrar "${nombre}" del catálogo de Insumos?\n\n` +
+      `Se pierde su historial de gastos y restocks. No se puede deshacer.`
+    )) return false;
+    try {
+      await eliminarInsumo(insumoId);
+      setMsg(`✓ "${nombre}" eliminado del catálogo.`);
+      await onInventarioChange?.();
+      return true;
+    } catch (err) { setMsg("Error: " + err.message); return false; }
+  };
 
   const conError = (fn) => async (...args) => {
     setGuardando(true);
@@ -212,6 +306,15 @@ export function FinanzasTab({ pedidos = [], gastoId = null, onAbrirGasto, onVolv
     return (
       <DetalleGasto
         gastoId={gastoId}
+        filamentos={filamentos}
+        insumos={insumos}
+        productos={productos}
+        personalizados={personalizados}
+        gastos={gastos}
+        listas={listas}
+        onCrearInsumo={crearInsumoDesdeGasto}
+        onBorrarInsumo={borrarInsumoDesdeGasto}
+        onInventarioChange={onInventarioChange}
         onVolver={onVolver}
         onCambios={recargar}
         setMsg={setMsg}
@@ -381,11 +484,15 @@ export function FinanzasTab({ pedidos = [], gastoId = null, onAbrirGasto, onVolv
             <td><TKPill variant="outline">{g.numeroGasto || "—"}</TKPill></td>
             <td title={g.descripcion || ""}>
               <span style={{ fontWeight: 600 }}>{g.descripcion || "—"}</span>
-              {g.detalle ? (
+              {(g.items || []).length > 0 ? (
+                <span style={{ color: "var(--muted)", fontWeight: 400 }}>
+                  {" "}· {g.items.length} ítem{g.items.length === 1 ? "" : "s"}
+                </span>
+              ) : g.detalle ? (
                 <span style={{ color: "var(--muted)", fontWeight: 400 }}> · con detalle</span>
               ) : null}
             </td>
-            <td className="num" style={{ fontWeight: 700, color: "#B56B3E" }}>{fmtARS(g.monto || 0)}</td>
+            <td className="num" style={{ fontWeight: 700, color: "#B56B3E" }}>{fmtARS(montoDeGasto(g))}</td>
             <td>
               <span style={{ display: "flex", gap: 4 }}>
                 {/* El mismo Icon.list que abre el detalle de un filamento en

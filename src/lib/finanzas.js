@@ -17,6 +17,7 @@ import {
   runTransaction, writeBatch, serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '../firebase.js';
+import { montoDeGasto } from './gastoItems.js';
 
 export const COL_GANANCIAS = "ganancias";
 export const COL_GASTOS = "gastos";
@@ -101,9 +102,11 @@ export function validarMovimiento({ fecha, monto, descripcion }, { pideDescripci
  * del emprendimiento, no un error de cálculo que haya que recortar en 0.
  */
 export function totales(ganancias = [], gastos = []) {
-  const suma = (filas) => filas.reduce((acc, f) => acc + (Number(f?.monto) || 0), 0);
-  const ingresos = suma(ganancias);
-  const egresos = suma(gastos);
+  const ingresos = ganancias.reduce((acc, g) => acc + (Number(g?.monto) || 0), 0);
+  // Los gastos pasan por montoDeGasto: con ítems vale su suma, sin ítems el
+  // monto cargado a mano. Sumar el campo crudo haría que el saldo no coincida
+  // con lo que muestra cada fila.
+  const egresos = gastos.reduce((acc, g) => acc + montoDeGasto(g), 0);
   return { ingresos, egresos, saldo: ingresos - egresos };
 }
 
@@ -253,11 +256,18 @@ export async function crearGasto({ fecha, descripcion, monto, detalle = "" }) {
 }
 
 /** El número NO se toca: es el correlativo, y editarlo rompería su sentido. */
-export async function actualizarGasto(id, { fecha, descripcion, monto }) {
-  const { valido, errores, datos } = validarMovimiento({ fecha, monto, descripcion });
+export async function actualizarGasto(id, { fecha, descripcion, monto }, { conMonto = true } = {}) {
+  // Con ítems el monto no se edita a mano: lo manda su suma. Y tampoco se
+  // vuelve a escribir el viejo, que quedaría como un segundo número guardado
+  // peleado con el que se muestra.
+  const { valido, errores, datos } = conMonto
+    ? validarMovimiento({ fecha, monto, descripcion })
+    : validarMovimiento({ fecha, monto: "1", descripcion });
   if (!valido) throw new Error(Object.values(errores).join(" "));
   await updateDoc(doc(db, COL_GASTOS, id), {
-    fecha: datos.fecha, descripcion: datos.descripcion, monto: datos.monto,
+    fecha: datos.fecha,
+    descripcion: datos.descripcion,
+    ...(conMonto ? { monto: datos.monto } : {}),
   });
 }
 

@@ -13,23 +13,36 @@ export const claveDeRollo = (f) =>
   `${claveFilamento(f?.material, f?.color)}|${String(f?.marca || "").trim().toLowerCase()}`;
 
 /**
- * El rollo del owner destino que tiene EXACTAMENTE el mismo material, color y
- * marca que el de origen. null si no existe: ahí hay que crearlo.
+ * El rollo que tiene EXACTAMENTE ese material, color, marca y owner. null si
+ * no existe: ahí hay que crearlo.
  *
  * La marca entra en la comparación a propósito. Dos rollos del mismo material
  * y color pero de marcas distintas no son intercambiables —cambian el precio y
  * hasta el resultado de impresión— así que sumarlos en un solo documento
- * perdería esa diferencia.
+ * perdería esa diferencia. Y la marca vacía es un valor más, no un comodín:
+ * un rollo sin marca anotada no se mezcla con los que sí la tienen.
+ *
+ * @param {string[]} excluir ids que no cuentan como candidatos
  */
-export function buscarDestino(filamentos = [], origen, ownerDestino) {
-  if (!origen) return null;
-  const clave = claveDeRollo(origen);
-  const owner = String(ownerDestino || "").trim().toLowerCase();
+export function buscarRollo(filamentos = [], caracteristicas, excluir = []) {
+  if (!caracteristicas) return null;
+  const clave = claveDeRollo(caracteristicas);
+  const owner = String(caracteristicas.owner || "").trim().toLowerCase();
   return filamentos.find(f =>
-    f._id !== origen._id &&
+    !excluir.includes(f._id) &&
     claveDeRollo(f) === clave &&
     String(f.owner || "").trim().toLowerCase() === owner
   ) || null;
+}
+
+/**
+ * El rollo del owner destino equivalente al de origen. Mismo matcher que usa
+ * la compra de filamento: si divergieran, transferir y comprar podrían
+ * decidir distinto sobre el mismo par de rollos.
+ */
+export function buscarDestino(filamentos = [], origen, ownerDestino) {
+  if (!origen) return null;
+  return buscarRollo(filamentos, { ...origen, owner: ownerDestino }, [origen._id]);
 }
 
 /**

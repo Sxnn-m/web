@@ -47,6 +47,11 @@ const opcionStyle = {
  *                              para que el llamador lo persista en su catálogo.
  *                              Los catálogos derivados de un distinct no lo
  *                              necesitan: el valor aparece solo.
+ * @param {Function} [etiquetaDe] (valor) => texto a mostrar. Para catálogos
+ *                              donde el valor guardado es un id y no el texto
+ *                              que el usuario reconoce (los insumos, por
+ *                              ejemplo). Por defecto se muestra el valor tal
+ *                              cual, así los catálogos de texto no cambian.
  * @param {Function} [onEliminarOpcion] (valor, {seleccionada}) => void. Si
  *                              viene, cada opción de la lista muestra su
  *                              papelera. La confirmación la hace el llamador,
@@ -58,8 +63,9 @@ const opcionStyle = {
 export function SelectorConAgregar({
   label, value = "", opciones = [], onChange, multiple = false,
   placeholder = "Nuevo...", vacio = "— Sin especificar —",
-  hint, resolver, onAgregar, onEliminarOpcion,
+  hint, resolver, onAgregar, onEliminarOpcion, etiquetaDe,
 }) {
+  const mostrar = (v) => (etiquetaDe ? etiquetaDe(v) : v);
   const [abierto, setAbierto] = useState(false);
   const [agregando, setAgregando] = useState(false);
   const [texto, setTexto] = useState("");
@@ -180,7 +186,7 @@ export function SelectorConAgregar({
             overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
             color: elegidos.length > 0 ? "var(--text)" : "var(--muted)",
           }}>
-            {elegidos.join(", ") || vacio}
+            {elegidos.map(mostrar).join(", ") || vacio}
           </span>
           <span style={{ color: "var(--muted)", flexShrink: 0, fontSize: 9 }}>▼</span>
         </button>
@@ -226,14 +232,14 @@ export function SelectorConAgregar({
                     {multiple && <span style={{ color: estaElegido(o) ? "var(--accent)" : "var(--line-strong)", marginRight: 8 }}>
                       {estaElegido(o) ? "✓" : "○"}
                     </span>}
-                    {o}
+                    {mostrar(o)}
                   </span>
                   {onEliminarOpcion && (
                     <button
                       type="button"
                       onClick={(e) => eliminar(e, o)}
-                      title={`Eliminar "${o}" de las opciones`}
-                      aria-label={`Eliminar ${o} de las opciones`}
+                      title={`Eliminar "${mostrar(o)}" de las opciones`}
+                      aria-label={`Eliminar ${mostrar(o)} de las opciones`}
                       style={{
                         background: "none", border: "none", padding: 2, cursor: "pointer",
                         color: "var(--muted)", display: "flex", alignItems: "center", flexShrink: 0,
