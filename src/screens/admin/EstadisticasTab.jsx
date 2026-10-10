@@ -218,13 +218,15 @@ function Aviso({ children, tono = "warn" }) {
   );
 }
 
-// Las seis tarjetas comparten el azul: son seis lecturas del mismo mes, no
-// seis estados distintos, así que un color por tarjeta solo agregaba ruido.
+// Las seis comparten la barra azul: son seis lecturas del mismo mes, no seis
+// estados distintos, así que un color por tarjeta solo agregaba ruido. El
+// número va en el negro del texto, igual que en el Dashboard: el azul es la
+// decoración que las agrupa, no un aviso sobre el valor.
 function Kpi({ label, valor, detalle }) {
   return (
     <div style={{ ...cardStyle, borderTop: `3px solid ${AZUL}` }}>
       <div style={{ ...tituloBloque, fontSize: 11 }}>{label}</div>
-      <div style={{ fontSize: 26, fontWeight: 700, margin: "10px 0 6px", color: AZUL }}>
+      <div style={{ fontSize: 26, fontWeight: 700, margin: "10px 0 6px", color: "var(--text)" }}>
         {valor}
       </div>
       <div style={{ fontSize: 11.5, color: "var(--muted)", lineHeight: 1.45 }}>
