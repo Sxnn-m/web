@@ -24,8 +24,9 @@ const cardStyle = {
   marginBottom: 20,
 };
 
-// El mismo azul que las tarjetas de resumen del tab, y el mismo tamaño en los
-// dos: así se leen como un par y no como dos cosas de distinto peso.
+// La barra lateral de los dos indicadores. El mismo azul que las tarjetas de
+// resumen del tab, y el mismo tamaño en los dos: así se leen como un par y no
+// como dos cosas de distinto peso.
 const AZUL = "#345C83";
 
 function Indicador({ label, valor }) {
@@ -34,7 +35,9 @@ function Indicador({ label, valor }) {
       <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 1.5, color: "var(--muted)", marginBottom: 6 }}>
         {label}
       </div>
-      <div style={{ fontSize: 28, color: AZUL }}>{valor}</div>
+      {/* El número en el negro del texto y la barra en azul, igual que los
+          indicadores del detalle de un filamento. */}
+      <div style={{ fontSize: 28, color: "var(--text)" }}>{valor}</div>
     </div>
   );
 }

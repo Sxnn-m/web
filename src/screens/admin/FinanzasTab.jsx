@@ -61,11 +61,13 @@ const actionBtn = {
 };
 
 /**
- * Las tres tarjetas de arriba. Mismo azul que Estadísticas y el Dashboard: son
- * tres lecturas del mismo dinero, no tres estados distintos.
+ * Las tres tarjetas de arriba. El número va en el negro del texto, igual que
+ * en el Dashboard y en los indicadores del detalle de un filamento: lo que
+ * identifica a la tarjeta es su barra azul, y pintar también el número hacía
+ * que tres lecturas del mismo dinero se leyeran como tres avisos.
  *
- * El saldo negativo va en rojo porque sí es un estado: se gastó más de lo que
- * entró, y es lo único de los tres números que pide una decisión.
+ * El saldo negativo sí va en rojo, barra y número: se gastó más de lo que
+ * entró, y es lo único de los tres que pide una decisión.
  */
 function Tarjeta({ label, valor, negativo = false, destacada = false }) {
   const color = negativo ? "#c64138" : AZUL;
@@ -77,7 +79,7 @@ function Tarjeta({ label, valor, negativo = false, destacada = false }) {
       <div style={{ ...tituloBloque, fontSize: 11 }}>{label}</div>
       <div style={{
         fontSize: destacada ? 30 : 24, fontWeight: 700,
-        margin: "10px 0 0", color,
+        margin: "10px 0 0", color: negativo ? color : "var(--text)",
       }}>
         {fmtARS(valor)}
       </div>
