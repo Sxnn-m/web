@@ -1,9 +1,11 @@
 // ─── Tiempo de impresión ─────────────────────────────────────────────
 // El tiempo se carga como dos números (horas y minutos) y se guarda así:
-//   specs.tiempoHoras                    · valor crudo ingresado
-//   specs.tiempoMinutos                  · valor crudo ingresado
-//   specs.tiempoImpresionHorasDecimal    · lo que usan las fórmulas
-// El string legible ("5h 30min") se genera al mostrar, nunca se guarda.
+//   specs.tiempoHoras      · valor crudo ingresado
+//   specs.tiempoMinutos    · valor crudo ingresado
+// El string legible ("5h 30min") se genera al mostrar, nunca se guarda, y las
+// horas decimales que usan las fórmulas también: las devuelve
+// tiempoDeProducto(). Hubo un tercer campo guardado,
+// specs.tiempoImpresionHorasDecimal, que no leía nadie; dejó de escribirse.
 
 /** horas + minutos → horas decimales. 5h 30min → 5.5 */
 export function horasDecimales(horas, minutos) {

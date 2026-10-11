@@ -335,7 +335,11 @@ export async function recalcularDisponibilidad(productos = [], filamentos = [], 
       const nuevos = specsDeTiempo(tiempo.horas, tiempo.minutos);
       patch["specs.tiempoHoras"] = nuevos.tiempoHoras;
       patch["specs.tiempoMinutos"] = nuevos.tiempoMinutos;
-      patch["specs.tiempoImpresionHorasDecimal"] = nuevos.tiempoImpresionHorasDecimal;
+      // tiempoImpresionHorasDecimal ya no se escribe: no lo lee nadie. Las
+      // fórmulas llaman a tiempoDeProducto(), que lo recalcula desde horas y
+      // minutos, y el doc de products es de lectura pública, así que todo
+      // campo que no se lea es superficie de más. Los valores que quedaron en
+      // documentos viejos los limpia el script de limpieza.
       if (tiempo.origen === "texto") tiemposMigrados++;
       if (tiempo.origen === "ilegible") {
         // Queda en 0/0 y se reporta para cargarlo a mano.

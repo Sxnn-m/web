@@ -65,6 +65,7 @@ import {
 import { datosDeCategoria, validarCategoria } from '../lib/categorias.js';
 import { EnlaceExterno } from '../components/EnlaceExterno.jsx';
 import { normalizarUrl } from '../lib/url.js';
+import { docPublico } from '../lib/productoPublico.js';
 import {
   tiempoDeProducto, specsDeTiempo, formatTiempo, formatTiempoProducto,
 } from '../lib/tiempoImpresion.js';
@@ -559,7 +560,7 @@ export function AdminScreen({ go, tab = "dashboard", onTab, gastoId = null, onGa
       // catálogo), que se usa arriba en el mismo bloque.
       const {
         _id, receta, origenUrl, notas, insumos: insumosProducto, archivos,
-        variantes: variantesEnteras, variantesInsumo: gruposEnteros, ...publico
+        variantes: variantesEnteras, variantesInsumo: gruposEnteros,
       } = data;
       const privado = {
         receta: receta || [],
@@ -572,12 +573,21 @@ export function AdminScreen({ go, tab = "dashboard", onTab, gastoId = null, onGa
         // Y a qué insumo apunta cada opción, con su cantidad.
         variantesInsumo: gruposPrivados(gruposEnteros || []),
       };
-      // Y al doc público solo el nombre visible, la aclaración y el booleano.
-      publico.variantes = variantesPublicas(
-        { ...data, receta: receta || [] }, films, insumos);
-      // De los grupos, el nombre y el precio de cada opción: el navegador los
-      // necesita para mostrar cuánto sale cada una. El insumo no viaja.
-      publico.variantesInsumo = gruposPublicos(gruposEnteros || [], insumos);
+      // Lo que se publica se elige por LISTA, no por descarte: docPublico()
+      // copia solo los campos que el sitio lee de verdad. Antes se escribía
+      // "todo lo que no sea privado", así que cualquier campo nuevo del
+      // formulario se habría publicado solo, sin que nadie lo decidiera.
+      //
+      // Las dos mitades públicas entran por parámetro y no desde `data`: de
+      // las variantes, solo el nombre visible, la aclaración y el booleano;
+      // de los grupos, el nombre y el precio de cada opción, que el navegador
+      // necesita para mostrar cuánto sale cada una. Los colores y el insumo
+      // al que apunta cada opción no viajan.
+      const publico = docPublico(data, {
+        variantes: variantesPublicas({ ...data, receta: receta || [] }, films, insumos),
+        variantesInsumo: gruposPublicos(gruposEnteros || [], insumos),
+        disponible,
+      });
 
       // Al crear, el ID visible se recalcula contra la lista fresca para que
       // dos altas seguidas no puedan quedarse con el mismo número.
@@ -592,7 +602,6 @@ export function AdminScreen({ go, tab = "dashboard", onTab, gastoId = null, onGa
         // de antes de la mudanza: guardar un producto lo migra solo.
         await updateDoc(doc(db, "products", productId), {
           ...publico,
-          disponible,
           receta: deleteField(),
           origenUrl: deleteField(),
           notas: deleteField(),
@@ -602,7 +611,6 @@ export function AdminScreen({ go, tab = "dashboard", onTab, gastoId = null, onGa
       } else {
         const ref = await addDoc(collection(db, "products"), {
           ...publico,
-          disponible,
           createdAt: serverTimestamp(),
         });
         productId = ref.id;
