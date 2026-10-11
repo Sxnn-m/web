@@ -4,6 +4,40 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>TKPrints — Impresión 3D</title>
+
+    <!-- ─── SEO y vista previa al compartir ─────────────────────────────
+         La descripción es la que usan Google y los bots de las redes cuando
+         no hay nada mejor. Se escribió a partir del copy que ya existe en el
+         sitio (HomeScreen y AboutScreen) para no inventar una voz distinta.
+
+         FALTAN, a propósito: canonical, og:url y og:image. Los tres llevan el
+         dominio de producción, que todavía no está definido, y una URL mal
+         puesta es peor que ninguna: un canonical equivocado le dice a Google
+         que la página buena es otra. Ver el PR para qué hace falta.
+
+         LIMITACIÓN: esto es una SPA. Los bots de Instagram, WhatsApp y
+         Facebook NO ejecutan JavaScript, así que leen SOLO este archivo, que
+         es el mismo para todas las rutas. La vista previa de cualquier link
+         —la home o un producto— va a ser esta, genérica. Para tener una por
+         producto hace falta que el HTML lo genere el servidor. -->
+    <meta name="description" content="Impresión 3D de objetos funcionales y decorativos: lámparas, organizadores y gadgets diseñados y producidos en Buenos Aires. Cada pieza se imprime bajo pedido en nuestro taller." />
+
+    <meta property="og:title" content="TKPrints — Impresión 3D" />
+    <meta property="og:description" content="Objetos funcionales y decorativos impresos en 3D, diseñados y producidos en Buenos Aires. Cada pieza se imprime bajo pedido." />
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="es_AR" />
+    <meta property="og:site_name" content="TKPrints" />
+
+    <!-- summary_large_image y no summary: sin og:image todavía no cambia
+         nada, pero cuando se agregue la imagen de 1200x630 esta es la tarjeta
+         que la muestra grande en vez de como miniatura al costado. -->
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <!-- El fondo real del sitio (--chalk). Tiñe la barra del navegador en
+         Android y iOS para que no corte contra la página. Va uno solo: el
+         tema oscuro está definido en index.css pero hoy nada lo activa, así
+         que un theme-color oscuro prometería algo que el sitio no hace. -->
+    <meta name="theme-color" content="#F8F7F4" />
     <!-- Favicon. Los archivos viven en public/, que Vite copia tal cual a la
          raíz del build, así que las rutas son las mismas en dev y en prod.
          El .ico va primero por los navegadores viejos que se quedan con el

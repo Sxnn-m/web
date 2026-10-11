@@ -1,0 +1,12 @@
+# TKPrints
+# El backoffice y el login no tienen nada que indexar y no deberían aparecer
+# en resultados de búsqueda. Son rutas de una SPA: el servidor devuelve el
+# mismo index.html para todas, así que esto no es seguridad —quien quiera
+# entrar igual puede— sino higiene de indexado. El control de acceso real son
+# las reglas de Firestore y el chequeo de role "admin" en la app.
+User-agent: *
+Disallow: /admin
+Disallow: /ingresar
+
+# Sin línea Sitemap: requiere la URL absoluta del dominio de producción, que
+# todavía no está definido.
