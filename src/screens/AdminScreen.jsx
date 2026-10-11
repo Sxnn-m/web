@@ -62,6 +62,7 @@ import {
   DEFAULT_COSTS, MARGEN_MATERIAL, margenDeCostos, calcularRentabilidad, calcularPrecioSugerido,
   filasDeRentabilidad, filtrarFilas, materialesDeCostos,
 } from '../lib/costos.js';
+import { datosDeCategoria, validarCategoria } from '../lib/categorias.js';
 import {
   tiempoDeProducto, specsDeTiempo, formatTiempo, formatTiempoProducto,
 } from '../lib/tiempoImpresion.js';
@@ -3519,13 +3520,25 @@ function CategoriesTab({ categories, products, onCategoriesChange, setMsg }) {
     setShowCatForm(true);
   };
   const saveCat = async () => {
-    if (!catForm.id.trim() || !catForm.name.trim()) return alert("ID y nombre son obligatorios.");
+    const { valido, error } = validarCategoria(catForm);
+    if (!valido) return alert(error);
     try {
       if (editingCat?._id) {
-        await updateDoc(doc(db, "categories", editingCat._id), { id: catForm.id, name: catForm.name });
+        // Se escribe la forma COMPLETA, con subs incluido, y no solo
+        // {id, name}: una categoría a la que le faltara el array seguía rota
+        // después de editarla, que es justo cuando uno espera arreglarla.
+        // Las subs vienen del documento, no del formulario: este no las
+        // edita (eso es addSub/removeSub), así que se conservan.
+        await updateDoc(
+          doc(db, "categories", editingCat._id),
+          datosDeCategoria({ ...catForm, subs: editingCat.subs })
+        );
         setMsg("✓ Categoría actualizada.");
       } else {
-        await addDoc(collection(db, "categories"), { id: catForm.id, name: catForm.name, subs: [], order: categories.length });
+        await addDoc(
+          collection(db, "categories"),
+          datosDeCategoria({ ...catForm, subs: [] }, { orden: categories.length })
+        );
         setMsg("✓ Categoría creada.");
       }
       onCategoriesChange?.();
