@@ -62,6 +62,7 @@ import {
   DEFAULT_COSTS, MARGEN_MATERIAL, margenDeCostos, calcularRentabilidad, calcularPrecioSugerido,
   filasDeRentabilidad, filtrarFilas, materialesDeCostos,
 } from '../lib/costos.js';
+import { datosDeCategoria, validarCategoria } from '../lib/categorias.js';
 import { EnlaceExterno } from '../components/EnlaceExterno.jsx';
 import { normalizarUrl } from '../lib/url.js';
 import {
@@ -222,9 +223,22 @@ export function AdminScreen({ go, tab = "dashboard", onTab, gastoId = null, onGa
    * El tab Inventario y el modal de impresión siguen con el stock físico: uno
    * cuenta lo que hay en la bobina y el otro descuenta de ella.
    */
+  const reservas = useMemo(
+    () => reservasDePedidos(pedidos, productosFull, personalizados),
+    [pedidos, productosFull, personalizados]);
+
   const filamentosDisponibles = useMemo(
-    () => filamentosNetos(filamentos, reservasDePedidos(pedidos, productosFull, personalizados)),
-    [filamentos, pedidos, productosFull, personalizados]);
+    () => filamentosNetos(filamentos, reservas), [filamentos, reservas]);
+
+  /**
+   * Y lo mismo para los insumos. Van juntos a propósito: decidir la
+   * disponibilidad con el filamento neto pero el insumo crudo daba dos
+   * respuestas distintas para el mismo producto —guardarlo lo dejaba
+   * "disponible" y el recálculo siguiente lo bajaba— porque el recálculo sí
+   * neteaba los dos. El tab Insumos sigue mostrando el stock físico.
+   */
+  const insumosDisponibles = useMemo(
+    () => insumosNetos(insumos, reservas), [insumos, reservas]);
 
   /**
    * Punto único donde el catálogo público se entera de un cambio de stock:
@@ -527,9 +541,17 @@ export function AdminScreen({ go, tab = "dashboard", onTab, gastoId = null, onGa
       // Contra el neto de reservas, igual que el recálculo automático: si no,
       // el producto se guardaría "disponible" y el primer recálculo lo daría
       // de baja sin que nadie haya tocado el stock.
-      const reservas = reservasDePedidos(pedidos, productosFull, personalizados);
+      // Los DOS netos: con el insumo crudo, un producto cuyo último imán ya
+      // está reservado se guardaba "disponible" y el recálculo siguiente lo
+      // bajaba, sin que nadie hubiera tocado el stock.
+      const reservasAhora = films === filamentos
+        ? reservas
+        : reservasDePedidos(pedidos, productosFull, personalizados);
       const disponible = calcularDisponibilidad(
-        data, filamentosNetos(films, reservas), insumos).disponible;
+        data,
+        filamentosNetos(films, reservasAhora),
+        insumosNetos(insumos, reservasAhora),
+      ).disponible;
 
       // El doc público NO lleva receta/origenUrl/notas/insumos: van a la
       // subcolección privada, que solo pueden leer los admins.
@@ -712,13 +734,13 @@ export function AdminScreen({ go, tab = "dashboard", onTab, gastoId = null, onGa
           {tabActivo === "dashboard" && <DashboardTab products={products} users={users} seedProducts={() => {}} categories={propCategories} onCategoriesChange={onCategoriesChange} onProductsChange={onProductsChange} setMsg={setMsg} />}
           {tabActivo === "productos" && (
             showForm
-              ? <ProductForm product={editProduct} onSave={handleSave} onCancel={() => { setShowForm(false); setEditProduct(null); }} categories={propCategories} filamentos={filamentos} filamentosDisponibles={filamentosDisponibles} costs={costSettings} nextId={siguienteIdProducto(products)} catalogoInsumos={insumos}
+              ? <ProductForm product={editProduct} onSave={handleSave} onCancel={() => { setShowForm(false); setEditProduct(null); }} categories={propCategories} filamentos={filamentos} filamentosDisponibles={filamentosDisponibles} costs={costSettings} nextId={siguienteIdProducto(products)} catalogoInsumos={insumosDisponibles}
                   tags={tags} onAgregarTag={handleAgregarTag} onEliminarTag={handleEliminarTag}/>
               : <ProductsTab
                   products={productosFull}
                   costs={costSettings}
                   filamentos={filamentosDisponibles}
-                  insumos={insumos}
+                  insumos={insumosDisponibles}
                   categories={propCategories}
                   pendientesDeMigrar={products.filter(p => CAMPOS_PRIVADOS.some(c => p[c] !== undefined)).length}
                   onEdit={(p) => { setEditProduct(p); setShowForm(true); }}
@@ -748,13 +770,13 @@ export function AdminScreen({ go, tab = "dashboard", onTab, gastoId = null, onGa
                   filamentos={filamentos}
                   filamentosDisponibles={filamentosDisponibles}
                   costs={costSettings}
-                  catalogoInsumos={insumos}
+                  catalogoInsumos={insumosDisponibles}
                 />
               : <PersonalizadosTab
                   personalizados={personalizados}
                   costs={costSettings}
                   filamentos={filamentosDisponibles}
-                  insumos={insumos}
+                  insumos={insumosDisponibles}
                   onEdit={(p) => { setEditPersonalizado(p); setShowFormPers(true); }}
                   onDelete={handleDeletePersonalizado}
                   onNew={() => { setEditPersonalizado(null); setShowFormPers(true); }}
@@ -3267,7 +3289,8 @@ export function ProductForm({
           {/* Vista previa de disponibilidad con el inventario actual */}
           <DisponibilidadPreview receta={receta} variantes={variantesLimpias}
             filamentos={filamentosDisponibles || filamentos}
-            insumos={insumosLimpios} gruposInsumo={gruposLimpios} catalogoInsumos={catalogoInsumos}/>
+            insumos={insumosLimpios} gruposInsumo={gruposLimpios}
+            catalogoInsumos={catalogoInsumos}/>
 
           {/* ── Datos internos: nunca se muestran en el catálogo público ── */}
           <div style={{ marginTop: 24, paddingTop: 16, borderTop: "1px solid var(--line)" }}>
@@ -3527,13 +3550,25 @@ function CategoriesTab({ categories, products, onCategoriesChange, setMsg }) {
     setShowCatForm(true);
   };
   const saveCat = async () => {
-    if (!catForm.id.trim() || !catForm.name.trim()) return alert("ID y nombre son obligatorios.");
+    const { valido, error } = validarCategoria(catForm);
+    if (!valido) return alert(error);
     try {
       if (editingCat?._id) {
-        await updateDoc(doc(db, "categories", editingCat._id), { id: catForm.id, name: catForm.name });
+        // Se escribe la forma COMPLETA, con subs incluido, y no solo
+        // {id, name}: una categoría a la que le faltara el array seguía rota
+        // después de editarla, que es justo cuando uno espera arreglarla.
+        // Las subs vienen del documento, no del formulario: este no las
+        // edita (eso es addSub/removeSub), así que se conservan.
+        await updateDoc(
+          doc(db, "categories", editingCat._id),
+          datosDeCategoria({ ...catForm, subs: editingCat.subs })
+        );
         setMsg("✓ Categoría actualizada.");
       } else {
-        await addDoc(collection(db, "categories"), { id: catForm.id, name: catForm.name, subs: [], order: categories.length });
+        await addDoc(
+          collection(db, "categories"),
+          datosDeCategoria({ ...catForm, subs: [] }, { orden: categories.length })
+        );
         setMsg("✓ Categoría creada.");
       }
       onCategoriesChange?.();
