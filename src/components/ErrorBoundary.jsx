@@ -12,6 +12,8 @@
 // hooks: es la única forma que da React de capturar un error de render.
 
 import { Component } from 'react';
+import { manejarErrorDeChunk } from '../lib/recargaPorChunk.js';
+import { CargandoPantalla } from './CargandoPantalla.jsx';
 
 const caja = {
   minHeight: "100dvh",
@@ -24,21 +26,46 @@ const caja = {
 export class ErrorBoundary extends Component {
   constructor(props) {
     super(props);
-    this.state = { fallo: false };
+    this.state = { fallo: false, recargando: false };
   }
 
   static getDerivedStateFromError() {
+    // Sin efectos acá: React exige que esto sea puro. Lo de recargar va en
+    // componentDidCatch, que es donde están permitidos.
     return { fallo: true };
   }
 
   componentDidCatch(error, info) {
+    // Primero, el caso que NO es un bug de la app: el navegador no pudo bajar
+    // un chunk. Pasa típicamente con una pestaña vieja abierta después de un
+    // deploy nuevo, porque el archivo que esa pestaña va a pedir ya cambió de
+    // hash. Recargar lo arregla, y se hace una sola vez.
+    const resultado = manejarErrorDeChunk(error);
+
+    if (resultado === "recargando") {
+      // La recarga ya está pedida. Se muestra el splash en vez de "algo salió
+      // mal" para no hacer parpadear un error que se arregla solo.
+      this.setState({ recargando: true });
+      return;
+    }
+
     // Al visitante no se le muestra nada técnico —un stack no lo ayuda y
     // puede filtrar nombres de archivos— pero sí queda en la consola para
     // poder diagnosticarlo con la pestaña abierta.
-    console.error("Error no capturado en el árbol de React:", error, info?.componentStack);
+    if (resultado === "no-es-de-chunk") {
+      console.error("Error no capturado en el árbol de React:", error, info?.componentStack);
+    } else {
+      // "ya-se-intento" o "sin-almacen": el problema es real y no lo arregla
+      // otra recarga automática. Queda la pantalla con el botón, que la
+      // aprieta una persona y por lo tanto no se repite solo.
+      console.error(
+        `No se pudo cargar una parte de la aplicación (${resultado}):`, error
+      );
+    }
   }
 
   render() {
+    if (this.state.recargando) return <CargandoPantalla/>;
     if (!this.state.fallo) return this.props.children;
 
     return (
