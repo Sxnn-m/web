@@ -161,7 +161,7 @@ export function ArchivosDiseno({ productId, archivos = [], onChange, coleccion =
                     <div style={{ fontSize: 12, color: "var(--muted)" }}>{formatBytes(a.tamanio)}</div>
                     <div style={{ fontSize: 12, color: "var(--muted)" }}>{fechaCorta(a.subidoAt)}</div>
                     <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-                      <button
+                      <button aria-label="Descargar"
                         onClick={() => descargar(a)}
                         title="Descargar"
                         style={{
@@ -172,7 +172,7 @@ export function ArchivosDiseno({ productId, archivos = [], onChange, coleccion =
                       >
                         <Icon.arrow size={14}/>
                       </button>
-                      <button
+                      <button aria-label="Eliminar de Storage"
                         onClick={() => borrar(a)}
                         title="Eliminar de Storage"
                         style={{

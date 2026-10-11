@@ -51,10 +51,10 @@ export function MobileHome({ go, addToCart, products = FALLBACK_PRODUCTS, catego
             <h2 style={{ fontWeight: 700, fontSize: 26, margin: 0, letterSpacing: -0.5 }}>Más vendidos</h2>
           </div>
           <div style={{ display: "flex", gap: 6 }}>
-            <button onClick={() => setCarIdx(i => (i - 1 + bestSellers.length) % bestSellers.length)} style={carBtn}>
+            <button aria-label="Producto anterior" onClick={() => setCarIdx(i => (i - 1 + bestSellers.length) % bestSellers.length)} style={carBtn}>
               <Icon.back size={14}/>
             </button>
-            <button onClick={() => setCarIdx(i => (i + 1) % bestSellers.length)} style={carBtn}>
+            <button aria-label="Producto siguiente" onClick={() => setCarIdx(i => (i + 1) % bestSellers.length)} style={carBtn}>
               <Icon.arrow size={14}/>
             </button>
           </div>
@@ -93,7 +93,7 @@ export function MobileHome({ go, addToCart, products = FALLBACK_PRODUCTS, catego
                     )}
                   </div>
                   {!sinStock(p) && (
-                    <button onClick={(e) => { e.stopPropagation(); addToCart(p); }} style={{
+                    <button aria-label={`Agregar ${p.name} al carrito`} onClick={(e) => { e.stopPropagation(); addToCart(p); }} style={{
                       width: 40, height: 40, borderRadius: "50%", background: "var(--accent)", color: "#fff",
                       border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
                       boxShadow: "0 4px 12px rgba(0,0,0,.25)",
@@ -303,7 +303,7 @@ export function MobileCategoria({ go, addToCart, cat, products = FALLBACK_PRODUC
               <img src={p.img} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", mixBlendMode: "multiply" }}/>
               {p.tag && <div style={{ position: "absolute", top: 8, left: 8 }}><TKPill variant={p.tag === "Premium" ? "dark" : "default"}>{p.tag}</TKPill></div>}
               {!sinStock(p) && (
-                <button onClick={(e) => { e.stopPropagation(); addToCart(p); }} style={{
+                <button aria-label={`Agregar ${p.name} al carrito`} onClick={(e) => { e.stopPropagation(); addToCart(p); }} style={{
                   position: "absolute", bottom: 6, right: 6, width: 32, height: 32, borderRadius: "50%",
                   background: "var(--anchor)", color: "#fff", border: "none", cursor: "pointer",
                   display: "flex", alignItems: "center", justifyContent: "center",
@@ -364,7 +364,7 @@ export function MobileBuscador({ go, addToCart, products = FALLBACK_PRODUCTS }) 
         <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar producto..." style={{
           flex: 1, border: "none", outline: "none", background: "transparent", fontSize: 14, color: "var(--text)",
         }}/>
-        {q && <button onClick={() => setQ("")} style={{ background: "none", border: "none", color: "var(--muted)", cursor: "pointer" }}><Icon.close size={16}/></button>}
+        {q && <button aria-label="Borrar la búsqueda" onClick={() => setQ("")} style={{ background: "none", border: "none", color: "var(--muted)", cursor: "pointer" }}><Icon.close size={16}/></button>}
       </div>
 
       {!q && (
@@ -404,7 +404,7 @@ export function MobileBuscador({ go, addToCart, products = FALLBACK_PRODUCTS }) 
                   )}
                 </div>
                 {!sinStock(p) && (
-                  <button onClick={(e) => { e.stopPropagation(); addToCart(p); }} style={{
+                  <button aria-label={`Agregar ${p.name} al carrito`} onClick={(e) => { e.stopPropagation(); addToCart(p); }} style={{
                     width: 36, height: 36, borderRadius: "50%", background: "var(--anchor)", color: "#fff",
                     border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
                   }}>
@@ -466,7 +466,7 @@ function MenuPerfilMobile({ user, isAdmin, go, onLogout, estilo }) {
   const [abierto, setAbierto] = useState(false);
 
   if (!user) {
-    return <button onClick={() => go("auth")} style={estilo}><Icon.user size={20}/></button>;
+    return <button aria-label="Iniciar sesión" onClick={() => go("auth")} style={estilo}><Icon.user size={20}/></button>;
   }
 
   const item = {
@@ -543,7 +543,7 @@ export function MobileHeader({ route, go, user, isAdmin, onLogout }) {
           )}
         </div>
         <div style={{ display: "flex", gap: 2 }}>
-          <button onClick={() => go("buscador")} style={iconBtnM}><Icon.search size={20}/></button>
+          <button aria-label="Buscar productos" onClick={() => go("buscador")} style={iconBtnM}><Icon.search size={20}/></button>
           <MenuPerfilMobile user={user} isAdmin={isAdmin} go={go} onLogout={onLogout} estilo={iconBtnM}/>
         </div>
       </header>

@@ -180,8 +180,14 @@ export function AuthScreen({ go, onLogin }) {
             Contraseña
           </div>
           <div style={{ position: "relative" }}>
+            {/* El "Contraseña" de arriba es un div, no un <label>, así que no
+                está asociado al campo: sin el aria-label el lector de pantalla
+                anuncia un campo sin nombre. TKInput no tiene el problema porque
+                envuelve todo en un <label>; acá el markup está a mano por el
+                botón del ojo. */}
             <input
               type={showPwd ? "text" : "password"}
+              aria-label="Contraseña"
               value={pwd}
               onChange={e => setPwd(e.target.value)}
               placeholder=""
@@ -197,6 +203,8 @@ export function AuthScreen({ go, onLogin }) {
             />
             <button
               type="button"
+              aria-label={showPwd ? "Ocultar contraseña" : "Mostrar contraseña"}
+              aria-pressed={showPwd}
               onClick={() => setShowPwd(v => !v)}
               title={showPwd ? "Ocultar contraseña" : "Mostrar contraseña"}
               style={{

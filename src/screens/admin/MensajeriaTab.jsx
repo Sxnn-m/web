@@ -184,7 +184,7 @@ export function MensajeriaTab({ mensajes = [], onChanged, setMsg }) {
                   <div style={{ fontSize: 12, color: "var(--muted)", fontWeight: 400 }}>
                     {fmtFecha(m.createdAt)}
                   </div>
-                  <button
+                  <button aria-label="Eliminar mensaje"
                     onClick={(e) => { e.stopPropagation(); borrar(m); }}
                     style={{ ...actionBtn, color: "#c64138", justifyContent: "center" }}
                     title="Eliminar mensaje"

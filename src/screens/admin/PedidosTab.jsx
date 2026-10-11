@@ -16,7 +16,7 @@ import {
 } from '../../lib/variantesInsumo.js';
 import { tiposDe, claveTipo } from '../../lib/tiposInsumo.js';
 import { ListaDesplegable } from '../../components/ListaDesplegable.jsx';
-import { usarOrigen } from '../../components/usarOrigen.js';
+import { useOrigen } from '../../components/useOrigen.js';
 import { ModalOrigenPedido } from './ModalOrigen.jsx';
 import { LineasDeMaterial, EncabezadoPieza } from '../../components/LineasDeMaterial.jsx';
 
@@ -521,7 +521,7 @@ export function PedidosTab({ pedidos, productos, personalizados = [], filamentos
                   {/* Espaciador del alto del rótulo: sin él el botón queda más
                       arriba que los campos de la primera fila. */}
                   {i === 0 && <div style={{ ...labelStyle, visibility: "hidden" }}>·</div>}
-                  <button
+                  <button aria-label="Quitar línea"
                     onClick={() => setLineas(ls => ls.length > 1 ? ls.filter((_, j) => j !== i) : ls)}
                     style={{ ...actionBtn, color: "#c64138", justifyContent: "center",
                       height: 44, width: "100%" }}
@@ -615,6 +615,7 @@ export function PedidosTab({ pedidos, productos, personalizados = [], filamentos
                       onClick={() => !impreso && setImprimiendo(pedido)}
                       disabled={impreso}
                       style={{ ...actionBtn, opacity: impreso ? 0.4 : 1, cursor: impreso ? "not-allowed" : "pointer" }}
+                      aria-label={impreso ? "Ya está impreso" : "Marcar como impreso"}
                       title={impreso ? "Ya está impreso" : "Marcar como impreso"}
                     >
                       <Icon.check size={14}/>
@@ -622,6 +623,8 @@ export function PedidosTab({ pedidos, productos, personalizados = [], filamentos
                     <button
                       onClick={() => toggleEntregado(pedido)}
                       style={{ ...actionBtn, color: pedido.entregado ? "#4a7a52" : "var(--text)" }}
+                      aria-label={pedido.entregado ? "Marcar como no entregado" : "Marcar como entregado"}
+                      aria-pressed={pedido.entregado === true}
                       title={pedido.entregado ? "Marcar como no entregado" : "Marcar como entregado"}
                     >
                       <Icon.truck size={14}/>
@@ -629,11 +632,13 @@ export function PedidosTab({ pedidos, productos, personalizados = [], filamentos
                     <button
                       onClick={() => togglePagado(pedido)}
                       style={{ ...actionBtn, color: estaPagado(pedido) ? "#4a7a52" : "var(--text)" }}
+                      aria-label={estaPagado(pedido) ? "Marcar como pago pendiente" : "Marcar como pagado"}
+                      aria-pressed={estaPagado(pedido)}
                       title={estaPagado(pedido) ? "Marcar como pago pendiente" : "Marcar como pagado"}
                     >
                       <Icon.check size={14}/>
                     </button>
-                    <button onClick={() => borrarPedido(pedido)} style={{ ...actionBtn, color: "#c64138" }} title="Eliminar">
+                    <button aria-label="Eliminar" onClick={() => borrarPedido(pedido)} style={{ ...actionBtn, color: "#c64138" }} title="Eliminar">
                       <Icon.trash size={14}/>
                     </button>
                   </div>
@@ -755,7 +760,7 @@ export function ModalImpresion({ pedido, productos, personalizados = [], filamen
   // neto de reservas —se está imprimiendo, y restar la reserva de este mismo
   // pedido sería contarla dos veces— y arranca precargado con lo que se
   // reservó, reparto y todo, editable como si se armara de cero.
-  const o = usarOrigen({ plan, filamentos, desperdicios, inicial: pedido?.origen });
+  const o = useOrigen({ plan, filamentos, desperdicios, inicial: pedido?.origen });
   const {
     planResuelto, totalPorLinea, candidatos, origen, asignaciones,
     faltaElegir, sinOwnerConStock, sinMaterialConStock, malRepartidas,
@@ -839,7 +844,7 @@ export function ModalImpresion({ pedido, productos, personalizados = [], filamen
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
           <h3 style={{ fontSize: 24, margin: 0 }}>Marcar {pedido.numeroOrden} como impreso</h3>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)" }}>
+          <button aria-label="Cerrar" onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)" }}>
             <Icon.close size={18}/>
           </button>
         </div>

@@ -112,8 +112,13 @@ export function CatalogoScreen({ go, addToCart, initialCat, initialSub, catalogo
               {filtered.length} resultados
             </div>
             <div style={{ display: "flex", gap: 4, border: "1px solid var(--line)", padding: 3 }}>
-              <button onClick={() => setLayout("grid")} style={layoutBtn(layout === "grid")}><Icon.grid/></button>
-              <button onClick={() => setLayout("list")} style={layoutBtn(layout === "list")}><Icon.list/></button>
+              {/* aria-pressed además del label: son dos botones que se
+                  alternan, y sin eso no hay forma de saber cuál está activo
+                  si no se ve el borde. */}
+              <button aria-label="Ver en cuadrícula" aria-pressed={layout === "grid"}
+                onClick={() => setLayout("grid")} style={layoutBtn(layout === "grid")}><Icon.grid/></button>
+              <button aria-label="Ver en lista" aria-pressed={layout === "list"}
+                onClick={() => setLayout("list")} style={layoutBtn(layout === "list")}><Icon.list/></button>
             </div>
           </div>
 

@@ -199,7 +199,11 @@ function BestSellersCarousel({ featured, go, addToCart }) {
               alignItems: "center",
             }} className="carousel-slide-grid">
               {/* Product image side */}
-              <div style={{ position: "relative", overflow: "hidden" }}
+              {/* Había dos `style` en este mismo div. JSX se queda con el
+                  último, así que el primero —position y overflow— nunca se
+                  aplicaba... salvo que ya estaba repetido adentro del
+                  segundo. El resultado pintado no cambia. */}
+              <div
                 onClick={() => go("detalle", { id: p.id })}
                 onMouseEnter={e => { const img = e.currentTarget.querySelector('.pcard-img'); if(img) img.style.transform = "scale(1.04)"; }}
                 onMouseLeave={e => { const img = e.currentTarget.querySelector('.pcard-img'); if(img) img.style.transform = "scale(1)"; }}

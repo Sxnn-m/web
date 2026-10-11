@@ -228,10 +228,10 @@ export function ItemsDeGasto({
                       {fmtARS(totalDeItem(item))}
                     </div>
                     <div style={{ display: "flex", gap: 4 }}>
-                      <button style={botonAccion} title="Editar" onClick={() => editar(item)} disabled={guardando}>
+                      <button aria-label="Editar" style={botonAccion} title="Editar" onClick={() => editar(item)} disabled={guardando}>
                         <Icon.spark size={14}/>
                       </button>
-                      <button style={botonBorrar} title="Eliminar"
+                      <button aria-label="Eliminar" style={botonBorrar} title="Eliminar"
                         onClick={() => borrar(item)} disabled={guardando}>
                         <Icon.trash size={14}/>
                       </button>

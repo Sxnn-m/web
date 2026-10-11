@@ -699,7 +699,7 @@ export function AdminScreen({ go, tab = "dashboard", onTab, gastoId = null, onGa
           display: "flex", justifyContent: "space-between", alignItems: "center",
         }}>
           {msg}
-          <button onClick={() => setMsg("")} style={{ background: "none", border: "none", cursor: "pointer", color: "inherit" }}><Icon.close size={14}/></button>
+          <button aria-label="Cerrar el aviso" onClick={() => setMsg("")} style={{ background: "none", border: "none", cursor: "pointer", color: "inherit" }}><Icon.close size={14}/></button>
         </div>
       )}
 
@@ -1100,7 +1100,7 @@ export function ProductsTab({
                 ))}
               </ul>
             </div>
-            <button onClick={onCerrarTiempos} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)" }}>
+            <button aria-label="Cerrar el aviso de tiempos" onClick={onCerrarTiempos} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)" }}>
               <Icon.close size={14}/>
             </button>
           </div>
@@ -1191,6 +1191,8 @@ export function ProductsTab({
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
                     <button
                       onClick={() => onToggleVisible(p)}
+                      aria-label={p.visible === false ? "Oculto — clic para mostrar" : "Visible — clic para ocultar"}
+                      aria-pressed={p.visible !== false}
                       title={p.visible === false ? "Oculto — clic para mostrar" : "Visible — clic para ocultar"}
                       style={{
                         background: "none", border: "none", cursor: "pointer", padding: 4,
@@ -1203,8 +1205,8 @@ export function ProductsTab({
                     </button>
                   </div>
                   <div style={{ display: "flex", gap: 4 }}>
-                    <button onClick={() => onEdit(p)} style={actionBtn} title="Editar"><Icon.spark size={14}/></button>
-                    <button onClick={() => onDelete(p._id)} style={{...actionBtn, color: "#c64138"}} title="Eliminar"><Icon.trash size={14}/></button>
+                    <button aria-label="Editar" onClick={() => onEdit(p)} style={actionBtn} title="Editar"><Icon.spark size={14}/></button>
+                    <button aria-label="Eliminar" onClick={() => onDelete(p._id)} style={{...actionBtn, color: "#c64138"}} title="Eliminar"><Icon.trash size={14}/></button>
                   </div>
                 </div>
 
@@ -1331,8 +1333,8 @@ function PersonalizadosTab({
                     <EnlaceExterno url={p.origenUrl}/>
                   </div>
                   <div style={{ display: "flex", gap: 4 }}>
-                    <button onClick={() => onEdit(p)} style={actionBtn} title="Editar"><Icon.spark size={14}/></button>
-                    <button onClick={() => onDelete(p)} style={{...actionBtn, color: "#c64138"}} title="Eliminar"><Icon.trash size={14}/></button>
+                    <button aria-label="Editar" onClick={() => onEdit(p)} style={actionBtn} title="Editar"><Icon.spark size={14}/></button>
+                    <button aria-label="Eliminar" onClick={() => onDelete(p)} style={{...actionBtn, color: "#c64138"}} title="Eliminar"><Icon.trash size={14}/></button>
                   </div>
                 </div>
 
@@ -1378,7 +1380,7 @@ function ModalRenumeracion({ plan, onClose, onConfirm }) {
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
           <h3 style={{ fontSize: 24, margin: 0 }}>Renumerar IDs de producto</h3>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)" }}>
+          <button aria-label="Cerrar" onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)" }}>
             <Icon.close size={18}/>
           </button>
         </div>
@@ -1832,7 +1834,7 @@ export function RecetaEditor({ receta, setReceta, filamentos }) {
                 placeholder="Gramos"
                 style={recetaInput}
               />
-              <button onClick={() => quitar(i)} style={{ ...actionBtn, color: "#c64138", justifyContent: "center", height: 42 }} title="Quitar línea">
+              <button aria-label="Quitar línea" onClick={() => quitar(i)} style={{ ...actionBtn, color: "#c64138", justifyContent: "center", height: 42 }} title="Quitar línea">
                 <Icon.trash size={14}/>
               </button>
             </div>
@@ -1930,7 +1932,7 @@ function VarianteCard({ indice, variante, abierta, onAlternar, onQuitar, faltanC
           )}
         </button>
 
-        <button onClick={onQuitar} style={{ ...actionBtn, color: "#c64138", flexShrink: 0 }}
+        <button aria-label="Eliminar variante" onClick={onQuitar} style={{ ...actionBtn, color: "#c64138", flexShrink: 0 }}
           title="Eliminar variante">
           <Icon.trash size={14}/>
         </button>
@@ -2279,7 +2281,7 @@ export function VariantesInsumoEditor({ grupos, setGrupos, catalogo, insumosFijo
                             style={recetaInput}
                           />
                         </div>
-                        <button onClick={() => quitarOpcion(i, j)}
+                        <button aria-label="Quitar opción" onClick={() => quitarOpcion(i, j)}
                           style={{ ...actionBtn, color: "#c64138", justifyContent: "center", height: 42 }}
                           title="Quitar opción">
                           <Icon.trash size={14}/>
@@ -2482,7 +2484,7 @@ function GrupoInsumoCard({ indice, grupo, abierto, conStock, sinInsumo, onAltern
             </span>
           )}
         </button>
-        <button onClick={onQuitar} style={{ ...actionBtn, color: "#c64138", flexShrink: 0 }}
+        <button aria-label="Eliminar grupo" onClick={onQuitar} style={{ ...actionBtn, color: "#c64138", flexShrink: 0 }}
           title="Eliminar grupo">
           <Icon.trash size={14}/>
         </button>
@@ -2695,7 +2697,7 @@ function InsumosEditor({ lineas, setLineas, catalogo }) {
                   {l.insumoId ? fmtARS(subtotalDe(l)) : "—"}
                 </div>
               </div>
-              <button
+              <button aria-label="Quitar insumo"
                 onClick={() => quitar(i)}
                 style={{ ...actionBtn, color: "#c64138", justifyContent: "center", height: 40, marginTop: i === 0 ? 20 : 0 }}
                 title="Quitar insumo"
@@ -3407,7 +3409,7 @@ export function ProductForm({
 
                 {/* Clear */}
                 {url.trim() && (
-                  <button onClick={() => upImg(i, "")} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)", padding: 4 }}>
+                  <button aria-label={`Borrar la imagen ${i + 1}`} onClick={() => upImg(i, "")} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)", padding: 4 }}>
                     <Icon.close size={12}/>
                   </button>
                 )}
@@ -3698,11 +3700,14 @@ function CategoriesTab({ categories, products, onCategoriesChange, setMsg }) {
                   ID: {cat.id} · {(cat.subs || []).length} subcategorías · {products.filter(p => p.cat === cat.id).length} productos
                 </div>
               </div>
-              <button onClick={() => toggleCatVisibility(cat)} style={{...actionBtn, color: cat.visible === false ? "#c64138" : "#4a7a52"}} title={cat.visible === false ? "Oculta — clic para mostrar" : "Visible — clic para ocultar"}>
+              <button onClick={() => toggleCatVisibility(cat)} style={{...actionBtn, color: cat.visible === false ? "#c64138" : "#4a7a52"}}
+                aria-label={`${cat.name}: ${cat.visible === false ? "oculta — clic para mostrar" : "visible — clic para ocultar"}`}
+                aria-pressed={cat.visible !== false}
+                title={cat.visible === false ? "Oculta — clic para mostrar" : "Visible — clic para ocultar"}>
                 {cat.visible === false ? <Icon.eyeOff size={14}/> : <Icon.eye size={14}/>}
               </button>
-              <button onClick={() => openEditCat(cat)} style={actionBtn} title="Editar"><Icon.spark size={14}/></button>
-              <button onClick={() => deleteCat(cat)} style={{...actionBtn, color: "#c64138"}} title="Eliminar"><Icon.trash size={14}/></button>
+              <button aria-label="Editar" onClick={() => openEditCat(cat)} style={actionBtn} title="Editar"><Icon.spark size={14}/></button>
+              <button aria-label="Eliminar" onClick={() => deleteCat(cat)} style={{...actionBtn, color: "#c64138"}} title="Eliminar"><Icon.trash size={14}/></button>
             </div>
 
             {/* Subcategories (expanded) */}
@@ -3734,12 +3739,16 @@ function CategoriesTab({ categories, products, onCategoriesChange, setMsg }) {
                           ({prodCount} {prodCount === 1 ? "producto" : "productos"})
                         </span>
                       </div>
-                      <button onClick={() => toggleSubVisibility(cat, sub)} style={{...actionBtn, color: isHidden ? "#c64138" : "#4a7a52"}} title={isHidden ? "Oculta — clic para mostrar" : "Visible — clic para ocultar"}>
+                      <button onClick={() => toggleSubVisibility(cat, sub)} style={{...actionBtn, color: isHidden ? "#c64138" : "#4a7a52"}}
+                        aria-label={`${sub}: ${isHidden ? "oculta — clic para mostrar" : "visible — clic para ocultar"}`}
+                        aria-pressed={!isHidden}
+                        title={isHidden ? "Oculta — clic para mostrar" : "Visible — clic para ocultar"}>
                         {isHidden ? <Icon.eyeOff size={13}/> : <Icon.eye size={13}/>}
                       </button>
-                      <button onClick={() => openEditSub(cat, sub)} style={actionBtn} title="Editar"><Icon.spark size={13}/></button>
+                      <button aria-label="Editar" onClick={() => openEditSub(cat, sub)} style={actionBtn} title="Editar"><Icon.spark size={13}/></button>
                       <button onClick={() => deleteSub(cat, sub)}
                         style={{...actionBtn, color: prodCount > 0 ? "var(--muted)" : "#c64138", cursor: prodCount > 0 ? "not-allowed" : "pointer"}}
+                        aria-label={prodCount > 0 ? `${sub}: tiene productos, no se puede eliminar` : `Eliminar ${sub}`}
                         title={prodCount > 0 ? "Tiene productos, no se puede eliminar" : "Eliminar"}>
                         <Icon.trash size={13}/>
                       </button>
@@ -3959,7 +3968,7 @@ export function CostosTab({
                 {/* Si el material solo viene del inventario no hay fila que
                     borrar: sacarla acá la haría reaparecer en el próximo render. */}
                 {configurado ? (
-                  <button
+                  <button aria-label="Eliminar material"
                     onClick={() => removeMaterial(material)}
                     style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)", padding: 4 }}
                     title="Eliminar material"

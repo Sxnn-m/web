@@ -213,6 +213,9 @@ export function InsumosTab({ insumos, onChanged, setMsg }) {
                 <button
                   onClick={() => quitarTipoDelForm(j)}
                   disabled={form.tipos.length <= 1}
+                  aria-label={form.tipos.length <= 1
+                    ? "El insumo no puede quedarse sin tipos"
+                    : `Quitar el tipo ${j + 1}`}
                   title={form.tipos.length <= 1
                     ? "El insumo no puede quedarse sin tipos"
                     : "Quitar tipo"}
@@ -284,6 +287,7 @@ export function InsumosTab({ insumos, onChanged, setMsg }) {
                     {multi && (
                       <button
                         onClick={() => alternar(i._id)}
+                        aria-label={`${expandido ? "Contraer" : "Expandir"} ${i.nombre || "el insumo"}`}
                         title={expandido ? "Contraer" : "Expandir"}
                         aria-expanded={expandido}
                         style={{ ...actionBtn, padding: "2px 4px", border: "none" }}
@@ -339,16 +343,16 @@ export function InsumosTab({ insumos, onChanged, setMsg }) {
                   </div>
                   <div style={{ display: "flex", gap: 4 }}>
                     {!multi && (
-                      <button onClick={() => setAbierto({ insumoId: i._id, tipoId: unico.tipoId })}
+                      <button aria-label="Ver detalle" onClick={() => setAbierto({ insumoId: i._id, tipoId: unico.tipoId })}
                         style={actionBtn} title="Ver detalle"><Icon.list size={14}/></button>
                     )}
-                    <button
+                    <button aria-label="Agregar tipo"
                       onClick={() => setNuevoTipo({
                         insumoId: i._id, nombre: "", precioUnidad: 0, cantidadDisponible: 0,
                       })}
                       style={actionBtn} title="Agregar tipo"><Icon.plus size={14}/></button>
-                    <button onClick={() => openEditar(i)} style={actionBtn} title="Editar"><Icon.spark size={14}/></button>
-                    <button onClick={() => borrar(i)} style={{ ...actionBtn, color: "#c64138" }} title="Eliminar"><Icon.trash size={14}/></button>
+                    <button aria-label="Editar" onClick={() => openEditar(i)} style={actionBtn} title="Editar"><Icon.spark size={14}/></button>
+                    <button aria-label="Eliminar" onClick={() => borrar(i)} style={{ ...actionBtn, color: "#c64138" }} title="Eliminar"><Icon.trash size={14}/></button>
                   </div>
                 </div>
 
@@ -410,10 +414,10 @@ export function InsumosTab({ insumos, onChanged, setMsg }) {
                       </div>
                       <div>{alertaTipo ? <RestockBadge/> : <span style={{ color: "var(--muted)", fontSize: 12 }}>OK</span>}</div>
                       <div style={{ display: "flex", gap: 4 }}>
-                        <button onClick={() => setAbierto({ insumoId: i._id, tipoId: t.tipoId })}
+                        <button aria-label="Ver detalle" onClick={() => setAbierto({ insumoId: i._id, tipoId: t.tipoId })}
                           style={actionBtn} title="Ver detalle"><Icon.list size={14}/></button>
-                        <button onClick={() => openEditar(i)} style={actionBtn} title="Editar"><Icon.spark size={14}/></button>
-                        <button onClick={() => borrarTipo(i, t)}
+                        <button aria-label="Editar" onClick={() => openEditar(i)} style={actionBtn} title="Editar"><Icon.spark size={14}/></button>
+                        <button aria-label="Eliminar tipo" onClick={() => borrarTipo(i, t)}
                           style={{ ...actionBtn, color: "#c64138" }} title="Eliminar tipo">
                           <Icon.trash size={14}/>
                         </button>

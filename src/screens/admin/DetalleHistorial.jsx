@@ -125,7 +125,11 @@ export function DetalleHistorial({
     setLoading(false);
   };
 
-  useEffect(() => { cargarHistoriales(); /* eslint-disable-next-line */ }, [coleccion, item._id, tipoId]);
+  // Mismo caso que en DetalleGasto: la función se recrea en cada render y
+  // meterla en el array haría un bucle. Sus dependencias reales —coleccion,
+  // el id del ítem y el tipo— ya están todas.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { cargarHistoriales(); }, [coleccion, item._id, tipoId]);
 
   const guardarRestock = async () => {
     const n = Number(restockForm.cantidadAgregada);

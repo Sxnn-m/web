@@ -57,10 +57,11 @@ export function Nav({ route, go, user, isAdmin, onLogout }) {
         <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
           {/* Instagram no va acá: ya está el botón flotante, que lleva al
               mismo lugar. Quedan lupa, carrito y perfil. */}
-          <button onClick={() => go("catalogo")} style={iconBtn}><Icon.search/></button>
+          <button aria-label="Buscar en el catálogo" onClick={() => go("catalogo")} style={iconBtn}><Icon.search/></button>
           <BotonCarrito/>
           <MenuPerfil user={user} isAdmin={isAdmin} go={go} onLogout={onLogout}/>
-          <button className="nav-mobile" onClick={() => setOpen(!open)} style={{...iconBtn, display: "none"}}>
+          <button aria-label={open ? "Cerrar el menú" : "Abrir el menú"} aria-expanded={open}
+            className="nav-mobile" onClick={() => setOpen(!open)} style={{...iconBtn, display: "none"}}>
             {open ? <Icon.close/> : <Icon.menu/>}
           </button>
         </div>
@@ -132,7 +133,7 @@ function MenuPerfil({ user, isAdmin, go, onLogout }) {
 
   if (!user) {
     return (
-      <button onClick={() => go("auth")} style={{ ...iconBtn, gap: 7 }} title="Iniciar sesión">
+      <button aria-label="Iniciar sesión" onClick={() => go("auth")} style={{ ...iconBtn, gap: 7 }} title="Iniciar sesión">
         <Icon.user/>
       </button>
     );
@@ -575,6 +576,7 @@ function AppInterna() {
         href={CONTACT.instagramUrl}
         target="_blank"
         rel="noopener noreferrer"
+        aria-label={`Seguinos en Instagram — @${CONTACT.instagramHandle}`}
         title={`Seguinos en Instagram — @${CONTACT.instagramHandle}`}
         style={{
           position: "fixed", bottom: 20, left: 20, zIndex: 101,
