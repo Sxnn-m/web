@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, lazy, Suspense } from 'react';
 import './index.css';
 import { PRODUCTS as FALLBACK_PRODUCTS, CATEGORIES as FALLBACK_CATEGORIES, CONTACT } from './data.js';
 import { TKLogo, Icon, sinStock } from './components/UI.jsx';
@@ -7,9 +7,10 @@ import { CatalogoScreen } from './screens/CatalogoScreen.jsx';
 import { DetalleScreen } from './screens/DetalleScreen.jsx';
 import { AuthScreen } from './screens/AuthScreen.jsx';
 import { AboutScreen } from './screens/AboutScreen.jsx';
-import { AdminScreen } from './screens/AdminScreen.jsx';
 import { MantenimientoScreen } from './screens/MantenimientoScreen.jsx';
 import { MobileHome, MobileCatalogoHub, MobileCategoria, MobileBuscador, MobileTabBar, MobileHeader } from './screens/mobile/MobileScreens.jsx';
+import { CargandoPantalla } from './components/CargandoPantalla.jsx';
+import { limpiarMarca } from './lib/recargaPorChunk.js';
 import { CarritoProvider, useCarrito } from './context/CarritoContext.jsx';
 import { CarritoModal } from './components/CarritoModal.jsx';
 import { configuracionInicial } from './lib/carrito.js';
@@ -21,6 +22,44 @@ import { useLocation, useNavigate, Navigate } from 'react-router-dom';
 import { auth, db } from './firebase.js';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
+
+// ─── El backoffice se baja aparte ────────────────────────────────────
+// AdminScreen arrastra consigo los doce tabs del backoffice, las finanzas, el
+// inventario y las estadísticas: la mayor parte del código de la aplicación,
+// que solo usa una persona. Con un import normal, cada visitante que entra a
+// ver una lámpara se baja todo eso para no usarlo nunca.
+//
+// Es la ÚNICA frontera de lazy que hace falta: Rollup mete en el chunk
+// asíncrono todo el subárbol que solo se alcanza desde acá, así que los tabs,
+// ItemsDeGasto, las tablas del admin y sus libs se van solos. Lo que comparte
+// con el sitio público (UI.jsx, variantes.js, el SDK de Firebase) se queda en
+// el chunk común, que es lo correcto: duplicarlo sería peor.
+//
+// AdminScreen es un export con nombre, no default, así que hay que mapearlo.
+// Y el .then() es además el momento exacto en que se sabe que el chunk llegó:
+// ahí se borra la marca de "ya recargué una vez por un chunk que no cargaba",
+// para que la red de contención vuelva a estar armada para la próxima.
+const AdminScreen = lazy(() =>
+  import('./screens/AdminScreen.jsx').then(modulo => {
+    limpiarMarca();
+    return { default: modulo.AdminScreen };
+  })
+);
+
+/**
+ * El backoffice con su espera. Se usa en las dos ramas del render (escritorio
+ * y mobile) para que la frontera de Suspense sea exactamente la misma: si una
+ * rama lo envolviera y la otra no, la que falta tiraría el error de carga
+ * hasta el ErrorBoundary de arriba y se vería la pantalla de error en vez del
+ * splash.
+ */
+function Backoffice(props) {
+  return (
+    <Suspense fallback={<CargandoPantalla/>}>
+      <AdminScreen {...props}/>
+    </Suspense>
+  );
+}
 
 // Exportado para poder montarlo aislado en pruebas del header.
 export function Nav({ route, go, user, isAdmin, onLogout }) {
@@ -482,7 +521,7 @@ function AppInterna() {
       case "detalle": return <DetalleScreen key={routeData.id} go={go} addToCart={addToCart} productId={routeData.id} products={publicProducts} categories={publicCategories}/>;
         case "auth": return <AuthScreen go={go} onLogin={setUser}/>;
         case "about": return <AboutScreen go={go} categories={publicCategories}/>;
-        case "admin": return isAdmin ? <AdminScreen go={go} onProductsChange={loadProducts} onCategoriesChange={loadCategories} categories={categories} products={products}/> : <AuthScreen go={go} onLogin={setUser}/>;
+        case "admin": return isAdmin ? <Backoffice go={go} onProductsChange={loadProducts} onCategoriesChange={loadCategories} categories={categories} products={products}/> : <AuthScreen go={go} onLogin={setUser}/>;
         default: return <MobileHome go={go} addToCart={addToCart} products={publicProducts}/>;
       }
     }
@@ -505,7 +544,7 @@ function AppInterna() {
       // es la misma para las dos ramas, así que entrar deja al admin ya parado
       // en el tab que había pedido.
       case "admin": return isAdmin
-        ? <AdminScreen go={go} tab={routeData.tab} onTab={t => go("admin", { tab: t })}
+        ? <Backoffice go={go} tab={routeData.tab} onTab={t => go("admin", { tab: t })}
             gastoId={routeData.gastoId || null}
             onGasto={id => go("admin", { tab: "finanzas", ...(id ? { gastoId: id } : {}) })}
             onProductsChange={loadProducts} onCategoriesChange={loadCategories}

@@ -49,8 +49,17 @@ const leer = (almacen) => {
   catch { return null; }   // null = "no sé", distinto de false = "no hay marca"
 };
 const escribir = (almacen) => {
-  try { almacen?.setItem(CLAVE_MARCA, "1"); return true; }
-  catch { return false; }
+  try {
+    // Sin almacén NO se da por escrita la marca. Con `almacen?.setItem(...)`
+    // el encadenamiento opcional no lanza: devolvía true sin haber guardado
+    // nada, y eso es exactamente el bucle infinito que esto tiene que evitar.
+    if (!almacen) return false;
+    almacen.setItem(CLAVE_MARCA, "1");
+    // Y se vuelve a leer: hay navegadores que en modo privado aceptan el
+    // setItem sin error y después devuelven null. Escribir sin poder leer de
+    // vuelta es lo mismo que no tener marca.
+    return almacen.getItem(CLAVE_MARCA) === "1";
+  } catch { return false; }
 };
 
 /** Se llama cuando el chunk SÍ cargó: la marca dejó de aplicar. */
