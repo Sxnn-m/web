@@ -87,11 +87,15 @@ export function HomeScreen({ go, addToCart, homeVariant = "A", products = [], ca
                   <div style={{ fontSize: 11, color: "var(--muted)", letterSpacing: 1.5 }}>
                     {i < 9 ? `0${i+1}` : i+1}
                   </div>
-                  <h3 style={{ fontSize: c.name.length > 18 ? 26 : 36, letterSpacing: -0.5, margin: "16px 0 0", color: "var(--text)", lineHeight: 1.1 }}>
+                  {/* Las categorías llegan normalizadas desde App.jsx, pero
+                      estas dos lecturas se defienden igual: son las que
+                      dejaban el sitio público en blanco si el documento venía
+                      sin name o sin subs. */}
+                  <h3 style={{ fontSize: (c.name || "").length > 18 ? 26 : 36, letterSpacing: -0.5, margin: "16px 0 0", color: "var(--text)", lineHeight: 1.1 }}>
                     {c.name}
                   </h3>
                   <div style={{ marginTop: 14, display: "flex", flexWrap: "wrap", gap: 8 }}>
-                    {c.subs.map(s => (
+                    {(c.subs || []).map(s => (
                       <span key={s} style={{ fontSize: 12, color: "var(--muted)", borderBottom: "1px solid var(--line-strong)", paddingBottom: 2 }}>{s}</span>
                     ))}
                   </div>
@@ -397,7 +401,7 @@ function HomeC({ go, addToCart, products = [] }) {
             </div>
           </div>
           <div>
-            <ProductImage src={picks[0].img} alt=""/>
+            <ProductImage src={picks[0]?.img} alt=""/>
           </div>
         </div>
       </section>

@@ -16,6 +16,7 @@ import { configuracionInicial } from './lib/carrito.js';
 import { nombreVisible, mostrarEmail } from './lib/usuario.js';
 import { escucharMantenimiento, debeBloquear } from './lib/mantenimiento.js';
 import { rutaDe, estadoDe, esRutaConocida } from './lib/rutas.js';
+import { normalizarCategorias } from './lib/categorias.js';
 import { useLocation, useNavigate, Navigate } from 'react-router-dom';
 import { auth, db } from './firebase.js';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
@@ -307,9 +308,12 @@ function AppInterna() {
     try {
       const snap = await getDocs(collection(db, "categories"));
       if (!snap.empty) {
-        const cats = snap.docs
-          .map(d => ({ ...d.data(), _id: d.id }))
-          .sort((a, b) => (a.order ?? 99) - (b.order ?? 99));
+        // Normalizadas acá, que es por donde TODA categoría entra a la app:
+        // la home hace c.name.length y c.subs.map(), y un documento sin esos
+        // campos tiraba un TypeError que dejaba el sitio entero en blanco.
+        const cats = normalizarCategorias(
+          snap.docs.map(d => ({ ...d.data(), _id: d.id }))
+        ).sort((a, b) => (a.order ?? 99) - (b.order ?? 99));
         setCategories(cats);
       }
     } catch (err) {
