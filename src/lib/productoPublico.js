@@ -36,13 +36,21 @@
  */
 export const CAMPOS_DEL_FORM = [
   "id", "name", "cat", "sub", "desc", "tag", "price", "visible", "img", "images",
-  // No lo lee ninguna pantalla pública, pero NO se puede sacar de acá sin
-  // migrar antes: recalcularDisponibilidad() decide con `p.precioManual
-  // !== true` si puede reescribir el precio, y lee el producto enriquecido,
-  // donde este campo sale del doc público. Si desapareciera de golpe, todo
-  // producto con precio puesto a mano pasaría a contar como automático y el
-  // primer recálculo le reescribiría el precio. Es un booleano: no revela
-  // ningún número del inventario.
+  // ── precioManual: público a propósito ──────────────────────────────
+  // Ninguna pantalla pública lo lee, así que a primera vista sobra en esta
+  // lista. Se publica porque recalcularDisponibilidad() (inventario.js)
+  // decide con `p.precioManual !== true` si puede reescribir el precio, y
+  // lee el producto ENRIQUECIDO, donde este campo sale del doc público.
+  //
+  // Sacarlo exige migrar primero, en este orden: escribirlo en el doc
+  // privado de cada producto, hacer que el recálculo lo lea de ahí, y solo
+  // entonces borrarlo del público. Sacarlo de golpe haría que todo producto
+  // con precio puesto a mano pasara a contar como automático y el primer
+  // recálculo le reescribiría el precio.
+  //
+  // Mientras siga acá, la limpieza de campos viejos NO puede tocarlo: está
+  // en el allowlist, y el plan de limpieza se deriva de este mismo allowlist.
+  // Es un booleano y no revela ningún número del inventario.
   "precioManual",
 ];
 
@@ -131,5 +139,67 @@ export function camposExtra(doc = {}) {
   return {
     campos: Object.keys(doc).filter(c => !permitidos.has(c)).sort(),
     specs: Object.keys(doc?.specs || {}).filter(c => !CAMPOS_SPECS.includes(c)).sort(),
+  };
+}
+
+/**
+ * El plan de limpieza de toda la colección: documentos adentro, plan afuera.
+ *
+ * Puro a propósito —no toca Firestore— para poder probarlo con documentos
+ * inventados. Quien escribe es aplicarLimpieza() en limpiezaProductos.js.
+ *
+ * Lo que entra al plan sale de camposExtra(), que a su vez sale del MISMO
+ * allowlist con que docPublico() arma el documento. No hay ninguna lista de
+ * campos a borrar escrita a mano: si mañana se agrega un campo al allowlist,
+ * deja de aparecer en la limpieza sin tocar nada acá.
+ *
+ * @param {Array<object>} docs  documentos de products, cada uno con su _id
+ * @returns {{
+ *   productos: Array<{_id, id, nombre, campos: Array<{ruta, valor}>}>,
+ *   porCampo: Array<{ruta, cantidad}>,
+ *   totalProductos: number, totalCampos: number, revisados: number
+ * }}
+ */
+export function planDeLimpieza(docs = []) {
+  // Red de seguridad explícita, además de la que ya da camposExtra(): que la
+  // regla "nunca se borra algo del allowlist" esté escrita justo donde se
+  // decide qué se borra, y no solo en el test.
+  const intocable = (ruta) => {
+    if (ruta.startsWith("specs.")) return CAMPOS_SPECS.includes(ruta.slice(6));
+    return CAMPOS_PUBLICOS_EN_DOC.includes(ruta) || ruta === "_id";
+  };
+
+  const productos = [];
+  const cuenta = new Map();
+
+  for (const d of (Array.isArray(docs) ? docs : [])) {
+    if (!d?._id) continue;
+    const extra = camposExtra(d);
+    const campos = [
+      ...extra.campos.map(c => ({ ruta: c, valor: d[c] })),
+      ...extra.specs.map(c => ({ ruta: `specs.${c}`, valor: d.specs?.[c] })),
+    ].filter(f => !intocable(f.ruta));
+
+    if (campos.length === 0) continue;
+
+    for (const f of campos) cuenta.set(f.ruta, (cuenta.get(f.ruta) || 0) + 1);
+    productos.push({
+      _id: d._id,
+      id: d.id || "",
+      nombre: d.name || d.id || d._id,
+      campos,
+    });
+  }
+
+  return {
+    productos,
+    // Los más frecuentes primero; a igual cantidad, alfabético, para que la
+    // vista previa no cambie de orden entre corridas.
+    porCampo: [...cuenta.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([ruta, cantidad]) => ({ ruta, cantidad })),
+    totalProductos: productos.length,
+    totalCampos: productos.reduce((n, p) => n + p.campos.length, 0),
+    revisados: Array.isArray(docs) ? docs.length : 0,
   };
 }

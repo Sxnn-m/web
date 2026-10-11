@@ -66,6 +66,7 @@ import { datosDeCategoria, validarCategoria } from '../lib/categorias.js';
 import { EnlaceExterno } from '../components/EnlaceExterno.jsx';
 import { normalizarUrl } from '../lib/url.js';
 import { docPublico } from '../lib/productoPublico.js';
+import { calcularPlanDeLimpieza, aplicarLimpieza } from '../lib/limpiezaProductos.js';
 import {
   tiempoDeProducto, specsDeTiempo, formatTiempo, formatTiempoProducto,
 } from '../lib/tiempoImpresion.js';
@@ -397,6 +398,45 @@ export function AdminScreen({ go, tab = "dashboard", onTab, gastoId = null, onGa
     } catch (err) {
       setMsg("Error al renumerar: " + err.message);
     }
+  };
+
+  /**
+   * Limpiar campos viejos del doc público: dos pasos separados a propósito.
+   * `calcular` solo lee y devuelve el plan para la vista previa; `aplicar`
+   * escribe, y recién se llama cuando el modal ya pidió confirmación.
+   */
+  const handleLimpiarCampos = {
+    calcular: async () => {
+      try {
+        return await calcularPlanDeLimpieza();
+      } catch (err) {
+        setMsg("Error al revisar los productos: " + err.message);
+        return { productos: [], porCampo: [], totalProductos: 0, totalCampos: 0, revisados: 0 };
+      }
+    },
+    aplicar: async (plan) => {
+      setMsg("Limpiando campos viejos...");
+      try {
+        const { limpiados, lotes, lotesOk, errores, ok } = await aplicarLimpieza(plan);
+        await loadProducts();
+        onProductsChange?.();
+        if (!ok) {
+          // Sin "✓": un lote que falló significa que esos productos siguen
+          // con los campos puestos. El batch es atómico, así que se reintenta
+          // entero volviendo a tocar el botón.
+          setMsg(
+            `Se limpiaron ${limpiados} producto(s) en ${lotesOk} de ${lotes} lote(s). ` +
+            `Falló ${errores.length} lote(s): ${errores[0].error}. ` +
+            `Los productos de los lotes que fallaron siguen igual (${errores.flatMap(e => e.productos).slice(0, 5).join(", ")}` +
+            `${errores.flatMap(e => e.productos).length > 5 ? "…" : ""}). Volvé a tocar el botón para completarlos.`
+          );
+        } else {
+          setMsg(`✓ ${limpiados} producto(s) limpiados. Se borraron ${plan.totalCampos} campo(s) del documento público.`);
+        }
+      } catch (err) {
+        setMsg("Error al limpiar: " + err.message);
+      }
+    },
   };
 
   // Botón manual: mueve receta/origenUrl/notas del doc público a la subcolección
@@ -760,6 +800,7 @@ export function AdminScreen({ go, tab = "dashboard", onTab, gastoId = null, onGa
                     p => (p.variantes || []).length === 0 && (p.receta || []).length > 0).length}
                   onMigrarPrivados={handleMigrarPrivados}
                   onRenumerarIds={handleRenumerarIds}
+                  onLimpiarCampos={handleLimpiarCampos}
                   tiemposIlegibles={tiemposIlegibles}
                   onCerrarTiempos={() => setTiemposIlegibles([])}
                   onToggleVisible={async (p) => {
@@ -991,10 +1032,13 @@ export function ProductsTab({
   onEdit, onDelete, onNew, onToggleVisible, onRecalcular, onMigrarPrivados,
   onMigrarVariantes, pendientesDeVariantes = 0,
   onRenumerarIds, tiemposIlegibles = [], onCerrarTiempos,
+  onLimpiarCampos,
 }) {
   const [search, setSearch] = useState("");
   const [planRenumeracion, setPlanRenumeracion] = useState(null);
   const [expandido, setExpandido] = useState(null);
+  // null = el modal está cerrado. "cargando" mientras se lee la colección.
+  const [planLimpieza, setPlanLimpieza] = useState(null);
 
   // Cascada categoría → subcategoría, compartida con la tabla de Rentabilidad.
   const filtros = useFiltrosCategoria(categories);
@@ -1044,6 +1088,18 @@ export function ProductsTab({
           )}
           <TKButton variant="outline" onClick={onRecalcular} icon={<Icon.spark size={14}/>}>
             Recalcular desde recetas
+          </TKButton>
+          {/* Lee la colección entera y abre la vista previa. No escribe nada
+              hasta que se confirma dentro del modal. */}
+          <TKButton
+            variant="outline"
+            onClick={async () => {
+              setPlanLimpieza("cargando");
+              setPlanLimpieza(await onLimpiarCampos.calcular());
+            }}
+            icon={<Icon.trash size={14}/>}
+          >
+            Limpiar campos viejos
           </TKButton>
           <TKButton onClick={onNew} icon={<Icon.plus size={14}/>}>Nuevo producto</TKButton>
         </div>
@@ -1229,6 +1285,18 @@ export function ProductsTab({
         />
       )}
 
+      {planLimpieza && (
+        <ModalLimpieza
+          plan={planLimpieza === "cargando" ? null : planLimpieza}
+          onClose={() => setPlanLimpieza(null)}
+          onConfirm={async () => {
+            const plan = planLimpieza;
+            setPlanLimpieza(null);
+            await onLimpiarCampos.aplicar(plan);
+          }}
+        />
+      )}
+
       {filtered.length === 0 && (
         <div style={{ padding: 40, textAlign: "center", color: "var(--muted)" }}>
           No se encontraron productos.
@@ -1353,6 +1421,145 @@ function PersonalizadosTab({
         </div>
       )}
     </>
+  );
+}
+
+// ─── Modal: revisar la limpieza de campos viejos antes de escribir ────
+// Vista previa primero, siempre. El botón de aplicar aparece solo si hay
+// algo que borrar, y pide confirmación con los números a la vista.
+export function ModalLimpieza({ plan, onClose, onConfirm }) {
+  const cargando = plan === null;
+  const hayQueLimpiar = !cargando && plan.totalProductos > 0;
+
+  const confirmar = () => {
+    const ok = confirm(
+      `Se van a borrar ${plan.totalCampos} campo(s) en ${plan.totalProductos} producto(s).\n\n` +
+      `Se borran únicamente los campos listados. El resto de cada documento ` +
+      `queda intacto, y los productos que ya están limpios no se tocan.\n\n` +
+      `¿Aplicar la limpieza?`
+    );
+    if (ok) onConfirm();
+  };
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", zIndex: 200,
+        display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: "var(--bg)", border: "1px solid var(--line)",
+          maxWidth: 680, width: "100%", maxHeight: "85vh",
+          display: "flex", flexDirection: "column",
+          padding: 28, boxShadow: "0 20px 60px rgba(0,0,0,.3)",
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
+          <h3 style={{ fontSize: 24, margin: 0 }}>Limpiar campos viejos</h3>
+          <button aria-label="Cerrar" onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)" }}>
+            <Icon.close size={18}/>
+          </button>
+        </div>
+        <p style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.6, marginTop: 0, marginBottom: 14 }}>
+          El documento de un producto es de lectura pública, y guardarlo FUSIONA
+          en vez de reemplazar: un campo que escribió una versión anterior de la
+          app se queda ahí para siempre. Acá se listan esos campos, con su valor
+          actual, para borrarlos. La lista sale del mismo allowlist con el que se
+          arma el documento, así que nunca puede incluir un campo que el sitio sí
+          usa.
+        </p>
+
+        {cargando ? (
+          <div style={{ padding: 40, textAlign: "center", color: "var(--muted)", fontSize: 13 }}>
+            Leyendo los productos...
+          </div>
+        ) : !hayQueLimpiar ? (
+          <div style={{ padding: 40, textAlign: "center" }}>
+            <div style={{ fontSize: 15, color: "#4a7a52", fontWeight: 600, marginBottom: 6 }}>
+              Todos los productos están limpios
+            </div>
+            <div style={{ fontSize: 12, color: "var(--muted)" }}>
+              {plan.revisados} producto(s) revisados · ningún campo de más.
+            </div>
+          </div>
+        ) : (
+          <>
+            <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 14 }}>
+              <strong style={{ color: "var(--text)" }}>{plan.totalProductos}</strong> de {plan.revisados} productos
+              tienen campos de más · <strong style={{ color: "var(--text)" }}>{plan.totalCampos}</strong> campo(s) en total.
+            </div>
+
+            {/* Resumen por campo: cuántos productos tiene cada uno. */}
+            <div style={{ border: "1px solid var(--line)", marginBottom: 16 }}>
+              <div style={{
+                padding: "8px 12px", background: "var(--bg-alt)", fontSize: 10,
+                textTransform: "uppercase", letterSpacing: 1.2, color: "var(--muted)", fontWeight: 700,
+              }}>
+                Resumen por campo
+              </div>
+              {plan.porCampo.map(c => (
+                <div key={c.ruta} style={{
+                  display: "flex", justifyContent: "space-between",
+                  padding: "8px 12px", borderTop: "1px solid var(--line)", fontSize: 12,
+                }}>
+                  <code style={{ fontWeight: 600 }}>{c.ruta}</code>
+                  <span style={{ color: "var(--muted)" }}>
+                    {c.cantidad} producto{c.cantidad === 1 ? "" : "s"}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            {/* Detalle por producto, con el valor a la vista: si alguno resulta
+                que sí hace falta, se agrega al allowlist en vez de borrarlo. */}
+            <div style={{ flex: 1, overflowY: "auto", border: "1px solid var(--line)", marginBottom: 20 }}>
+              <div style={{
+                padding: "8px 12px", background: "var(--bg-alt)", fontSize: 10,
+                textTransform: "uppercase", letterSpacing: 1.2, color: "var(--muted)", fontWeight: 700,
+                position: "sticky", top: 0,
+              }}>
+                Detalle por producto
+              </div>
+              {plan.productos.map(p => (
+                <div key={p._id} style={{ padding: "10px 12px", borderTop: "1px solid var(--line)" }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
+                    {p.nombre}
+                    {p.id && <span style={{ color: "var(--muted)", fontWeight: 400 }}> · {p.id}</span>}
+                  </div>
+                  {p.campos.map(c => (
+                    <div key={c.ruta} style={{
+                      display: "grid", gridTemplateColumns: "minmax(0, 240px) minmax(0, 1fr)",
+                      gap: 10, fontSize: 11, padding: "2px 0",
+                    }}>
+                      <code style={{ color: "#c64138" }}>{c.ruta}</code>
+                      <span style={{ color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                        title={JSON.stringify(c.valor)}>
+                        {JSON.stringify(c.valor)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
+          <TKButton variant="outline" onClick={onClose}>
+            {hayQueLimpiar ? "Cancelar" : "Cerrar"}
+          </TKButton>
+          {hayQueLimpiar && (
+            <TKButton onClick={confirmar}>
+              Aplicar limpieza
+            </TKButton>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
