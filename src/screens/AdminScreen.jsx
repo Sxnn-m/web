@@ -63,6 +63,8 @@ import {
   filasDeRentabilidad, filtrarFilas, materialesDeCostos,
 } from '../lib/costos.js';
 import { datosDeCategoria, validarCategoria } from '../lib/categorias.js';
+import { EnlaceExterno } from '../components/EnlaceExterno.jsx';
+import { normalizarUrl } from '../lib/url.js';
 import {
   tiempoDeProducto, specsDeTiempo, formatTiempo, formatTiempoProducto,
 } from '../lib/tiempoImpresion.js';
@@ -1170,11 +1172,12 @@ export function ProductsTab({
                       {disp.disponible ? "Sí" : disp.sinReceta ? "Sin receta" : "No"}
                     </button>
                   </div>
-                  {/* Origen del diseño — solo backoffice */}
+                  {/* Origen del diseño — solo backoffice. Se valida al
+                      RENDERIZAR y no solo al guardar: un valor escrito antes
+                      de que existiera la validación, o a mano desde la
+                      consola, no puede terminar en un href. */}
                   <div style={{ fontSize: 12 }}>
-                    {p.origenUrl ? (
-                      <a href={p.origenUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>Link</a>
-                    ) : <span style={{ color: "var(--muted)" }}>—</span>}
+                    <EnlaceExterno url={p.origenUrl}/>
                   </div>
                   {/* Visibility eye */}
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -1317,9 +1320,7 @@ function PersonalizadosTab({
                     </button>
                   </div>
                   <div style={{ fontSize: 12 }}>
-                    {p.origenUrl
-                      ? <a href={p.origenUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>Link</a>
-                      : <span style={{ color: "var(--muted)" }}>—</span>}
+                    <EnlaceExterno url={p.origenUrl}/>
                   </div>
                   <div style={{ display: "flex", gap: 4 }}>
                     <button onClick={() => onEdit(p)} style={actionBtn} title="Editar"><Icon.spark size={14}/></button>
@@ -3058,6 +3059,11 @@ export function ProductForm({
     if (esPersonalizado && !form.clienteNombre.trim()) {
       return alert("El nombre del cliente es obligatorio.");
     }
+    // El origen del diseño termina en un href del backoffice. Un esquema que
+    // no sea http/https se rechaza acá, en el formulario, y no se guarda a
+    // medias: así el admin ve qué escribió mal en vez de perder el dato.
+    const origen = normalizarUrl(form.origenUrl);
+    if (!origen.valida) return alert(`Origen del diseño: ${origen.error}`);
     const cleanImages = images.filter(u => u.trim());
     // Se descarta el texto libre viejo: al guardar el specs se reemplaza entero.
     const { tiempo: _tiempoTextoViejo, ...specsBase } = form.specs;
@@ -3083,7 +3089,9 @@ export function ProductForm({
         peso: specsCalculadas.peso,
         ...specsTiempo,
       },
-      origenUrl: form.origenUrl.trim(),
+      // Normalizada, no solo recortada: lo que se guarda es exactamente lo
+      // que va a ir al href.
+      origenUrl: origen.url,
       notas: form.notas,
       // Viaja tal cual vino: el guardado del doc privado lo reemplaza entero,
       // así que omitirlo borraría el índice y dejaría los binarios huérfanos

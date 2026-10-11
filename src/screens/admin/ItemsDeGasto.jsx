@@ -19,6 +19,7 @@ import {
   validarItem, normalizarItem, totalDeItem, totalDeItems, mueveStock, usosDeInsumo,
 } from '../../lib/gastoItems.js';
 import { tiposDe } from '../../lib/tiposInsumo.js';
+import { EnlaceExterno } from '../../components/EnlaceExterno.jsx';
 
 // El azul de Finanzas. Lo usa el total de abajo, que es un número del mismo
 // peso que los de las tarjetas del tab. Los carteles de categoría ya NO: esos
@@ -214,16 +215,14 @@ export function ItemsDeGasto({
                       title={resumen(item)}>
                       {resumen(item)}
                     </div>
-                    {/* Envío no tiene link: su celda es un guion, sin ancla. */}
+                    {/* Envío no tiene link: su celda es un guion, sin ancla.
+                        Para el resto decide EnlaceExterno, que vuelve a validar
+                        el esquema: el link se normaliza al guardar, pero un
+                        gasto cargado antes de esa validación sigue en la base. */}
                     <div style={{ overflow: "hidden" }}>
-                      {aceptaLink(item.categoria) && item.link ? (
-                        <a href={item.link} target="_blank" rel="noopener noreferrer"
-                          title={item.link} style={{ color: "var(--accent)" }}>
-                          Link
-                        </a>
-                      ) : (
-                        <span style={{ color: "var(--muted)" }}>—</span>
-                      )}
+                      {aceptaLink(item.categoria)
+                        ? <EnlaceExterno url={item.link}/>
+                        : <span style={{ color: "var(--muted)" }}>—</span>}
                     </div>
                     <div style={{ fontWeight: 700, textAlign: "right" }}>
                       {fmtARS(totalDeItem(item))}
