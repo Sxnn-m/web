@@ -66,7 +66,7 @@ export function EncabezadoPieza({ pieza }) {
 }
 
 /**
- * @param {object} o             todo lo que devuelve usarOrigen()
+ * @param {object} o             todo lo que devuelve useOrigen()
  * @param {string} modo          "imprimir" | "reservar"
  * @param {object} desperdicios  solo en modo imprimir
  */

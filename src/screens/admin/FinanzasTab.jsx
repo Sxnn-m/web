@@ -172,7 +172,10 @@ export function FinanzasTab({
     setLoading(false);
   };
 
-  useEffect(() => { sincronizar(); /* eslint-disable-next-line */ }, [pedidos]);
+  // Ídem: sincronizar() se recrea en cada render. Lo único que mira de
+  // afuera es `pedidos`, que ya está en el array.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { sincronizar(); }, [pedidos]);
 
   const t = useMemo(() => totales(ganancias, gastos), [ganancias, gastos]);
 
@@ -447,14 +450,14 @@ export function FinanzasTab({
             <td>
               {!esAutomatica(g) && (
                 <span style={{ display: "flex", gap: 4 }}>
-                  <button style={actionBtn} title="Editar"
+                  <button aria-label="Editar" style={actionBtn} title="Editar"
                     onClick={() => setFormGanancia({
                       id: g._id, fecha: inputDesdeFecha(g.fecha),
                       descripcion: g.descripcion || "", monto: String(g.monto ?? ""),
                     })}>
                     <Icon.spark size={13}/>
                   </button>
-                  <button style={{ ...actionBtn, color: "#c64138" }} title="Eliminar"
+                  <button aria-label="Eliminar" style={{ ...actionBtn, color: "#c64138" }} title="Eliminar"
                     onClick={() => borrarGanancia(g)}>
                     <Icon.trash size={13}/>
                   </button>
@@ -510,10 +513,10 @@ export function FinanzasTab({
               <span style={{ display: "flex", gap: 4 }}>
                 {/* El mismo Icon.list que abre el detalle de un filamento en
                     Inventario: dos tablas que hacen lo mismo con el mismo ícono. */}
-                <button style={actionBtn} title="Ver detalle" onClick={() => onAbrirGasto(g._id)}>
+                <button aria-label="Ver detalle" style={actionBtn} title="Ver detalle" onClick={() => onAbrirGasto(g._id)}>
                   <Icon.list size={13}/>
                 </button>
-                <button style={{ ...actionBtn, color: "#c64138" }} title="Eliminar"
+                <button aria-label="Eliminar" style={{ ...actionBtn, color: "#c64138" }} title="Eliminar"
                   onClick={() => borrarGasto(g)}>
                   <Icon.trash size={13}/>
                 </button>

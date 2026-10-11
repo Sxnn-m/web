@@ -75,7 +75,12 @@ export function DetalleGasto({
     setLoading(false);
   };
 
-  useEffect(() => { cargar(); /* eslint-disable-next-line */ }, [gastoId]);
+  // cargar() se recrea en cada render, así que exhaustive-deps la pide en el
+  // array. Agregarla haría un bucle: el efecto la llama, el render siguiente
+  // la recrea y el efecto vuelve a correr. Lo único de lo que depende de
+  // verdad es gastoId, que ya está. La regla se calla solo para este efecto.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { cargar(); }, [gastoId]);
 
   const guardarDetalle = async () => {
     setGuardando(true);

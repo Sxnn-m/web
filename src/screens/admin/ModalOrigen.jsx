@@ -13,7 +13,7 @@ import { TKButton, Icon } from '../../components/UI.jsx';
 import { planDeConsumo } from '../../lib/inventario.js';
 import { materialesDe } from '../../lib/consumoPedido.js';
 import { opcionesDeDescuento } from '../../lib/opcionesFilamento.js';
-import { usarOrigen } from '../../components/usarOrigen.js';
+import { useOrigen } from '../../components/useOrigen.js';
 import { LineasDeMaterial } from '../../components/LineasDeMaterial.jsx';
 import { reservasDePedidos, filamentosNetos } from '../../lib/reservas.js';
 
@@ -52,7 +52,7 @@ export function ModalOrigenPedido({
   // El mismo hook que usa el modal de impresión, división entre owners
   // incluida: lo único distinto es que acá se evalúa contra el stock neto y
   // que no se pide desperdicio.
-  const o = usarOrigen({ plan, filamentos: netos, inicial: {} });
+  const o = useOrigen({ plan, filamentos: netos, inicial: {} });
   const {
     planResuelto, totalPorLinea, candidatos, origen, origenPlano,
     faltaElegir, sinOwnerConStock, sinMaterialConStock, malRepartidas,
@@ -87,7 +87,7 @@ export function ModalOrigenPedido({
           <h3 style={{ fontSize: 24, margin: 0 }}>
             Origen del filamento{numeroOrden ? ` · Pedido ${numeroOrden}` : ""}
           </h3>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)" }}>
+          <button aria-label="Cerrar" onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)" }}>
             <Icon.close size={18}/>
           </button>
         </div>

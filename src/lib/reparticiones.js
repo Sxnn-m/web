@@ -94,7 +94,7 @@ export function descuadres(plan = [], reparticiones = {}) {
 }
 
 /**
- * Del origen por sub-clave que devuelve usarOrigen() al que se guarda en el
+ * Del origen por sub-clave que devuelve useOrigen() al que se guarda en el
  * pedido, con las reparticiones plegadas bajo la clave de su línea.
  *
  * Se guarda plegado y no plano para que la clave siga siendo la de la línea

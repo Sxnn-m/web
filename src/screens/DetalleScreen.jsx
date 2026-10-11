@@ -243,9 +243,9 @@ export function DetalleScreen({ go, addToCart, productId, detalleVariant = "A", 
           ) : (
             <div style={{ display: "flex", gap: 12, alignItems: "stretch", marginBottom: 24 }}>
               <div style={{ display: "flex", alignItems: "center", border: "1px solid var(--line-strong)" }}>
-                <button onClick={() => setQty(Math.max(1, qty - 1))} style={qtyBtn}><Icon.minus/></button>
-                <span style={{ padding: "0 18px", fontSize: 16 }}>{qty}</span>
-                <button onClick={() => setQty(qty + 1)} style={qtyBtn}><Icon.plus/></button>
+                <button aria-label="Quitar uno" onClick={() => setQty(Math.max(1, qty - 1))} style={qtyBtn}><Icon.minus/></button>
+                <span style={{ padding: "0 18px", fontSize: 16 }} aria-live="polite">{qty}</span>
+                <button aria-label="Agregar uno" onClick={() => setQty(qty + 1)} style={qtyBtn}><Icon.plus/></button>
               </div>
               {/* El cierre por Instagram pasó al carrito: acá se arma la
                   línea (producto + color + texto + cantidad) y listo. */}
@@ -538,9 +538,9 @@ function DetalleB({ go, addToCart, productId, products = [] }) {
           ) : (
             <div style={{ display: "flex", gap: 12 }}>
               <div style={{ display: "flex", alignItems: "center", border: "1px solid var(--line-strong)" }}>
-                <button onClick={() => setQty(Math.max(1, qty - 1))} style={qtyBtn}><Icon.minus/></button>
-                <span style={{ padding: "0 18px", fontSize: 16 }}>{qty}</span>
-                <button onClick={() => setQty(qty + 1)} style={qtyBtn}><Icon.plus/></button>
+                <button aria-label="Quitar uno" onClick={() => setQty(Math.max(1, qty - 1))} style={qtyBtn}><Icon.minus/></button>
+                <span style={{ padding: "0 18px", fontSize: 16 }} aria-live="polite">{qty}</span>
+                <button aria-label="Agregar uno" onClick={() => setQty(qty + 1)} style={qtyBtn}><Icon.plus/></button>
               </div>
               <TKButton size="lg" full icon={<Icon.cart size={16}/>} onClick={() => addToCart(product, { color: varianteComoColor(variante), qty })}>
                 Agregar al carrito

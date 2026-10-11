@@ -264,14 +264,14 @@ export function InventarioTab({
                 </div>
                 <div>{alerta ? <RestockBadge/> : <span style={{ color: "var(--muted)", fontSize: 12 }}>OK</span>}</div>
                 <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
-                  <button onClick={() => setSeleccionado(f._id)} style={actionBtn} title="Ver detalle"><Icon.list size={13}/></button>
-                  <button onClick={() => openEditar(f)} style={actionBtn} title="Editar"><Icon.spark size={13}/></button>
+                  <button aria-label="Ver detalle" onClick={() => setSeleccionado(f._id)} style={actionBtn} title="Ver detalle"><Icon.list size={13}/></button>
+                  <button aria-label="Editar" onClick={() => openEditar(f)} style={actionBtn} title="Editar"><Icon.spark size={13}/></button>
                   <button onClick={() => setTransfiriendo(f)} style={actionBtn}
                     title={`Transferir ${f.material} ${f.color} a otro owner`}
                     aria-label={`Transferir ${f.material} ${f.color}`}>
                     <Icon.truck size={13}/>
                   </button>
-                  <button onClick={() => borrar(f)} style={{ ...actionBtn, color: "#c64138" }} title="Eliminar"><Icon.trash size={13}/></button>
+                  <button aria-label="Eliminar" onClick={() => borrar(f)} style={{ ...actionBtn, color: "#c64138" }} title="Eliminar"><Icon.trash size={13}/></button>
                 </div>
               </div>
             );

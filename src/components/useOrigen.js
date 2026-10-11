@@ -35,7 +35,13 @@ import {
  *   por línea, un rollo único o un reparto entre varios. Es lo que precarga el
  *   modal de impresión con exactamente lo que se reservó.
  */
-export function usarOrigen({ plan, filamentos, desperdicios = {}, inicial = {} }) {
+// El nombre arranca con "use" y no con "usar", que sería lo coherente con el
+// resto del código en castellano: la regla react-hooks/rules-of-hooks
+// reconoce un hook por el prefijo "use" y nada más. Con "usarOrigen" daba 14
+// errores —creía que los useState y useMemo de adentro estaban en una función
+// común— y esos errores tapaban cualquier violación de verdad de las reglas
+// de hooks que apareciera después.
+export function useOrigen({ plan, filamentos, desperdicios = {}, inicial = {} }) {
   // Lo guardado se despliega una sola vez, al abrir: las reparticiones pasan a
   // ser estado editable y cada parte recupera su owner y su material.
   const [guardado] = useState(() => desplegarOrigen(inicial));
