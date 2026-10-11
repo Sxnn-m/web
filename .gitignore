@@ -6,6 +6,10 @@ dist/
 
 # Logs
 npm-debug.log*
+firebase-debug.log*
+firestore-debug.log*
+ui-debug.log*
+pubsub-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
