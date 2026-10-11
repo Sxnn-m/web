@@ -1,5 +1,8 @@
 import { useState, useMemo } from 'react';
-import { CATEGORIES as FALLBACK_CATEGORIES } from '../data.js';
+// PRODUCTS lo usa solo HomeB, para la foto fija de su hero. Faltaba el
+// import: la variante no se renderiza hoy —homeVariant queda siempre en "A"—
+// así que el ReferenceError estaba latente y aparecía recién al activarla.
+import { CATEGORIES as FALLBACK_CATEGORIES, PRODUCTS } from '../data.js';
 import { TKButton, TKPill, Icon, ProductImage, ProductCard, SinStockBadge, sinStock } from '../components/UI.jsx';
 
 export function HomeScreen({ go, addToCart, homeVariant = "A", products = [], categories = FALLBACK_CATEGORIES }) {
