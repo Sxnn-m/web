@@ -14,7 +14,8 @@
 // en pedido.origen, así que la reserva apunta a un documento de filamento
 // concreto: no hay que repartir nada entre owners ni suponer de cuál sale.
 
-import { planDeConsumo, planDeInsumos } from './inventario.js';
+import { planDeConsumo, planDeInsumos, buscarProductoDeLinea } from './inventario.js';
+import { opcionPedida } from './variantesInsumo.js';
 import { tiposDe, claveTipo } from './tiposInsumo.js';
 import { filamentosDeVariantes } from './variantes.js';
 import { claveFilamento } from './disponibilidad.js';
@@ -193,6 +194,93 @@ export function reservasDeFilamento(filamentoId, pedidos = [], productos = [], p
     }
   }
   return filas.sort((a, b) => (b.numeroOrden || 0) - (a.numeroOrden || 0));
+}
+
+/**
+ * Las reservas de UN TIPO de insumo, fila por fila, para la tabla "Reservado"
+ * del detalle. El equivalente de reservasDeFilamento(), con dos diferencias
+ * que vienen del dominio y no de una decisión de estilo:
+ *
+ *   · no hay reparticiones: un insumo no se divide entre documentos, el tipo
+ *     es uno solo y el consumo entero sale de ahí;
+ *   · la columna Producto muestra la OPCIÓN elegida cuando la reserva viene de
+ *     un grupo de variante de insumo ("Lampara Cilindrica · RGB"), que es el
+ *     dato que explica por qué ese tipo quedó comprometido. El nombre de la
+ *     variante de color no se muestra: en el detalle de un insumo no aporta
+ *     —el imán es el mismo se imprima negro o blanco— y alargaría la fila.
+ *
+ * Las unidades son las MISMAS que descuenta la impresión (unidadesConsumidas),
+ * así la suma de la columna coincide con lo que reservasDePedidos() informa
+ * para este tipo.
+ *
+ * @returns {Array<{clave, productoNombre, varianteNombre, opcionesTexto,
+ *                  cantidadConsumida, numeroOrden, createdAt}>}
+ */
+export function reservasDeInsumo(
+  insumoId, tipoId, pedidos = [], productos = [], personalizados = [], catalogoInsumos = []
+) {
+  const filas = [];
+  for (const pedido of pedidos) {
+    if (!estaPendiente(pedido)) continue;
+    for (const linea of planDeInsumos(pedido, productos, personalizados, catalogoInsumos)) {
+      if (!linea.insumoId || !linea.tipoId) continue;
+      // Comparación por CLAVE y no campo a campo: es la misma identidad que
+      // usan reservasDePedidos() y agruparConsumo(), así que un tipo vacío o
+      // ausente se normaliza igual en los tres lados.
+      if (claveTipo(linea.insumoId, linea.tipoId) !== claveTipo(insumoId, tipoId)) continue;
+      // Una opción con cantidad 0 no llega hasta acá: planDeInsumos ya la
+      // descarta, así que no hay que filtrarla de nuevo.
+      filas.push({
+        clave: `${pedido._id}|${linea.clave}`,
+        productoNombre: linea.productoNombre,
+        varianteNombre: "",
+        opcionesTexto: linea.opcionNombre || "",
+        cantidadConsumida: Number(linea.unidadesConsumidas) || 0,
+        numeroOrden: pedido.numeroOrden,
+        createdAt: pedido.createdAt,
+      });
+    }
+  }
+  return filas.sort((a, b) => (b.numeroOrden || 0) - (a.numeroOrden || 0));
+}
+
+/**
+ * Pedidos pendientes que PODRÍAN estar usando este tipo y no se sabe.
+ *
+ * Son los anteriores a las variantes de insumo: el producto tiene un grupo con
+ * dos o más opciones y la línea no guardó cuál se vendió. No se puede adivinar
+ * —cada opción consume un insumo distinto— así que no se reserva nada, igual
+ * que hace el descuento al imprimir. Pero el detalle de los tipos que son
+ * candidatos sí tiene que decirlo, o el número de "disponible" se lee como más
+ * firme de lo que es.
+ *
+ * Con UNA sola opción en el grupo no hay ambigüedad: opcionPedida() cae a esa
+ * única y la reserva se calcula normal, así que no se cuenta acá.
+ *
+ * @returns {number} cuántos pedidos pendientes están en esa situación
+ */
+export function pedidosSinOpcionQueAfectan(
+  insumoId, tipoId, pedidos = [], productos = [], personalizados = []
+) {
+  const clave = claveTipo(insumoId, tipoId);
+  let cuenta = 0;
+  for (const pedido of pedidos) {
+    if (!estaPendiente(pedido)) continue;
+    const afecta = (pedido.items || []).some(item => {
+      const producto = buscarProductoDeLinea(item, productos, personalizados);
+      return (producto?.variantesInsumo || []).some(grupo => {
+        const opciones = grupo?.opciones || [];
+        // Resuelto, o con una sola opción: no hay nada sin saber.
+        if (opciones.length < 2) return false;
+        if (opcionPedida(grupo, item.opcionesInsumo || {})) return false;
+        // Sin resolver: ¿alguna de las opciones posibles apunta a ESTE tipo?
+        return opciones.some(o =>
+          o?.insumoId && Number(o.cantidad) > 0 && claveTipo(o.insumoId, o.tipoId) === clave);
+      });
+    });
+    if (afecta) cuenta++;
+  }
+  return cuenta;
 }
 
 /** Los productos que el pedido nombra en sus líneas. */
