@@ -135,6 +135,7 @@ export function InventarioTab({
         alerta={necesitaRestock(abierto)}
         conDesperdicio
         reservas={reservasDeFilamento(abierto._id, pedidos, productos, personalizados)}
+        vacioReservas="Sin reservas: ningún pedido pendiente usa este rollo."
         onBack={() => setSeleccionado(null)}
         onChanged={onChanged}
         setMsg={setMsg}

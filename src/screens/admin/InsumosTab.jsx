@@ -10,6 +10,7 @@ import {
   tiposDe, esMultiTipo, nuevoIdTipo, NOMBRE_TIPO_BASE,
 } from '../../lib/tiposInsumo.js';
 import { DetalleHistorial, RestockBadge } from './DetalleHistorial.jsx';
+import { reservasDeInsumo, pedidosSinOpcionQueAfectan } from '../../lib/reservas.js';
 
 const actionBtn = {
   background: "none", border: "1px solid var(--line)", padding: "6px 8px",
@@ -35,7 +36,18 @@ const inputChico = {
 // Con un tipo la fila se ve como siempre (precio, stock y alerta inline); con
 // varios muestra "N tipos" y se despliega para verlos uno por uno. El historial
 // también es por tipo: cada uno tiene sus gastos y sus restocks.
-export function InsumosTab({ insumos, onChanged, setMsg }) {
+/**
+ * Los pedidos, los productos y los personalizados entran SOLO para calcular
+ * lo reservado en el detalle de cada tipo, igual que ya hace InventarioTab.
+ *
+ * El listado y la alerta de "Hacer restock" siguen leyendo el stock FÍSICO
+ * —`insumos` llega sin netear a propósito— porque miden cosas distintas: el
+ * depósito tiene lo que tiene, y lo reservado dice cuánto de eso ya está
+ * prometido.
+ */
+export function InsumosTab({
+  insumos, pedidos = [], productos = [], personalizados = [], onChanged, setMsg,
+}) {
   // Qué tipo está abierto en el detalle de historial: { insumoId, tipoId }.
   const [abierto, setAbierto] = useState(null);
   const [expandidos, setExpandidos] = useState(() => new Set());
@@ -152,9 +164,16 @@ export function InsumosTab({ insumos, onChanged, setMsg }) {
           ? `${insumoAbierto.nombre} — ${tipoAbierto.nombre}`
           : insumoAbierto.nombre}
         subtitulo="Insumos / Detalle"
+        // El FÍSICO: es lo que hay en el cajón. Lo reservado se resta en el
+        // segundo indicador, que lo calcula DetalleHistorial sumando las filas.
         cantidad={tipoAbierto.cantidadDisponible}
         unidad="u."
         alerta={necesitaRestockInsumo(tipoAbierto)}
+        reservas={reservasDeInsumo(
+          insumoAbierto._id, tipoAbierto.tipoId, pedidos, productos, personalizados, insumos)}
+        vacioReservas="Sin reservas: ningún pedido pendiente usa este insumo."
+        sinOpcion={pedidosSinOpcionQueAfectan(
+          insumoAbierto._id, tipoAbierto.tipoId, pedidos, productos, personalizados)}
         onBack={() => setAbierto(null)}
         onChanged={onChanged}
         setMsg={setMsg}

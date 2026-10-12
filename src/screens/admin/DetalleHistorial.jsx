@@ -96,13 +96,23 @@ const cardStyle = {
  * @param {string} unidad          "g" | "u."
  * @param {boolean} alerta         si está por debajo del umbral de restock
  * @param {boolean} conDesperdicio si los gastos tienen cantidadDesperdiciada
- * @param {Array|null} reservas    filas de reservasDeFilamento(). Null en los
- *   insumos, que no tienen esta vista: entonces no se muestra ni la sección
- *   "Reservado" ni el segundo indicador.
+ * @param {Array|null} reservas    filas de reservasDeFilamento() o de
+ *   reservasDeInsumo(). Null (el default) oculta la sección "Reservado" y el
+ *   segundo indicador: así un llamador que todavía no sabe calcular reservas
+ *   no muestra una tabla vacía que parece decir "no hay ninguna".
+ * @param {string} [vacioReservas] qué dice la tabla cuando no hay reservas.
+ *   Lo pone el llamador porque nombra la cosa: "este rollo" o "este insumo".
+ * @param {number} [sinOpcion] pedidos pendientes que PODRÍAN usar esto y no
+ *   lo dicen (anteriores a las variantes de insumo). Se avisa aparte: no
+ *   están en la tabla porque no se reservaron, pero el número de "disponible"
+ *   es menos firme de lo que parece.
  */
 export function DetalleHistorial({
   coleccion, item, tipoId = null, titulo, subtitulo, cantidad, unidad,
-  alerta, conDesperdicio = false, reservas = null, onBack, onChanged, setMsg,
+  alerta, conDesperdicio = false, reservas = null,
+  vacioReservas = "Sin reservas: ningún pedido pendiente usa esto.",
+  sinOpcion = 0,
+  onBack, onChanged, setMsg,
 }) {
   const [gastos, setGastos] = useState([]);
   const [restocks, setRestocks] = useState([]);
@@ -300,11 +310,21 @@ export function DetalleHistorial({
               bajada={<>
                 Pedidos tomados y todavía no impresos · {totalReservado.toLocaleString("es-AR")} {unidad} comprometidas.
                 No se descontaron del stock; se descuentan al marcar el pedido como impreso.
+                {/* Discreto y no un cartel: no es un error ni algo que haya
+                    que arreglar ahora, pero el número de arriba es menos
+                    firme de lo que parece y eso hay que poder saberlo. */}
+                {sinOpcion > 0 && (
+                  <span style={{ display: "block", marginTop: 6, color: "#8a6d3b" }}>
+                    {sinOpcion} pedido{sinOpcion === 1 ? "" : "s"} pendiente{sinOpcion === 1 ? "" : "s"}
+                    {" "}no indica{sinOpcion === 1 ? "" : "n"} qué opción de insumo usa{sinOpcion === 1 ? "" : "n"}
+                    {" "}y no se reservaron.
+                  </span>
+                )}
               </>}
             >
             <TablaConTope
               filas={FILAS_VISIBLES}
-              vacio="Sin reservas: ningún pedido pendiente usa este rollo."
+              vacio={vacioReservas}
               columnas={[
                 { titulo: "Fecha", ancho: ANCHO_FECHA },
                 { titulo: "Orden", ancho: ANCHO_ORDEN },

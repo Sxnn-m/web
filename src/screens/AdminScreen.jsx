@@ -844,7 +844,16 @@ export function AdminScreen({ go, tab = "dashboard", onTab, gastoId = null, onGa
               setMsg={setMsg}/>
           )}
           {tabActivo === "insumos" && (
-            <InsumosTab insumos={insumos} onChanged={handleInventarioChange} setMsg={setMsg}/>
+            <InsumosTab
+              // Sin netear: el tab muestra el stock físico y la alerta se
+              // evalúa sobre él. Lo reservado se calcula aparte, en el detalle
+              // de cada tipo, a partir de los pedidos.
+              insumos={insumos}
+              pedidos={pedidos}
+              productos={productosFull}
+              personalizados={personalizados}
+              onChanged={handleInventarioChange}
+              setMsg={setMsg}/>
           )}
           {tabActivo === "pedidos" && (
             <PedidosTab
