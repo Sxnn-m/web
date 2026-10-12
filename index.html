@@ -10,10 +10,10 @@
          no hay nada mejor. Se escribió a partir del copy que ya existe en el
          sitio (HomeScreen y AboutScreen) para no inventar una voz distinta.
 
-         FALTAN, a propósito: canonical, og:url y og:image. Los tres llevan el
-         dominio de producción, que todavía no está definido, y una URL mal
-         puesta es peor que ninguna: un canonical equivocado le dice a Google
-         que la página buena es otra. Ver el PR para qué hace falta.
+         SIGUEN FALTANDO a propósito canonical y og:url. Los dos dicen "esta
+         página es ESTA dirección", y en una SPA el mismo HTML se sirve para
+         todas las rutas: un canonical fijo le diría a Google que /producto/p01
+         y /catalogo son en realidad la home. Mejor ninguno que uno mal.
 
          LIMITACIÓN: esto es una SPA. Los bots de Instagram, WhatsApp y
          Facebook NO ejecutan JavaScript, así que leen SOLO este archivo, que
@@ -28,10 +28,31 @@
     <meta property="og:locale" content="es_AR" />
     <meta property="og:site_name" content="TKPrints" />
 
-    <!-- summary_large_image y no summary: sin og:image todavía no cambia
-         nada, pero cuando se agregue la imagen de 1200x630 esta es la tarjeta
-         que la muestra grande en vez de como miniatura al costado. -->
+    <!-- ─── La imagen de la vista previa ───────────────────────────────
+         Tiene que ser una URL ABSOLUTA: los bots de WhatsApp, Instagram y
+         Facebook no resuelven rutas relativas, porque leen el HTML fuera del
+         contexto de la página. Es el único lugar del archivo donde el dominio
+         está escrito, y por eso es lo primero que hay que cambiar si el sitio
+         se muda.
+
+         El archivo vive en public/assets/, que Vite copia a dist/assets/ —la
+         misma carpeta donde pone sus bundles con hash— y que el rewrite de
+         vercel.json ya excluye. Así no hay que tocar el patrón: el intento de
+         agregarle una exclusión propia es lo que rompió el deploy anterior.
+
+         width y height no son decoración: con ellos el chat puede reservar el
+         lugar de la imagen antes de bajarla, y la tarjeta no salta cuando
+         llega. -->
+    <meta property="og:image" content="https://tkprints-catalog.vercel.app/assets/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:alt" content="Logo de TKPrints sobre fondo azul oscuro" />
+
+    <!-- summary_large_image y no summary: con og:image puesta, esta es la
+         tarjeta que la muestra grande en vez de como miniatura al costado. -->
     <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="https://tkprints-catalog.vercel.app/assets/og-image.png" />
 
     <!-- El fondo real del sitio (--chalk). Tiñe la barra del navegador en
          Android y iOS para que no corte contra la página. Va uno solo: el
