@@ -35,14 +35,15 @@
          está escrito, y por eso es lo primero que hay que cambiar si el sitio
          se muda.
 
-         El nombre del archivo tiene espacios, así que van percent-encoded
-         (%20). Un espacio literal en un atributo de URL no es válido y cada
-         bot lo arregla a su manera, o no lo arregla.
+         El archivo vive en public/assets/, que Vite copia a dist/assets/ —la
+         misma carpeta donde pone sus bundles con hash— y que el rewrite de
+         vercel.json ya excluye. Así no hay que tocar el patrón: el intento de
+         agregarle una exclusión propia es lo que rompió el deploy anterior.
 
          width y height no son decoración: con ellos el chat puede reservar el
          lugar de la imagen antes de bajarla, y la tarjeta no salta cuando
          llega. -->
-    <meta property="og:image" content="https://tkprints-catalog.vercel.app/Presentacion%20Web%20Tkprints.png" />
+    <meta property="og:image" content="https://tkprints-catalog.vercel.app/assets/og-image.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta property="og:image:type" content="image/png" />
@@ -51,7 +52,7 @@
     <!-- summary_large_image y no summary: con og:image puesta, esta es la
          tarjeta que la muestra grande en vez de como miniatura al costado. -->
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:image" content="https://tkprints-catalog.vercel.app/Presentacion%20Web%20Tkprints.png" />
+    <meta name="twitter:image" content="https://tkprints-catalog.vercel.app/assets/og-image.png" />
 
     <!-- El fondo real del sitio (--chalk). Tiñe la barra del navegador en
          Android y iOS para que no corte contra la página. Va uno solo: el
