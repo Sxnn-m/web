@@ -226,8 +226,8 @@ export function AdminScreen({ go, tab = "dashboard", onTab, gastoId = null, onGa
    * cuenta lo que hay en la bobina y el otro descuenta de ella.
    */
   const reservas = useMemo(
-    () => reservasDePedidos(pedidos, productosFull, personalizados),
-    [pedidos, productosFull, personalizados]);
+    () => reservasDePedidos(pedidos, productosFull, personalizados, insumos),
+    [pedidos, productosFull, personalizados, insumos]);
 
   const filamentosDisponibles = useMemo(
     () => filamentosNetos(filamentos, reservas), [filamentos, reservas]);
@@ -254,7 +254,9 @@ export function AdminScreen({ go, tab = "dashboard", onTab, gastoId = null, onGa
       // prometer. El inventario sigue mostrando el stock físico; lo que cambia
       // es contra qué se decide.
       const pedidos = await cargarPedidos();
-      const reservas = reservasDePedidos(pedidos, prodsFull, personalizados);
+      // `insus` es el catálogo que recibió esta función, que es el mismo
+      // contra el que se van a netear los insumos dos líneas más abajo.
+      const reservas = reservasDePedidos(pedidos, prodsFull, personalizados, insus);
       const objetivo = soloIds
         ? prodsFull.filter(p => soloIds.includes(p._id))
         : prodsFull;
@@ -587,7 +589,7 @@ export function AdminScreen({ go, tab = "dashboard", onTab, gastoId = null, onGa
       // bajaba, sin que nadie hubiera tocado el stock.
       const reservasAhora = films === filamentos
         ? reservas
-        : reservasDePedidos(pedidos, productosFull, personalizados);
+        : reservasDePedidos(pedidos, productosFull, personalizados, insumos);
       const disponible = calcularDisponibilidad(
         data,
         filamentosNetos(films, reservasAhora),

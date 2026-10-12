@@ -53,9 +53,16 @@ export function partesDeOrigen(origen, cantidadConsumida = 0) {
  * antes de tener reservas: no empeora nada, y el pedido se sigue pudiendo
  * imprimir.
  *
+ * @param {Array} catalogoInsumos  el catálogo de insumos. Hace falta para
+ *   resolver el tipo de los insumos fijos igual que lo hace la impresión; sin
+ *   él, una línea sin tipoId se imputa al tipo equivocado.
  * @returns {{porFilamento: Object<string, number>, porInsumo: Object<string, number>}}
+ *   porInsumo va por clave "insumoId|tipoId" y en UNIDADES DE INSUMO, el
+ *   mismo número que descuenta marcarPedidoImpreso().
  */
-export function reservasDePedidos(pedidos = [], productos = [], personalizados = []) {
+export function reservasDePedidos(
+  pedidos = [], productos = [], personalizados = [], catalogoInsumos = []
+) {
   const porFilamento = {};
   const porInsumo = {};
 
@@ -74,10 +81,23 @@ export function reservasDePedidos(pedidos = [], productos = [], personalizados =
       }
     }
 
-    for (const linea of planDeInsumos(pedido, productos, personalizados)) {
+    // El catálogo va SÍ o SÍ: planDeInsumos lo usa para resolver el tipo de
+    // los insumos fijos, y sin él una línea cuyo tipoId falte o apunte a un
+    // tipo borrado cae a "base" en vez de al primer tipo real del insumo.
+    // La reserva quedaba entonces en una clave que no existe —"i_x|base"
+    // cuando el stock vive en "i_x|t_m3"— y insumosNetos() no la encontraba
+    // nunca: el stock se veía sin reservar. La impresión sí le pasa el
+    // catálogo (PedidosTab), y los dos caminos tienen que resolver igual.
+    for (const linea of planDeInsumos(pedido, productos, personalizados, catalogoInsumos)) {
       if (!linea.insumoId || !linea.tipoId) continue;
       const clave = claveTipo(linea.insumoId, linea.tipoId);
-      porInsumo[clave] = (porInsumo[clave] || 0) + (Number(linea.cantidad) || 0);
+      // unidadesConsumidas, NO cantidad: `cantidad` es cuántas unidades del
+      // PRODUCTO se pidieron, y `unidadesConsumidas` es cuántas del insumo
+      // sale de ahí (cantidadPorUnidad × cantidad). Sumar `cantidad` reservaba
+      // 3 imanes para 3 lámparas que llevan 2 cada una, cuando la impresión
+      // descuenta 6: es exactamente el campo que agruparConsumo() suma para
+      // validar y descontar, así que es el que tiene que reservarse.
+      porInsumo[clave] = (porInsumo[clave] || 0) + (Number(linea.unidadesConsumidas) || 0);
     }
   }
 

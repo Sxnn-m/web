@@ -34,6 +34,11 @@ const aviso = {
  */
 export function ModalOrigenPedido({
   items, cliente, numeroOrden, productos, personalizados = [], filamentos,
+  // El catálogo de insumos entra SOLO para calcular bien las reservas: sin
+  // él, reservasDePedidos() resuelve el tipo de los insumos fijos distinto de
+  // como lo resuelve la impresión, y la reserva queda en una clave que no
+  // existe. Este modal todavía no valida insumos; eso es otro cambio.
+  insumos = [],
   pedidos = [], guardando = false, onClose, onConfirmar,
 }) {
   const pedidoProvisorio = useMemo(() => ({ items }), [items]);
@@ -45,9 +50,9 @@ export function ModalOrigenPedido({
   // comprometieron no se puede volver a prometer. Este pedido todavía no
   // existe, así que no se está restando a sí mismo.
   const netos = useMemo(() => {
-    const reservas = reservasDePedidos(pedidos, productos, personalizados);
+    const reservas = reservasDePedidos(pedidos, productos, personalizados, insumos);
     return filamentosNetos(filamentos, reservas);
-  }, [pedidos, productos, personalizados, filamentos]);
+  }, [pedidos, productos, personalizados, filamentos, insumos]);
 
   // El mismo hook que usa el modal de impresión, división entre owners
   // incluida: lo único distinto es que acá se evalúa contra el stock neto y
