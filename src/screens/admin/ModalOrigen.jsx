@@ -10,12 +10,12 @@
 
 import { useMemo } from 'react';
 import { TKButton, Icon } from '../../components/UI.jsx';
-import { planDeConsumo } from '../../lib/inventario.js';
-import { materialesDe } from '../../lib/consumoPedido.js';
+import { planDeConsumo, planDeInsumos } from '../../lib/inventario.js';
+import { materialesDe, validarInsumosDePedido } from '../../lib/consumoPedido.js';
 import { opcionesDeDescuento } from '../../lib/opcionesFilamento.js';
 import { useOrigen } from '../../components/useOrigen.js';
 import { LineasDeMaterial } from '../../components/LineasDeMaterial.jsx';
-import { reservasDePedidos, filamentosNetos } from '../../lib/reservas.js';
+import { reservasDePedidos, filamentosNetos, insumosNetos } from '../../lib/reservas.js';
 
 // Vivía acá; ahora es del componente compartido. Se reexporta para no romper
 // a quien la importaba desde este archivo.
@@ -34,10 +34,8 @@ const aviso = {
  */
 export function ModalOrigenPedido({
   items, cliente, numeroOrden, productos, personalizados = [], filamentos,
-  // El catálogo de insumos entra SOLO para calcular bien las reservas: sin
-  // él, reservasDePedidos() resuelve el tipo de los insumos fijos distinto de
-  // como lo resuelve la impresión, y la reserva queda en una clave que no
-  // existe. Este modal todavía no valida insumos; eso es otro cambio.
+  // El catálogo de insumos: para resolver el tipo de las líneas fijas igual
+  // que lo resuelve la impresión, y para validar que el pedido se pueda tomar.
   insumos = [],
   pedidos = [], guardando = false, onClose, onConfirmar,
 }) {
@@ -49,10 +47,20 @@ export function ModalOrigenPedido({
   // Contra el stock NETO, no el físico: lo que otros pedidos pendientes ya
   // comprometieron no se puede volver a prometer. Este pedido todavía no
   // existe, así que no se está restando a sí mismo.
-  const netos = useMemo(() => {
+  const { netos, insumosLibres } = useMemo(() => {
     const reservas = reservasDePedidos(pedidos, productos, personalizados, insumos);
-    return filamentosNetos(filamentos, reservas);
+    return {
+      netos: filamentosNetos(filamentos, reservas),
+      insumosLibres: insumosNetos(insumos, reservas),
+    };
   }, [pedidos, productos, personalizados, filamentos, insumos]);
+
+  // Los insumos no pasan por useOrigen: no tienen material alternativo ni se
+  // reparten entre owners, así que no hay nada que elegir. Solo alcanza o no.
+  const insumosValidados = useMemo(() => validarInsumosDePedido(
+    planDeInsumos(pedidoProvisorio, productos, personalizados, insumos),
+    insumosLibres,
+  ), [pedidoProvisorio, productos, personalizados, insumos, insumosLibres]);
 
   // El mismo hook que usa el modal de impresión, división entre owners
   // incluida: lo único distinto es que acá se evalúa contra el stock neto y
@@ -70,7 +78,13 @@ export function ModalOrigenPedido({
   // Nadie tiene ese filamento cargado: no aparece ni como owner insuficiente.
   const sinRollo = aResolver.filter(l => (candidatos[l.clave] || []).length === 0);
   const faltanOrigen = aResolver.filter(l => !origenPlano[l.clave]);
-  const puedeGuardar = faltanOrigen.length === 0 && malRepartidas.length === 0 && !guardando;
+  // Los insumos también bloquean: tomar un pedido cuyo imán no está es
+  // prometer algo que no se puede imprimir, y el problema aparecía recién al
+  // intentar imprimirlo, cuando el cliente ya estaba esperando.
+  const insumosBloquean =
+    insumosValidados.faltantes.length > 0 || insumosValidados.sinResolver.length > 0;
+  const puedeGuardar = faltanOrigen.length === 0 && malRepartidas.length === 0
+    && !insumosBloquean && !guardando;
 
   return (
     <div
@@ -110,7 +124,8 @@ export function ModalOrigenPedido({
           padding: "12px 14px", background: "var(--bg-alt)", borderLeft: "3px solid var(--line)",
           fontSize: 12, color: "var(--muted)", lineHeight: 1.6, marginBottom: 20,
         }}>
-          Los gramos que se muestran ya descuentan lo reservado por pedidos pendientes.
+          Los gramos y las unidades que se muestran ya descuentan lo reservado por pedidos
+          pendientes.
         </div>
 
         {plan.some(l => l.sinVariante) && (
@@ -208,6 +223,58 @@ export function ModalOrigenPedido({
           </div>
         )}
 
+        {/* Los insumos, con el mismo formato que los filamentos: cuánto hay
+            libre y cuánto falta, por tipo. Un tipo comprometido por dos
+            caminos en el mismo pedido —fijo y opción de variante— aparece una
+            sola vez, con el consumo sumado. */}
+        {insumosValidados.faltantes.length > 0 && (
+          <div style={aviso}>
+            <strong style={{ color: "#c64138" }}>
+              No se puede crear el pedido: falta stock libre de insumos.
+            </strong>
+            <ul style={{ margin: "8px 0 0", paddingLeft: 18, color: "var(--muted)", fontSize: 12 }}>
+              {insumosValidados.faltantes.map(i => (
+                <li key={i.clave}>
+                  <strong style={{ color: "var(--text)" }}>{i.etiqueta}</strong>:{" "}
+                  necesita {i.necesita} u., hay {i.libre} u. libres, le faltan {i.falta} u.
+                </li>
+              ))}
+            </ul>
+            <div style={{ color: "var(--muted)", marginTop: 8, fontSize: 12 }}>
+              Las unidades libres ya descuentan lo reservado por otros pedidos pendientes. Cargá lo
+              que falta desde Insumos, o imprimí antes alguno de los pedidos que están reservando.
+            </div>
+          </div>
+        )}
+
+        {/* El insumo que el producto nombra ya no está en el catálogo: lo
+            borraron después de guardarse el producto. NO se inventa un stock
+            de 0 que "alcance", ni se bloquea sin decir por qué.
+            
+            Un TIPO borrado no llega acá: planDeInsumos lo re-ancla al primer
+            tipo del insumo, y hace exactamente lo mismo al imprimir, así que
+            los dos caminos siguen coincidiendo. Lo que no se puede resolver
+            de ninguna manera es un insumo que no existe. */}
+        {insumosValidados.sinResolver.length > 0 && (
+          <div style={aviso}>
+            <strong style={{ color: "#c64138" }}>
+              No se puede crear el pedido: hay insumos que ya no están en el catálogo.
+            </strong>
+            <ul style={{ margin: "8px 0 0", paddingLeft: 18, color: "var(--muted)", fontSize: 12 }}>
+              {insumosValidados.sinResolver.map(i => (
+                <li key={i.clave}>
+                  <strong style={{ color: "var(--text)" }}>{i.etiqueta || "(sin nombre)"}</strong>:{" "}
+                  el producto lo sigue pidiendo, pero el insumo no existe en Insumos.
+                </li>
+              ))}
+            </ul>
+            <div style={{ color: "var(--muted)", marginTop: 8, fontSize: 12 }}>
+              Revisá el producto y volvé a elegirle el insumo, o volvé a crearlo en el catálogo. No
+              se descuenta de otro: sería vaciar un stock que nadie eligió.
+            </div>
+          </div>
+        )}
+
         {faltaElegir.length > 0 && (
           <div style={aviso}>
             <strong style={{ color: "#c64138" }}>
@@ -232,6 +299,10 @@ export function ModalOrigenPedido({
               : sinMaterialConStock.length > 0 ? "Falta stock"
               : sinOwnerConStock.length > 0 ? "Falta stock"
               : sinRollo.length > 0 ? "Falta stock"
+              : insumosValidados.faltantes.length > 0 ? "Falta stock"
+              // Distinto de "Falta stock" a propósito: no se arregla
+              // reponiendo, se arregla revisando el producto.
+              : insumosValidados.sinResolver.length > 0 ? "Insumo inexistente"
               : faltaElegir.length > 0 ? "Falta elegir owner"
               : "Crear pedido y reservar"}
           </TKButton>
