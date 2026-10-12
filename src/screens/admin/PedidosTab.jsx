@@ -709,6 +709,7 @@ export function PedidosTab({ pedidos, productos, personalizados = [], filamentos
           productos={productos}
           personalizados={personalizados}
           filamentos={filamentos}
+          insumos={insumos}
           // Los pedidos recién leídos, no los del render: entre que se abrió
           // el formulario y se confirma pudo entrar otro pedido que ya reservó
           // parte de este stock.
