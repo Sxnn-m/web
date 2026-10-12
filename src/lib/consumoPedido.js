@@ -7,7 +7,7 @@
 
 import { claveFilamento } from './disponibilidad.js';
 import { opcionesDeDescuento } from './opcionesFilamento.js';
-import { claveTipo } from './tiposInsumo.js';
+import { claveTipo, tiposDe } from './tiposInsumo.js';
 
 /**
  * La asignación de owner de una línea del plan, si la hay.
@@ -201,6 +201,73 @@ export function agruparConsumo(plan = [], desperdicios = {}, planInsumos = [], a
  * @param {Function} stockInsumo    (item) => {id, disponible} | null
  * @returns {{ok: boolean, faltantes: Array, filamentos: Array, insumos: Array}}
  */
+/**
+ * Los insumos que un pedido POR CREAR necesita, contra el stock LIBRE.
+ *
+ * Es el equivalente, para el eje de insumos, de lo que useOrigen() hace con
+ * los filamentos: decide si el pedido se puede tomar. Dos diferencias con la
+ * validación de la impresión, y las dos son del dominio:
+ *
+ *   · se mide contra el stock NETO de las reservas de los otros pedidos
+ *     pendientes, no contra el físico. Al imprimir se descuenta de la bobina,
+ *     así que ahí el físico es lo correcto; al tomar un pedido lo que importa
+ *     es qué queda sin prometer;
+ *   · el umbral es 1x. Para el filamento se exige el doble
+ *     (FACTOR_DISPONIBILIDAD) porque una impresión puede fallar y repetirse;
+ *     un imán que entra, entra.
+ *
+ * Reutiliza agruparConsumo() y validarStock(), que son las mismas funciones
+ * que corre la impresión: así el número que bloquea al crear y el que bloquea
+ * al imprimir no pueden separarse por una implementación paralela. El
+ * agrupado por tipo es lo que hace que un tipo comprometido por dos caminos
+ * —fijo en un producto y opción de variante en otro— se compare sumado.
+ *
+ * El tipo se busca EXACTO, sin caer al primero del insumo, igual que hace
+ * marcarPedidoImpreso(): descontar de otro tipo sería vaciar un stock que
+ * nadie eligió. En la práctica un tipo borrado no llega hasta acá —
+ * planDeInsumos() ya lo re-ancló al primer tipo del insumo, y al imprimir
+ * hace lo mismo, así que los dos caminos coinciden—; lo que sí llega es un
+ * INSUMO que no está en el catálogo. Esas filas vienen con existe:false y se
+ * informan aparte, porque no se arreglan reponiendo sino revisando el
+ * producto.
+ *
+ * @param {Array} planInsumos  salida de planDeInsumos() CON el catálogo
+ * @param {Array} insumosNeteados  el catálogo ya pasado por insumosNetos()
+ * @returns {{ok: boolean, filas: Array, faltantes: Array, sinResolver: Array}}
+ */
+export function validarInsumosDePedido(planInsumos = [], insumosNeteados = []) {
+  const consumo = agruparConsumo([], {}, planInsumos, {});
+
+  const resultado = validarStock(
+    { filamentos: [], insumos: consumo.insumos },
+    () => null,
+    (i) => {
+      const insumo = (insumosNeteados || []).find(x => x?._id === i.insumoId);
+      if (!insumo) return null;
+      const tipo = tiposDe(insumo).find(t => t.tipoId === i.tipoId);
+      return tipo ? { id: i.clave, disponible: Number(tipo.cantidadDisponible) || 0 } : null;
+    }
+  );
+
+  const filas = resultado.insumos.map(i => ({
+    ...i,
+    // `libre` y no `disponible`: en esta pantalla el número ya viene neteado,
+    // y llamarlo igual que el físico invita a confundirlos.
+    libre: i.disponible,
+    necesita: i.total,
+    falta: Math.max(0, i.total - i.disponible),
+  }));
+
+  return {
+    filas,
+    // Lo que no alcanza, separado de lo que no se pudo resolver: el primero se
+    // arregla reponiendo y el segundo revisando el producto.
+    faltantes: filas.filter(f => f.existe && !f.alcanza),
+    sinResolver: filas.filter(f => !f.existe),
+    ok: filas.every(f => f.existe && f.alcanza),
+  };
+}
+
 export function validarStock(consumo, stockFilamento, stockInsumo) {
   const faltantes = [];
 
